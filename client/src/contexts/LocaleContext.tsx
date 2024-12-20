@@ -1,25 +1,33 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
 import { IntlProvider } from 'react-intl';
-import { messages, defaultLocale, supportedLocales, getDirection } from '@/lib/i18n';
+import { messages, defaultLocale, type SupportedLocale, getDirection } from '@/lib/i18n';
 
 type LocaleContextType = {
-  locale: string;
-  setLocale: (locale: string) => void;
+  locale: SupportedLocale;
+  setLocale: (locale: SupportedLocale) => void;
   direction: 'rtl' | 'ltr';
 };
 
 const LocaleContext = createContext<LocaleContextType>({
-  locale: defaultLocale,
+  locale: defaultLocale as SupportedLocale,
   setLocale: () => {},
   direction: 'ltr',
 });
 
 export function useLocale() {
-  return useContext(LocaleContext);
+  const context = useContext(LocaleContext);
+  if (!context) {
+    throw new Error('useLocale must be used within a LocaleProvider');
+  }
+  return context;
 }
 
-export function LocaleProvider({ children }: { children: React.ReactNode }) {
-  const [locale, setLocale] = useState(defaultLocale);
+interface LocaleProviderProps {
+  children: ReactNode;
+}
+
+export function LocaleProvider({ children }: LocaleProviderProps) {
+  const [locale, setLocale] = useState<SupportedLocale>(defaultLocale as SupportedLocale);
   const direction = getDirection(locale);
 
   useEffect(() => {
@@ -27,10 +35,16 @@ export function LocaleProvider({ children }: { children: React.ReactNode }) {
     document.documentElement.lang = locale;
   }, [direction, locale]);
 
+  const value = {
+    locale,
+    setLocale,
+    direction,
+  };
+
   return (
-    <LocaleContext.Provider value={{ locale, setLocale, direction }}>
+    <LocaleContext.Provider value={value}>
       <IntlProvider
-        messages={messages[locale as keyof typeof messages]}
+        messages={messages[locale]}
         locale={locale}
         defaultLocale={defaultLocale}
       >
