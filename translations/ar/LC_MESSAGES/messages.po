@@ -1,0 +1,44 @@
+# Arabic translations for the Social Hub application.
+msgid ""
+msgstr ""
+"Project-Id-Version: 1.0\n"
+"POT-Creation-Date: 2024-12-20 10:00+0000\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.9.1\n"
+
+msgid "Post retrieved successfully"
+msgstr "تم استرداد المنشور بنجاح"
+
+msgid "Failed to fetch posts"
+msgstr "فشل في جلب المنشورات"
+
+msgid "Post created successfully"
+msgstr "تم إنشاء المنشور بنجاح"
+
+msgid "Failed to create post"
+msgstr "فشل في إنشاء المنشور"
+
+msgid "Content repurposed successfully"
+msgstr "تم إعادة صياغة المحتوى بنجاح"
+
+msgid "Failed to repurpose content"
+msgstr "فشل في إعادة صياغة المحتوى"
+
+msgid "Caption generated successfully"
+msgstr "تم إنشاء التعليق بنجاح"
+
+msgid "Failed to generate caption"
+msgstr "فشل في إنشاء التعليق"
+
+msgid "Performance prediction completed successfully"
+msgstr "تم إكمال توقع الأداء بنجاح"
+
+msgid "Failed to predict performance"
+msgstr "فشل في توقع الأداء"
+
+msgid "A/B test suggestions generated successfully"
+msgstr "تم إنشاء اقتراحات اختبار A/B بنجاح"
+
+msgid "Failed to generate A/B test suggestions"
+msgstr "فشل في إنشاء اقتراحات اختبار A/B"

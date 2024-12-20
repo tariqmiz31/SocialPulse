@@ -1,0 +1,44 @@
+# English translations for the Social Hub application.
+msgid ""
+msgstr ""
+"Project-Id-Version: 1.0\n"
+"POT-Creation-Date: 2024-12-20 10:00+0000\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.9.1\n"
+
+msgid "Post retrieved successfully"
+msgstr "Post retrieved successfully"
+
+msgid "Failed to fetch posts"
+msgstr "Failed to fetch posts"
+
+msgid "Post created successfully"
+msgstr "Post created successfully"
+
+msgid "Failed to create post"
+msgstr "Failed to create post"
+
+msgid "Content repurposed successfully"
+msgstr "Content repurposed successfully"
+
+msgid "Failed to repurpose content"
+msgstr "Failed to repurpose content"
+
+msgid "Caption generated successfully"
+msgstr "Caption generated successfully"
+
+msgid "Failed to generate caption"
+msgstr "Failed to generate caption"
+
+msgid "Performance prediction completed successfully"
+msgstr "Performance prediction completed successfully"
+
+msgid "Failed to predict performance"
+msgstr "Failed to predict performance"
+
+msgid "A/B test suggestions generated successfully"
+msgstr "A/B test suggestions generated successfully"
+
+msgid "Failed to generate A/B test suggestions"
+msgstr "Failed to generate A/B test suggestions"

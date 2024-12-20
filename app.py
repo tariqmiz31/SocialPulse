@@ -1,15 +1,15 @@
-from flask import Flask, jsonify, request, render_template
+from flask import Flask, jsonify, request, render_template, session
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
 from flask_cors import CORS
+from flask_babel import Babel, gettext
 from datetime import datetime
 import os
 import logging
 from app.services.content_repurposer import ContentRepurposer
 from app.services.caption_generator import CaptionGenerator
 from app.services.performance_predictor import PerformancePredictor
-from app.services.ab_test_suggester import ABTestSuggester  # Add this import
-
+from app.services.ab_test_suggester import ABTestSuggester
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -18,6 +18,23 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 CORS(app)
 
+# Initialize Babel
+babel = Babel(app)
+
+# Supported languages
+LANGUAGES = {
+    'en': 'English',
+    'ar': 'العربية'
+}
+
+@babel.localeselector
+def get_locale():
+    # Try to get the language from the session
+    if session.get('lang'):
+        return session.get('lang')
+    # Otherwise try to guess the language from the user accept header
+    return request.accept_languages.best_match(LANGUAGES.keys())
+
 # Database configuration
 if not os.getenv('DATABASE_URL'):
     raise RuntimeError("DATABASE_URL environment variable is not set")
@@ -25,6 +42,8 @@ if not os.getenv('DATABASE_URL'):
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = os.urandom(24)
+app.config['BABEL_DEFAULT_LOCALE'] = 'en'
+app.config['LANGUAGES'] = LANGUAGES
 
 logger.info("Initializing database connection...")
 
@@ -69,7 +88,22 @@ class Analytics(db.Model):
     engagement_rate = db.Column(db.Float, default=0.0)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-# Routes
+# Language routes
+@app.route('/api/language', methods=['GET', 'POST'])
+def language():
+    if request.method == 'POST':
+        lang = request.json.get('lang')
+        if lang and lang in LANGUAGES:
+            session['lang'] = lang
+            return jsonify({'status': 'success', 'lang': lang})
+        return jsonify({'status': 'error', 'message': 'Invalid language'}), 400
+
+    return jsonify({
+        'current': session.get('lang', get_locale()),
+        'available': LANGUAGES
+    })
+
+# Routes with internationalization
 @app.route('/')
 def index():
     logger.info("Serving index page")
@@ -85,11 +119,12 @@ def get_posts():
             'content': post.content,
             'platforms': post.platforms,
             'scheduled_for': post.scheduled_for.isoformat(),
-            'status': post.status
+            'status': post.status,
+            'message': gettext('Post retrieved successfully')
         } for post in posts])
     except Exception as e:
         logger.error(f"Error fetching posts: {str(e)}")
-        return jsonify({"error": "Failed to fetch posts"}), 500
+        return jsonify({"error": gettext('Failed to fetch posts')}), 500
 
 @app.route('/api/posts', methods=['POST'])
 def create_post():
@@ -113,11 +148,12 @@ def create_post():
             'content': post.content,
             'platforms': post.platforms,
             'scheduled_for': post.scheduled_for.isoformat(),
-            'status': post.status
+            'status': post.status,
+            'message': gettext('Post created successfully')
         })
     except Exception as e:
         logger.error(f"Error creating post: {str(e)}")
-        return jsonify({"error": "Failed to create post"}), 500
+        return jsonify({"error": gettext('Failed to create post')}), 500
 
 @app.route('/api/analytics', methods=['GET'])
 def get_analytics():
@@ -130,11 +166,12 @@ def get_analytics():
             'likes': analytic.likes,
             'shares': analytic.shares,
             'comments': analytic.comments,
-            'engagement_rate': analytic.engagement_rate
+            'engagement_rate': analytic.engagement_rate,
+            'message': gettext('Analytics retrieved successfully')
         } for analytic in analytics])
     except Exception as e:
         logger.error(f"Error fetching analytics: {str(e)}")
-        return jsonify({"error": "Failed to fetch analytics"}), 500
+        return jsonify({"error": gettext('Failed to fetch analytics')}), 500
 
 @app.route('/api/repurpose', methods=['POST'])
 def repurpose_content():
@@ -151,7 +188,7 @@ def repurpose_content():
         return jsonify(repurposed)
     except Exception as e:
         logger.error(f"Error repurposing content: {str(e)}")
-        return jsonify({"error": "Failed to repurpose content"}), 500
+        return jsonify({"error": gettext('Failed to repurpose content')}), 500
 
 @app.route('/api/generate-caption', methods=['POST'])
 def generate_caption():
@@ -169,7 +206,7 @@ def generate_caption():
         return jsonify(result)
     except Exception as e:
         logger.error(f"Error generating caption: {str(e)}")
-        return jsonify({"error": "Failed to generate caption"}), 500
+        return jsonify({"error": gettext('Failed to generate caption')}), 500
 
 @app.route('/api/predict-performance', methods=['POST'])
 def predict_performance():
@@ -188,7 +225,7 @@ def predict_performance():
         return jsonify(result)
     except Exception as e:
         logger.error(f"Error predicting performance: {str(e)}")
-        return jsonify({"error": "Failed to predict performance"}), 500
+        return jsonify({"error": gettext('Failed to predict performance')}), 500
 
 @app.route('/api/ab-test-suggestions', methods=['POST'])
 def get_ab_test_suggestions():
@@ -207,7 +244,7 @@ def get_ab_test_suggestions():
         return jsonify(result)
     except Exception as e:
         logger.error(f"Error generating A/B test suggestions: {str(e)}")
-        return jsonify({"error": "Failed to generate A/B test suggestions"}), 500
+        return jsonify({"error": gettext('Failed to generate A/B test suggestions')}), 500
 
 if __name__ == '__main__':
     with app.app_context():
