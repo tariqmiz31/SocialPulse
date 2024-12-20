@@ -5,6 +5,7 @@ from flask_cors import CORS
 from datetime import datetime
 import os
 import logging
+from app.services.content_repurposer import ContentRepurposer # Added import statement
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -130,6 +131,23 @@ def get_analytics():
     except Exception as e:
         logger.error(f"Error fetching analytics: {str(e)}")
         return jsonify({"error": "Failed to fetch analytics"}), 500
+
+@app.route('/api/repurpose', methods=['POST']) # Added new route
+def repurpose_content():
+    try:
+        data = request.get_json()
+        logger.info(f"Repurposing content for platforms: {data['platforms']}")
+
+        content = data['content']
+        platforms = data['platforms']
+
+        repurposed = ContentRepurposer.repurpose_content(content, platforms)
+
+        logger.info("Content repurposed successfully")
+        return jsonify(repurposed)
+    except Exception as e:
+        logger.error(f"Error repurposing content: {str(e)}")
+        return jsonify({"error": "Failed to repurpose content"}), 500
 
 if __name__ == '__main__':
     with app.app_context():
