@@ -14,7 +14,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Sparkles, PieChart, TestTube2 } from "lucide-react";
+import { Sparkles, PieChart, TestTube2, Upload } from "lucide-react";
+import { Input } from "@/components/ui/input";
 
 export function ContentCreator() {
   const [content, setContent] = useState("");
@@ -22,6 +23,7 @@ export function ContentCreator() {
   const [platformContentTypes, setPlatformContentTypes] = useState<Record<string, string>>({});
   const [repurposedContent, setRepurposedContent] = useState<Record<string, string>>({});
   const [contentType, setContentType] = useState("general");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [generatedCaption, setGeneratedCaption] = useState<{
     caption: string;
     emojis: string[];
@@ -177,6 +179,13 @@ export function ContentCreator() {
     }
   };
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setSelectedFile(file);
+    }
+  };
+
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div className="flex items-end gap-4">
@@ -219,23 +228,38 @@ export function ContentCreator() {
         />
       </div>
 
-      {generatedCaption?.emojis.length > 0 && (
-        <div className="p-3 bg-muted rounded-md">
-          <Label className="mb-2 block">Suggested Emojis</Label>
-          <div className="flex flex-wrap gap-2">
-            {generatedCaption.emojis.map((emoji, index) => (
-              <button
-                key={index}
+      <div className="flex items-center gap-4">
+        <div className="flex-1">
+          <Label htmlFor="file" className="block mb-2">Attach Media</Label>
+          <div className="flex gap-2">
+            <Input
+              id="file"
+              type="file"
+              onChange={handleFileChange}
+              className="hidden"
+            />
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => document.getElementById('file')?.click()}
+              className="flex items-center gap-2"
+            >
+              <Upload className="w-4 h-4" />
+              {selectedFile ? selectedFile.name : "Choose File"}
+            </Button>
+            {selectedFile && (
+              <Button
                 type="button"
-                onClick={() => setContent(prev => prev + emoji)}
-                className="text-xl hover:bg-accent p-1 rounded"
+                variant="ghost"
+                size="sm"
+                onClick={() => setSelectedFile(null)}
               >
-                {emoji}
-              </button>
-            ))}
+                Remove
+              </Button>
+            )}
           </div>
         </div>
-      )}
+      </div>
 
       <div className="space-y-2">
         <Label>Platforms & Content Types</Label>
