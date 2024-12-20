@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Social Media Manager</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body class="bg-gray-100" x-data="{ darkMode: false }" :class="{ 'dark': darkMode }">
+    <div class="min-h-screen" x-data="{ currentTab: 'dashboard' }">
+        <!-- Sidebar -->
+        <aside class="fixed top-0 left-0 w-64 h-full bg-white dark:bg-gray-800 border-r dark:border-gray-700">
+            <div class="p-4">
+                <h1 class="text-xl font-bold dark:text-white">Social Hub</h1>
+                <button @click="darkMode = !darkMode" class="mt-2 px-3 py-1 text-sm rounded-md bg-gray-200 dark:bg-gray-700">
+                    Toggle Dark Mode
+                </button>
+            </div>
+            <nav class="mt-4">
+                <template x-for="tab in ['dashboard', 'calendar', 'analytics']">
+                    <a @click="currentTab = tab"
+                       :class="{ 'bg-gray-100 dark:bg-gray-700': currentTab === tab }"
+                       class="block px-4 py-2 capitalize hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer dark:text-gray-200"
+                       x-text="tab">
+                    </a>
+                </template>
+            </nav>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="ml-64 p-8">
+            <!-- Dashboard -->
+            <div x-show="currentTab === 'dashboard'" class="space-y-6">
+                <h2 class="text-2xl font-bold dark:text-white">Content Dashboard</h2>
+
+                <!-- Platform Stats -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <template x-for="platform in ['Instagram', 'Facebook', 'Twitter', 'TikTok', 'YouTube', 'Snapchat', 'Pinterest']">
+                        <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
+                            <h3 x-text="platform" class="text-lg font-semibold dark:text-white"></h3>
+                            <p class="text-2xl font-bold mt-2 dark:text-gray-200">0</p>
+                            <p class="text-gray-600 dark:text-gray-400">Posts this month</p>
+                        </div>
+                    </template>
+                </div>
+
+                <!-- Content Creation -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
+                        <h3 class="text-lg font-semibold mb-4 dark:text-white">Create Post</h3>
+                        <form id="postForm" class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-medium mb-1 dark:text-gray-200">Content</label>
+                                <textarea
+                                    class="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                                    rows="4"
+                                ></textarea>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium mb-1 dark:text-gray-200">Platforms</label>
+                                <div class="grid grid-cols-2 gap-2">
+                                    <template x-for="platform in ['Instagram', 'Facebook', 'Twitter', 'TikTok', 'YouTube', 'Snapchat', 'Pinterest']">
+                                        <label class="flex items-center space-x-2">
+                                            <input type="checkbox" class="rounded">
+                                            <span x-text="platform" class="dark:text-gray-200"></span>
+                                        </label>
+                                    </template>
+                                </div>
+                            </div>
+                            <button type="submit" class="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700">
+                                Schedule Post
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Calendar -->
+            <div x-show="currentTab === 'calendar'" class="space-y-6">
+                <h2 class="text-2xl font-bold dark:text-white">Content Calendar</h2>
+                <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
+                    <!-- Calendar implementation will go here -->
+                    <p class="dark:text-gray-200">Calendar view coming soon...</p>
+                </div>
+            </div>
+
+            <!-- Analytics -->
+            <div x-show="currentTab === 'analytics'" class="space-y-6">
+                <h2 class="text-2xl font-bold dark:text-white">Analytics Overview</h2>
+                <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
+                    <!-- Analytics charts will go here -->
+                    <p class="dark:text-gray-200">Analytics dashboard coming soon...</p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // Handle form submission
+        document.getElementById('postForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const form = e.target;
+            const content = form.querySelector('textarea').value;
+            const platforms = Array.from(form.querySelectorAll('input[type="checkbox"]:checked'))
+                .map(checkbox => checkbox.nextElementSibling.textContent.toLowerCase());
+
+            try {
+                const response = await fetch('/api/posts', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        content,
+                        platforms,
+                        scheduled_for: new Date().toISOString(),
+                    }),
+                });
+
+                if (response.ok) {
+                    form.reset();
+                    alert('Post scheduled successfully!');
+                } else {
+                    throw new Error('Failed to schedule post');
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        });
+    </script>
+</body>
+</html>
