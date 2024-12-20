@@ -6,7 +6,8 @@ from datetime import datetime
 import os
 import logging
 from app.services.content_repurposer import ContentRepurposer
-from app.services.caption_generator import CaptionGenerator # Added import statement
+from app.services.caption_generator import CaptionGenerator
+from app.services.performance_predictor import PerformancePredictor  # Add this import
 
 
 # Configure logging
@@ -168,6 +169,25 @@ def generate_caption():
     except Exception as e:
         logger.error(f"Error generating caption: {str(e)}")
         return jsonify({"error": "Failed to generate caption"}), 500
+
+@app.route('/api/predict-performance', methods=['POST'])
+def predict_performance():
+    try:
+        data = request.get_json()
+        logger.info(f"Predicting performance for content on platform: {data.get('platform')}")
+
+        predictor = PerformancePredictor()
+        result = predictor.predict_performance(
+            content=data.get('content', ''),
+            platform=data.get('platform', 'instagram'),
+            content_type=data.get('content_type', 'general')
+        )
+
+        logger.info("Performance prediction completed successfully")
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Error predicting performance: {str(e)}")
+        return jsonify({"error": "Failed to predict performance"}), 500
 
 if __name__ == '__main__':
     with app.app_context():

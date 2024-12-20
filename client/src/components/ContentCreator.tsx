@@ -14,7 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Sparkles } from "lucide-react";
+import { Sparkles, PieChart } from "lucide-react";
 
 export function ContentCreator() {
   const [content, setContent] = useState("");
@@ -25,6 +25,13 @@ export function ContentCreator() {
     caption: string;
     emojis: string[];
   } | null>(null);
+  const [predictions, setPredictions] = useState<Record<string, {
+    predicted_engagement: number;
+    predicted_reach: number;
+    best_posting_time: string;
+    content_score: number;
+    improvement_suggestions: string[];
+  }>>({});
 
   const createPost = useMutation({
     mutationFn: async (data: { content: string; platforms: string[] }) => {
@@ -55,6 +62,27 @@ export function ContentCreator() {
 
       const repurposed = await response.json();
       setRepurposedContent(repurposed);
+
+      // After repurposing, get predictions for each platform
+      const predictionsPromises = selectedPlatforms.map(async (platform) => {
+        const predictionResponse = await fetch("/api/predict-performance", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            content: repurposed[platform],
+            platform,
+            content_type: contentType,
+          }),
+        });
+
+        if (!predictionResponse.ok) throw new Error(`Failed to get prediction for ${platform}`);
+
+        const prediction = await predictionResponse.json();
+        return [platform, prediction];
+      });
+
+      const predictionsResults = await Promise.all(predictionsPromises);
+      setPredictions(Object.fromEntries(predictionsResults));
     } catch (error) {
       console.error("Error repurposing content:", error);
     }
@@ -186,7 +214,8 @@ export function ContentCreator() {
           onClick={handleRepurpose}
           disabled={!content.trim() || selectedPlatforms.length === 0}
         >
-          Preview Repurposed Content
+          <PieChart className="w-4 h-4 mr-2" />
+          Analyze & Preview Content
         </Button>
         <Button
           type="submit"
@@ -198,8 +227,8 @@ export function ContentCreator() {
       </div>
 
       {Object.keys(repurposedContent).length > 0 && (
-        <div className="mt-6">
-          <Label>Preview Repurposed Content</Label>
+        <div className="mt-6 space-y-6">
+          <Label>Content Analysis & Preview</Label>
           <Tabs defaultValue={selectedPlatforms[0]} className="mt-2">
             <TabsList>
               {selectedPlatforms.map(platformId => (
@@ -210,11 +239,56 @@ export function ContentCreator() {
             </TabsList>
             {selectedPlatforms.map(platformId => (
               <TabsContent key={platformId} value={platformId}>
-                <Card className="p-4">
-                  <pre className="whitespace-pre-wrap font-sans">
-                    {repurposedContent[platformId]}
-                  </pre>
-                </Card>
+                <div className="space-y-4">
+                  {predictions[platformId] && (
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <Card className="p-4">
+                        <p className="text-sm text-muted-foreground">Engagement</p>
+                        <p className="text-2xl font-bold">
+                          {predictions[platformId].predicted_engagement.toFixed(1)}%
+                        </p>
+                      </Card>
+                      <Card className="p-4">
+                        <p className="text-sm text-muted-foreground">Estimated Reach</p>
+                        <p className="text-2xl font-bold">
+                          {predictions[platformId].predicted_reach.toLocaleString()}
+                        </p>
+                      </Card>
+                      <Card className="p-4">
+                        <p className="text-sm text-muted-foreground">Best Time</p>
+                        <p className="text-2xl font-bold">
+                          {predictions[platformId].best_posting_time}
+                        </p>
+                      </Card>
+                      <Card className="p-4">
+                        <p className="text-sm text-muted-foreground">Content Score</p>
+                        <p className="text-2xl font-bold">
+                          {predictions[platformId].content_score.toFixed(1)}/10
+                        </p>
+                      </Card>
+                    </div>
+                  )}
+
+                  {predictions[platformId]?.improvement_suggestions.length > 0 && (
+                    <Card className="p-4">
+                      <p className="font-medium mb-2">Suggestions for Improvement</p>
+                      <ul className="list-disc pl-5 space-y-1">
+                        {predictions[platformId].improvement_suggestions.map((suggestion, index) => (
+                          <li key={index} className="text-sm text-muted-foreground">
+                            {suggestion}
+                          </li>
+                        ))}
+                      </ul>
+                    </Card>
+                  )}
+
+                  <Card className="p-4">
+                    <p className="font-medium mb-2">Preview Content</p>
+                    <pre className="whitespace-pre-wrap font-sans text-sm text-muted-foreground">
+                      {repurposedContent[platformId]}
+                    </pre>
+                  </Card>
+                </div>
               </TabsContent>
             ))}
           </Tabs>
