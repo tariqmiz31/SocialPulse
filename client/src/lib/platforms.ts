@@ -1,4 +1,4 @@
-import { SiInstagram, SiFacebook, SiX, SiTiktok, SiYoutube, SiSnapchat } from "react-icons/si";
+import { SiInstagram, SiFacebook, SiX, SiTiktok, SiYoutube, SiSnapchat, SiPinterest } from "react-icons/si";
 import type { Platform } from "./types";
 
 export const platforms: Platform[] = [
@@ -30,6 +30,16 @@ export const platforms: Platform[] = [
     stats: {
       posts: 32,
       engagement: 2.8
+    }
+  },
+  {
+    id: "pinterest",
+    name: "Pinterest",
+    icon: SiPinterest,
+    color: "#E60023",
+    stats: {
+      posts: 20,
+      engagement: 4.5
     }
   },
   {
