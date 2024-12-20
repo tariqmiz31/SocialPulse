@@ -7,7 +7,8 @@ import os
 import logging
 from app.services.content_repurposer import ContentRepurposer
 from app.services.caption_generator import CaptionGenerator
-from app.services.performance_predictor import PerformancePredictor  # Add this import
+from app.services.performance_predictor import PerformancePredictor
+from app.services.ab_test_suggester import ABTestSuggester  # Add this import
 
 
 # Configure logging
@@ -188,6 +189,25 @@ def predict_performance():
     except Exception as e:
         logger.error(f"Error predicting performance: {str(e)}")
         return jsonify({"error": "Failed to predict performance"}), 500
+
+@app.route('/api/ab-test-suggestions', methods=['POST'])
+def get_ab_test_suggestions():
+    try:
+        data = request.get_json()
+        logger.info(f"Generating A/B test suggestions for platform: {data.get('platform')}")
+
+        suggester = ABTestSuggester()
+        result = suggester.generate_test_suggestions(
+            content=data.get('content', ''),
+            platform=data.get('platform', 'instagram'),
+            content_type=data.get('content_type', 'general')
+        )
+
+        logger.info("A/B test suggestions generated successfully")
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Error generating A/B test suggestions: {str(e)}")
+        return jsonify({"error": "Failed to generate A/B test suggestions"}), 500
 
 if __name__ == '__main__':
     with app.app_context():

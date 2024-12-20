@@ -14,7 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Sparkles, PieChart } from "lucide-react";
+import { Sparkles, PieChart, TestTube2 } from "lucide-react";
 
 export function ContentCreator() {
   const [content, setContent] = useState("");
@@ -32,6 +32,14 @@ export function ContentCreator() {
     content_score: number;
     improvement_suggestions: string[];
   }>>({});
+  const [abTestSuggestions, setAbTestSuggestions] = useState<{
+    variations: string[];
+    hypothesis: string;
+    sample_size: number;
+    duration_days: number;
+    confidence_level: number;
+    expected_lift: number;
+  } | null>(null);
 
   const createPost = useMutation({
     mutationFn: async (data: { content: string; platforms: string[] }) => {
@@ -63,7 +71,6 @@ export function ContentCreator() {
       const repurposed = await response.json();
       setRepurposedContent(repurposed);
 
-      // After repurposing, get predictions for each platform
       const predictionsPromises = selectedPlatforms.map(async (platform) => {
         const predictionResponse = await fetch("/api/predict-performance", {
           method: "POST",
@@ -119,6 +126,29 @@ export function ContentCreator() {
       content,
       platforms: selectedPlatforms,
     });
+  };
+
+  const handleGenerateABTests = async () => {
+    if (!content.trim() || !selectedPlatforms[0]) return;
+
+    try {
+      const response = await fetch("/api/ab-test-suggestions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content,
+          platform: selectedPlatforms[0],
+          content_type: contentType,
+        }),
+      });
+
+      if (!response.ok) throw new Error("Failed to generate A/B test suggestions");
+
+      const suggestions = await response.json();
+      setAbTestSuggestions(suggestions);
+    } catch (error) {
+      console.error("Error generating A/B test suggestions:", error);
+    }
   };
 
   return (
@@ -218,6 +248,16 @@ export function ContentCreator() {
           Analyze & Preview Content
         </Button>
         <Button
+          type="button"
+          variant="outline"
+          className="flex-1"
+          onClick={handleGenerateABTests}
+          disabled={!content.trim() || selectedPlatforms.length === 0}
+        >
+          <TestTube2 className="w-4 h-4 mr-2" />
+          Generate A/B Tests
+        </Button>
+        <Button
           type="submit"
           className="flex-1"
           disabled={!content.trim() || selectedPlatforms.length === 0}
@@ -292,6 +332,66 @@ export function ContentCreator() {
               </TabsContent>
             ))}
           </Tabs>
+        </div>
+      )}
+
+      {abTestSuggestions && (
+        <div className="mt-6 space-y-4">
+          <Label>A/B Testing Suggestions</Label>
+          <Card className="p-4 space-y-4">
+            <div>
+              <h3 className="font-medium mb-2">Test Hypothesis</h3>
+              <p className="text-sm text-muted-foreground">{abTestSuggestions.hypothesis}</p>
+            </div>
+
+            <div>
+              <h3 className="font-medium mb-2">Content Variations</h3>
+              <div className="space-y-3">
+                {abTestSuggestions.variations.map((variation, index) => (
+                  <Card key={index} className="p-3">
+                    <p className="text-sm text-muted-foreground">{variation}</p>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="mt-2"
+                      onClick={() => setContent(variation)}
+                    >
+                      Use This Variation
+                    </Button>
+                  </Card>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <h3 className="font-medium mb-1">Sample Size</h3>
+                <p className="text-2xl font-bold">
+                  {abTestSuggestions.sample_size.toLocaleString()}
+                </p>
+                <p className="text-sm text-muted-foreground">users per variation</p>
+              </div>
+              <div>
+                <h3 className="font-medium mb-1">Test Duration</h3>
+                <p className="text-2xl font-bold">{abTestSuggestions.duration_days}</p>
+                <p className="text-sm text-muted-foreground">days</p>
+              </div>
+              <div>
+                <h3 className="font-medium mb-1">Confidence Level</h3>
+                <p className="text-2xl font-bold">
+                  {(abTestSuggestions.confidence_level * 100).toFixed(0)}%
+                </p>
+                <p className="text-sm text-muted-foreground">statistical significance</p>
+              </div>
+              <div>
+                <h3 className="font-medium mb-1">Expected Lift</h3>
+                <p className="text-2xl font-bold">
+                  {abTestSuggestions.expected_lift.toFixed(1)}%
+                </p>
+                <p className="text-sm text-muted-foreground">potential improvement</p>
+              </div>
+            </div>
+          </Card>
         </div>
       )}
     </form>
