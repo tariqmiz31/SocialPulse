@@ -19,6 +19,7 @@ import { Sparkles, PieChart, TestTube2 } from "lucide-react";
 export function ContentCreator() {
   const [content, setContent] = useState("");
   const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([]);
+  const [platformContentTypes, setPlatformContentTypes] = useState<Record<string, string>>({});
   const [repurposedContent, setRepurposedContent] = useState<Record<string, string>>({});
   const [contentType, setContentType] = useState("general");
   const [generatedCaption, setGeneratedCaption] = useState<{
@@ -78,7 +79,7 @@ export function ContentCreator() {
           body: JSON.stringify({
             content: repurposed[platform],
             platform,
-            content_type: contentType,
+            content_type: platformContentTypes[platform] || contentType, // Use platform-specific or general content type
           }),
         });
 
@@ -151,6 +152,31 @@ export function ContentCreator() {
     }
   };
 
+  const handlePlatformSelect = (platformId: string, checked: boolean) => {
+    setSelectedPlatforms(prev =>
+      checked
+        ? [...prev, platformId]
+        : prev.filter(id => id !== platformId)
+    );
+
+    if (!checked) {
+      setPlatformContentTypes(prev => {
+        const copy = { ...prev };
+        delete copy[platformId];
+        return copy;
+      });
+    } else {
+      // Set default content type when platform is selected
+      const platform = platforms.find(p => p.id === platformId);
+      if (platform?.contentTypes.length > 0) {
+        setPlatformContentTypes(prev => ({
+          ...prev,
+          [platformId]: platform.contentTypes[0].id
+        }));
+      }
+    }
+  };
+
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div className="flex items-end gap-4">
@@ -212,25 +238,50 @@ export function ContentCreator() {
       )}
 
       <div className="space-y-2">
-        <Label>Platforms</Label>
-        <div className="grid grid-cols-2 gap-4">
+        <Label>Platforms & Content Types</Label>
+        <div className="grid grid-cols-1 gap-4">
           {platforms.map(platform => (
-            <div key={platform.id} className="flex items-center space-x-2">
-              <Checkbox
-                id={platform.id}
-                checked={selectedPlatforms.includes(platform.id)}
-                onCheckedChange={(checked) => {
-                  setSelectedPlatforms(prev =>
-                    checked
-                      ? [...prev, platform.id]
-                      : prev.filter(id => id !== platform.id)
-                  );
-                }}
-              />
-              <Label htmlFor={platform.id} className="flex items-center gap-2">
-                <platform.icon className="w-4 h-4" style={{ color: platform.color }} />
-                {platform.name}
-              </Label>
+            <div key={platform.id} className="flex flex-col space-y-2 p-4 border rounded-lg">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id={platform.id}
+                    checked={selectedPlatforms.includes(platform.id)}
+                    onCheckedChange={(checked) => handlePlatformSelect(platform.id, checked as boolean)}
+                  />
+                  <Label htmlFor={platform.id} className="flex items-center gap-2">
+                    <platform.icon className="w-4 h-4" style={{ color: platform.color }} />
+                    {platform.name}
+                  </Label>
+                </div>
+                {selectedPlatforms.includes(platform.id) && platform.contentTypes.length > 0 && (
+                  <Select
+                    value={platformContentTypes[platform.id]}
+                    onValueChange={(value) => setPlatformContentTypes(prev => ({
+                      ...prev,
+                      [platform.id]: value
+                    }))}
+                  >
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue placeholder="Select content type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {platform.contentTypes.map(type => (
+                        <SelectItem key={type.id} value={type.id}>
+                          <div className="flex flex-col">
+                            <span>{type.name}</span>
+                            {type.description && (
+                              <span className="text-xs text-muted-foreground">
+                                {type.description}
+                              </span>
+                            )}
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
             </div>
           ))}
         </div>
