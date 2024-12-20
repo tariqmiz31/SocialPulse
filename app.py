@@ -5,7 +5,9 @@ from flask_cors import CORS
 from datetime import datetime
 import os
 import logging
-from app.services.content_repurposer import ContentRepurposer # Added import statement
+from app.services.content_repurposer import ContentRepurposer
+from app.services.caption_generator import CaptionGenerator # Added import statement
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -132,7 +134,7 @@ def get_analytics():
         logger.error(f"Error fetching analytics: {str(e)}")
         return jsonify({"error": "Failed to fetch analytics"}), 500
 
-@app.route('/api/repurpose', methods=['POST']) # Added new route
+@app.route('/api/repurpose', methods=['POST'])
 def repurpose_content():
     try:
         data = request.get_json()
@@ -148,6 +150,24 @@ def repurpose_content():
     except Exception as e:
         logger.error(f"Error repurposing content: {str(e)}")
         return jsonify({"error": "Failed to repurpose content"}), 500
+
+@app.route('/api/generate-caption', methods=['POST'])
+def generate_caption():
+    try:
+        data = request.get_json()
+        logger.info(f"Generating caption for content type: {data.get('content_type')} on platform: {data.get('platform')}")
+
+        generator = CaptionGenerator()
+        result = generator.generate_caption(
+            content_type=data.get('content_type', 'general'),
+            target_platform=data.get('platform', 'instagram')
+        )
+
+        logger.info("Caption generated successfully")
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Error generating caption: {str(e)}")
+        return jsonify({"error": "Failed to generate caption"}), 500
 
 if __name__ == '__main__':
     with app.app_context():
