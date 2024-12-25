@@ -1,6 +1,3 @@
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from flask import Flask, jsonify, request, render_template, session
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
