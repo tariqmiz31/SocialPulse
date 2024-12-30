@@ -1,6 +1,7 @@
 import { Switch, Route } from "wouter";
 import { lazy, Suspense } from "react";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { LocaleProvider } from "@/contexts/LocaleContext";
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
 const Calendar = lazy(() => import("@/pages/Calendar"));
 const Analytics = lazy(() => import("@/pages/Analytics"));
@@ -9,11 +10,19 @@ import { LanguageSelector } from "@/components/LanguageSelector";
 import { useLocale } from "@/contexts/LocaleContext";
 
 function App() {
+  return (
+    <LocaleProvider>
+      <AppContent />
+    </LocaleProvider>
+  );
+}
+
+function AppContent() {
   const { direction } = useLocale();
 
   return (
     <ErrorBoundary>
-      <div className={`flex h-screen bg-background ${direction === 'rtl' ? 'rtl' : 'ltr'}`}>
+      <div className={`flex h-screen bg-background ${direction === 'rtl' ? 'rtl' : 'ltr'}`} dir={direction}>
         <Sidebar />
         <main className="flex-1 overflow-y-auto">
           <div className="p-4 flex justify-end">

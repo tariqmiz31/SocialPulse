@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useMutation } from "@tanstack/react-query";
@@ -7,6 +7,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useLocale } from "@/contexts/LocaleContext";
 import {
   Select,
   SelectContent,
@@ -18,6 +19,7 @@ import { Sparkles, PieChart, TestTube2, Upload } from "lucide-react";
 import { Input } from "@/components/ui/input";
 
 export function ContentCreator() {
+  const { locale, direction } = useLocale();
   const [content, setContent] = useState("");
   const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([]);
   const [platformContentTypes, setPlatformContentTypes] = useState<Record<string, string>>({});
@@ -223,13 +225,33 @@ export function ContentCreator() {
     }
   };
 
+  // Update document direction when locale changes
+  useEffect(() => {
+    const textareas = document.querySelectorAll('textarea');
+    const inputs = document.querySelectorAll('input[type="text"]');
+
+    [...textareas, ...inputs].forEach(element => {
+      if (element instanceof HTMLElement) {
+        element.dir = direction;
+        element.lang = locale;
+
+        // Add specific styles for RTL
+        if (direction === 'rtl') {
+          element.style.textAlign = 'right';
+        } else {
+          element.style.textAlign = 'left';
+        }
+      }
+    });
+  }, [direction, locale]);
+
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form onSubmit={handleSubmit} className="space-y-4" dir={direction} lang={locale}>
       <div className="flex items-end gap-4">
         <div className="flex-1">
           <Label>Content Type</Label>
           <Select value={contentType} onValueChange={setContentType}>
-            <SelectTrigger>
+            <SelectTrigger className={direction === 'rtl' ? 'text-right' : 'text-left'}>
               <SelectValue placeholder="Select content type" />
             </SelectTrigger>
             <SelectContent>
@@ -261,7 +283,9 @@ export function ContentCreator() {
           value={content}
           onChange={(e) => setContent(e.target.value)}
           placeholder="Write your post content..."
-          className="h-32"
+          className={`h-32 ${direction === 'rtl' ? 'text-right' : 'text-left'}`}
+          dir={direction}
+          lang={locale}
         />
       </div>
 
@@ -323,7 +347,7 @@ export function ContentCreator() {
                       [platform.id]: value
                     }))}
                   >
-                    <SelectTrigger className="w-[180px]">
+                    <SelectTrigger className="w-[180px]" className={direction === 'rtl' ? 'text-right' : 'text-left'}>
                       <SelectValue placeholder="Select content type" />
                     </SelectTrigger>
                     <SelectContent>
