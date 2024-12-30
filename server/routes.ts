@@ -6,10 +6,35 @@ import { db } from "@db";
 import { posts } from "@db/schema";
 
 export function registerRoutes(app: Express): Server {
-  // Security middlewares
-  app.use(helmet());
+  // Security middlewares with custom domain support
+  app.use(helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        connectSrc: ["'self'", process.env.APP_URL || "https://*.repl.co"],
+        imgSrc: ["'self'", "data:", "blob:"],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+      },
+    },
+  }));
+
+  // CORS configuration for custom domain
+  const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(",") || [
+    "https://*.repl.co",
+    process.env.APP_URL, // Custom domain
+  ].filter(Boolean);
+
   app.use(cors({
-    origin: process.env.ALLOWED_ORIGINS?.split(",") || ["https://*.repl.co"],
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.some(allowed => 
+        origin === allowed || (allowed.includes('*') && origin.endsWith(allowed.replace('*', '')))
+      )) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
     credentials: true
   }));
 
@@ -44,7 +69,7 @@ export function registerRoutes(app: Express): Server {
         message: "Post created successfully",
         post,
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error processing request:", error);
       return res.status(500).json({
         error: "Internal server error",
