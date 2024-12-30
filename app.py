@@ -57,14 +57,16 @@ async def platform_callback(platform):
     except Exception as e:
         return jsonify({"error": "Authentication failed"}), 500
 
-        # Here you would typically:
-        # 1. Store the tokens in your database
-        # 2. Associate them with the current user
-        # 3. Redirect to the frontend with success message
-
-        return redirect(f"{os.getenv('APP_URL', '')}/settings?connection=success&platform={platform}")
-    except Exception as e:
-        return redirect(f"{os.getenv('APP_URL', '')}/settings?connection=error&platform={platform}&error={str(e)}")
+        token_data = await social_media_service.handle_oauth_callback(platform, code)
+        if not token_data:
+            return redirect(f"{os.getenv('APP_URL', '')}/settings?connection=error&platform={platform}&error=token_retrieval_failed")
+            
+        # Store tokens securely
+        try:
+            await social_media_service.store_platform_tokens(platform, token_data)
+            return redirect(f"{os.getenv('APP_URL', '')}/settings?connection=success&platform={platform}")
+        except Exception:
+            return redirect(f"{os.getenv('APP_URL', '')}/settings?connection=error&platform={platform}&error=token_storage_failed")
 
 @app.route('/api/social/post', methods=['POST'])
 async def publish_content():

@@ -17,11 +17,13 @@ function App() {
         <div className="p-4 flex justify-end">
           <LanguageSelector />
         </div>
-        <Switch>
-          <Route path="/" component={Dashboard} />
-          <Route path="/calendar" component={Calendar} />
-          <Route path="/analytics" component={Analytics} />
-        </Switch>
+        <Suspense fallback={<div className="p-4">Loading...</div>}>
+          <Switch>
+            <Route path="/" component={Dashboard} />
+            <Route path="/calendar" component={Calendar} />
+            <Route path="/analytics" component={Analytics} />
+          </Switch>
+        </Suspense>
       </main>
     </div>
   );
