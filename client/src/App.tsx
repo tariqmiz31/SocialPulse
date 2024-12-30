@@ -1,7 +1,8 @@
 import { Switch, Route } from "wouter";
-import Dashboard from "@/pages/Dashboard";
-import Calendar from "@/pages/Calendar";
-import Analytics from "@/pages/Analytics";
+import { lazy, Suspense } from "react";
+const Dashboard = lazy(() => import("@/pages/Dashboard"));
+const Calendar = lazy(() => import("@/pages/Calendar"));
+const Analytics = lazy(() => import("@/pages/Analytics"));
 import { Sidebar } from "@/components/layout/Sidebar";
 import { LanguageSelector } from "@/components/LanguageSelector";
 import { useLocale } from "@/contexts/LocaleContext";

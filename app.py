@@ -93,7 +93,10 @@ async def publish_content():
                 )
                 results[platform] = {"status": "success", "data": result}
             except Exception as e:
-                results[platform] = {"status": "error", "error": str(e)}
+                error_type = type(e).__name__
+                error_details = {"type": error_type, "message": str(e)}
+                results[platform] = {"status": "error", "error": error_details}
+                logger.error(f"Platform {platform} publishing error: {error_details}")
 
         return jsonify(results)
     except Exception as e:

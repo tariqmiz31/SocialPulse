@@ -37,7 +37,7 @@ export const analytics = pgTable("analytics", {
   shares: integer("shares").default(0),
   comments: integer("comments").default(0),
   reach: integer("reach").default(0),
-  engagementRate: integer("engagement_rate").default(0),
+  engagementRate: decimal("engagement_rate", { precision: 5, scale: 2 }).default(0),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
