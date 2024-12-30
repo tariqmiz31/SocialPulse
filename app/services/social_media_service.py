@@ -140,30 +140,40 @@ class SocialMediaService:
     # Similar implementation for other platforms...
     async def _publish_to_instagram(self, content: str, media_urls: Optional[List[str]], access_token: str) -> Dict:
         """Publish to Instagram"""
-        if not media_urls:
-            raise ValueError("Instagram requires at least one media file")
+        try:
+            if not media_urls:
+                raise ValueError("Instagram requires at least one media file")
+            if not access_token:
+                raise ValueError("Access token is required")
 
-        headers = {'Authorization': f'Bearer {access_token}'}
-        
-        # Create a container
-        container_response = requests.post(
-            f"{self.platform_configs['instagram']['api_base']}/media",
-            headers=headers,
-            data={
-                'image_url': media_urls[0],
-                'caption': content
-            }
-        )
-        container_response.raise_for_status()
-        container_id = container_response.json()['id']
+            headers = {'Authorization': f'Bearer {access_token}'}
+            
+            # Create a container
+            try:
+                container_response = requests.post(
+                    f"{self.platform_configs['instagram']['api_base']}/media",
+                    headers=headers,
+                    data={
+                        'image_url': media_urls[0],
+                        'caption': content
+                    }
+                )
+                container_response.raise_for_status()
+                container_id = container_response.json().get('id')
+                if not container_id:
+                    raise ValueError("Failed to get container ID from response")
 
-        # Publish the container
-        publish_response = requests.post(
-            f"{self.platform_configs['instagram']['api_base']}/media_publish",
-            headers=headers,
-            data={'creation_id': container_id}
-        )
-        publish_response.raise_for_status()
-        return publish_response.json()
+                # Publish the container
+                publish_response = requests.post(
+                    f"{self.platform_configs['instagram']['api_base']}/media_publish",
+                    headers=headers,
+                    data={'creation_id': container_id}
+                )
+                publish_response.raise_for_status()
+                return publish_response.json()
+            except requests.exceptions.RequestException as e:
+                raise ValueError(f"Instagram API error: {str(e)}")
+        except Exception as e:
+            raise ValueError(f"Failed to publish to Instagram: {str(e)}")
 
     # Implement other platform publishing methods similarly
