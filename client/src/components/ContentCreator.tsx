@@ -69,32 +69,53 @@ export function ContentCreator() {
         }),
       });
 
-      if (!response.ok) throw new Error("Failed to repurpose content");
+      if (!response.ok) {
+        const errorData = await response.text();
+        throw new Error(`Failed to repurpose content: ${errorData}`);
+      }
 
       const repurposed = await response.json();
       setRepurposedContent(repurposed);
 
       const predictionsPromises = selectedPlatforms.map(async (platform) => {
-        const predictionResponse = await fetch("/api/predict-performance", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            content: repurposed[platform],
-            platform,
-            content_type: platformContentTypes[platform] || contentType, // Use platform-specific or general content type
-          }),
-        });
+        try {
+          const predictionResponse = await fetch("/api/predict-performance", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              content: repurposed[platform],
+              platform,
+              content_type: platformContentTypes[platform] || contentType,
+            }),
+          });
 
-        if (!predictionResponse.ok) throw new Error(`Failed to get prediction for ${platform}`);
+          if (!predictionResponse.ok) {
+            const errorData = await predictionResponse.text();
+            throw new Error(`Failed to get prediction for ${platform}: ${errorData}`);
+          }
 
-        const prediction = await predictionResponse.json();
-        return [platform, prediction];
+          const prediction = await predictionResponse.json();
+          return [platform, prediction];
+        } catch (error) {
+          console.error(`Error getting prediction for ${platform}:`, error);
+          // Return a default prediction object on error
+          return [platform, {
+            predicted_engagement: 0,
+            predicted_reach: 0,
+            best_posting_time: "N/A",
+            content_score: 0,
+            improvement_suggestions: [`Failed to get predictions: ${error.message}`]
+          }];
+        }
       });
 
       const predictionsResults = await Promise.all(predictionsPromises);
       setPredictions(Object.fromEntries(predictionsResults));
     } catch (error) {
       console.error("Error repurposing content:", error);
+      // Add user feedback for errors
+      // Note: In a real application, you would want to show this in the UI
+      alert(`Failed to analyze content: ${error.message}`);
     }
   };
 
@@ -168,9 +189,9 @@ export function ContentCreator() {
         return copy;
       });
     } else {
-      // Set default content type when platform is selected
+      // Add null check and type safety for platform
       const platform = platforms.find(p => p.id === platformId);
-      if (platform?.contentTypes.length > 0) {
+      if (platform?.contentTypes && platform.contentTypes.length > 0) {
         setPlatformContentTypes(prev => ({
           ...prev,
           [platformId]: platform.contentTypes[0].id
@@ -182,6 +203,22 @@ export function ContentCreator() {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      // Add file type validation
+      const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'video/mp4'];
+      const maxSize = 10 * 1024 * 1024; // 10MB
+
+      if (!allowedTypes.includes(file.type)) {
+        alert('Please select a valid image (JPEG, PNG, GIF) or video (MP4) file.');
+        e.target.value = '';
+        return;
+      }
+
+      if (file.size > maxSize) {
+        alert('File size must be less than 10MB');
+        e.target.value = '';
+        return;
+      }
+
       setSelectedFile(file);
     }
   };
