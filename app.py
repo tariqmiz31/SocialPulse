@@ -51,11 +51,6 @@ async def platform_callback(platform):
 
         # Exchange code for access token
         token_data = await social_media_service.handle_oauth_callback(platform, code)
-        return jsonify(token_data)
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
-    except Exception as e:
-        return jsonify({"error": "Authentication failed"}), 500
 
         # Here you would typically:
         # 1. Store the tokens in your database
