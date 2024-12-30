@@ -11,36 +11,42 @@ export function registerRoutes(app: Express): Server {
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        connectSrc: ["'self'", process.env.APP_URL || "https://*.repl.co"],
+        connectSrc: ["'self'", "https://silvariumsocial.com"],
         imgSrc: ["'self'", "data:", "blob:"],
         scriptSrc: ["'self'", "'unsafe-inline'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
       },
     },
+    crossOriginEmbedderPolicy: false,
+    crossOriginResourcePolicy: { policy: "cross-origin" }
   }));
 
   // CORS configuration for custom domain
-  const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(",") || [
-    "https://*.repl.co",
-    process.env.APP_URL, // Custom domain
+  const allowedOrigins = [
+    "https://silvariumsocial.com",
+    process.env.APP_URL,
   ].filter(Boolean);
 
   app.use(cors({
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.some(allowed => 
-        origin === allowed || (allowed.includes('*') && origin.endsWith(allowed.replace('*', '')))
-      )) {
+      if (!origin || allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
         callback(new Error('Not allowed by CORS'));
       }
     },
-    credentials: true
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
   }));
 
   // Health check endpoint
   app.get("/api/health", (_req, res) => {
-    res.json({ status: "healthy" });
+    res.json({ 
+      status: "healthy",
+      domain: process.env.APP_URL,
+      timestamp: new Date().toISOString()
+    });
   });
 
   // API routes

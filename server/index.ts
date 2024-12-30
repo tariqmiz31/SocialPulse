@@ -3,11 +3,14 @@ dotenv.config();
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
+import { createServer } from "http";
 
+// Create Express app
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
+// Request logging middleware
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
@@ -38,32 +41,49 @@ app.use((req, res, next) => {
   next();
 });
 
+// Initialize server setup
 (async () => {
   try {
+    // Create HTTP server
+    const server = createServer(app);
+
+    // Register routes
     registerRoutes(app);
 
+    // Error handling middleware
     app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
       const status = err.status || err.statusCode || 500;
       const message = err.message || "Internal Server Error";
 
-      res.status(status).json({ message });
+      res.status(status).json({ 
+        message,
+        domain: process.env.APP_URL,
+        timestamp: new Date().toISOString()
+      });
+
       if (app.get("env") === "development") {
         console.error(err);
       }
     });
 
+    // Setup Vite in development, static files in production
     if (app.get("env") === "development") {
-      await setupVite(app);
+      await setupVite(app, server);
     } else {
       serveStatic(app);
     }
 
-    const PORT = 5000;
-    app.listen(PORT, "0.0.0.0", () => {
-      log(`Server is running on port ${PORT}`);
+    // Start server
+    const PORT = parseInt(process.env.PORT || "5000", 10);
+    server.listen(PORT, "0.0.0.0", () => {
+      log(`Server running on port ${PORT}`);
+      log(`Custom domain: ${process.env.APP_URL || 'Not configured'}`);
     });
   } catch (error) {
     console.error("Failed to start the server:", error);
     process.exit(1);
   }
 })();
+
+// Export app for production use
+export { app };
