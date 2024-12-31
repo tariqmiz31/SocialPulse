@@ -25,13 +25,6 @@ app.use(helmet({
       objectSrc: ["'none'"],
       upgradeInsecureRequests: []
     }
-  },
-  crossOriginEmbedderPolicy: false,
-  crossOriginResourcePolicy: { policy: "cross-origin" },
-  hsts: {
-    maxAge: 31536000,
-    includeSubDomains: true,
-    preload: true
   }
 }));
 
@@ -80,7 +73,7 @@ app.use(cors({
   maxAge: 86400 // CORS preflight cache for 24 hours
 }));
 
-// Enhanced security for production (retained from original)
+// Enhanced security for production
 if (process.env.NODE_ENV === 'production') {
   // Force HTTPS
   app.enable('trust proxy');
@@ -89,7 +82,6 @@ if (process.env.NODE_ENV === 'production') {
     res.redirect(`https://${req.headers.host}${req.url}`);
   });
 }
-
 
 try {
   app.listen(PORT, HOST, () => {

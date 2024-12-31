@@ -48,18 +48,11 @@ const activeConnections = new promClient.Gauge({
   help: 'Number of active connections'
 });
 
-const backupMetrics = new promClient.Gauge({
-  name: 'socialpulse_backup_status',
-  help: 'Status of the latest database backup',
-  labelNames: ['status']
-});
-
 register.registerMetric(httpRequestDuration);
 register.registerMetric(httpRequestTotal);
 register.registerMetric(apiLatency);
 register.registerMetric(memoryUsage);
 register.registerMetric(activeConnections);
-register.registerMetric(backupMetrics);
 
 // Performance monitoring middleware
 export const performanceMonitor = (req: Request, res: Response, next: NextFunction) => {
@@ -79,20 +72,16 @@ export const performanceMonitor = (req: Request, res: Response, next: NextFuncti
       method: req.method,
       path: path,
       status: status,
-      duration: `${duration.toFixed(2)}ms`,
-      userAgent: req.get('user-agent'),
-      ip: req.ip
+      duration: `${duration.toFixed(2)}ms`
     });
 
-    // Track slow requests (more than 1000ms)
+    // Track slow requests
     if (duration > 1000) {
       logger.warn({
         message: 'Slow request detected',
         method: req.method,
         path: path,
-        duration: `${duration.toFixed(2)}ms`,
-        query: req.query,
-        headers: req.headers
+        duration: `${duration.toFixed(2)}ms`
       });
     }
   });
@@ -101,139 +90,39 @@ export const performanceMonitor = (req: Request, res: Response, next: NextFuncti
 };
 
 // Error tracking middleware
-export const errorTracker = (err: Error, req: Request, res: Response, next: NextFunction) => {
-  const timestamp = new Date().toISOString();
-  const errorId = Math.random().toString(36).substring(7);
-
+export const errorTracker = (err: Error, _req: Request, res: Response, next: NextFunction) => {
   logger.error({
-    errorId,
     message: err.message,
     stack: err.stack,
-    method: req.method,
-    path: req.path,
-    query: req.query,
-    body: req.body,
-    headers: req.headers,
-    timestamp
+    timestamp: new Date().toISOString()
   });
 
-  res.status(500).json({
-    error: true,
-    message: process.env.NODE_ENV === 'production' 
-      ? 'An internal system error occurred' 
-      : err.message,
-    errorId,
-    timestamp
-  });
+  next(err);
 };
 
 // Memory monitoring
 const memoryMonitor = () => {
   const used = process.memoryUsage();
-
   memoryUsage.labels('rss').set(used.rss);
   memoryUsage.labels('heapTotal').set(used.heapTotal);
   memoryUsage.labels('heapUsed').set(used.heapUsed);
   memoryUsage.labels('external').set(used.external || 0);
   memoryUsage.labels('arrayBuffers').set(used.arrayBuffers || 0);
 
-  logger.debug({
-    memory: {
-      rss: `${Math.round(used.rss / 1024 / 1024)}MB`,
-      heapTotal: `${Math.round(used.heapTotal / 1024 / 1024)}MB`,
-      heapUsed: `${Math.round(used.heapUsed / 1024 / 1024)}MB`,
-      external: `${Math.round((used.external || 0) / 1024 / 1024)}MB`,
-      arrayBuffers: `${Math.round((used.arrayBuffers || 0) / 1024 / 1024)}MB`
-    }
-  });
-
-  // Run every 5 minutes
-  setTimeout(memoryMonitor, 300000);
+  // Run every minute
+  setTimeout(memoryMonitor, 60000);
 };
 
-// Backup monitoring
-async function monitorBackups() {
-  try {
-    const backupDir = '/tmp/backups';
-    const files = await fs.readdir(backupDir);
-    const backupFiles = files.filter(file => file.startsWith('backup-') && file.endsWith('.sql'));
+// API monitor middleware
+export const apiMonitor = (req: Request, res: Response, next: NextFunction) => {
+  const start = performance.now();
 
-    if (backupFiles.length > 0) {
-      // Get the latest backup file
-      const latestBackup = backupFiles.sort().reverse()[0];
-      const stats = await fs.stat(path.join(backupDir, latestBackup));
-      const backupAge = Date.now() - stats.mtime.getTime();
+  res.on('finish', () => {
+    const duration = performance.now() - start;
+    apiLatency.labels(req.path).observe(duration / 1000);
+  });
 
-      // Update backup status metric (1 for success, 0 for failure)
-      backupMetrics.labels('success').set(backupAge < 24 * 60 * 60 * 1000 ? 1 : 0);
-
-      logger.info('Backup status updated:', {
-        latestBackup,
-        age: `${Math.round(backupAge / (60 * 60 * 1000))} hours`
-      });
-    } else {
-      backupMetrics.labels('success').set(0);
-      logger.warn('No backup files found');
-    }
-  } catch (error) {
-    backupMetrics.labels('success').set(0);
-    logger.error('Error monitoring backups:', error);
-  }
-
-  // Check backup status every hour
-  setTimeout(monitorBackups, 60 * 60 * 1000);
-}
-
-// Health check data collector
-export const getHealthData = async () => {
-  const metrics = await register.getMetricsAsJSON();
-  const uptime = process.uptime();
-  const memory = process.memoryUsage();
-  const loadavg = require('os').loadavg();
-
-  // Get backup status
-  let backupStatus = "unknown";
-  try {
-    const backupDir = '/tmp/backups';
-    const files = await fs.readdir(backupDir);
-    const backupFiles = files.filter(file => file.startsWith('backup-') && file.endsWith('.sql'));
-
-    if (backupFiles.length > 0) {
-      const latestBackup = backupFiles.sort().reverse()[0];
-      const stats = await fs.stat(path.join(backupDir, latestBackup));
-      const backupAge = Date.now() - stats.mtime.getTime();
-
-      backupStatus = backupAge < 24 * 60 * 60 * 1000 ? "healthy" : "stale";
-    } else {
-      backupStatus = "missing";
-    }
-  } catch (error) {
-    backupStatus = "error";
-    logger.error('Error checking backup status:', error);
-  }
-
-  return {
-    status: 'healthy',
-    uptime,
-    uptimeFormatted: `${Math.floor(uptime / 3600)}h ${Math.floor((uptime % 3600) / 60)}m`,
-    memory: {
-      rss: `${Math.round(memory.rss / 1024 / 1024)}MB`,
-      heapTotal: `${Math.round(memory.heapTotal / 1024 / 1024)}MB`,
-      heapUsed: `${Math.round(memory.heapUsed / 1024 / 1024)}MB`,
-      external: `${Math.round((memory.external || 0) / 1024 / 1024)}MB`,
-      arrayBuffers: `${Math.round((memory.arrayBuffers || 0) / 1024 / 1024)}MB`
-    },
-    loadAverage: {
-      '1m': loadavg[0],
-      '5m': loadavg[1],
-      '15m': loadavg[2]
-    },
-    backup: {
-      status: backupStatus
-    },
-    metrics,
-    timestamp: new Date().toISOString()
-  };
+  next();
 };
 
 // Metrics endpoint handler
@@ -247,41 +136,27 @@ export const metricsHandler = async (_req: Request, res: Response) => {
   }
 };
 
-// API request counter
-let requestCount = 0;
-export const requestCounter = (req: Request, res: Response, next: NextFunction) => {
-  requestCount++;
-  if (requestCount % 100 === 0) {
-    logger.info(`[Stats] Total requests processed: ${requestCount}`);
-  }
-  next();
-};
+// Health check data collector
+export const getHealthData = async () => {
+  const metrics = await register.getMetricsAsJSON();
+  const uptime = process.uptime();
+  const memory = process.memoryUsage();
 
-// API monitor
-export const apiMonitor = (apiName: string) => {
-  return async (req: Request, res: Response, next: NextFunction) => {
-    const start = performance.now();
-
-    res.on('finish', () => {
-      const duration = performance.now() - start;
-      apiLatency.labels(apiName).observe(duration / 1000);
-
-      if (duration > 2000) { // Warning for requests taking more than 2 seconds
-        logger.warn({
-          message: 'Slow API request',
-          api: apiName,
-          duration: `${duration.toFixed(2)}ms`
-        });
-      }
-    });
-
-    next();
+  return {
+    status: 'healthy',
+    uptime,
+    memory: {
+      rss: Math.round(memory.rss / 1024 / 1024),
+      heapTotal: Math.round(memory.heapTotal / 1024 / 1024),
+      heapUsed: Math.round(memory.heapUsed / 1024 / 1024)
+    },
+    metrics,
+    timestamp: new Date().toISOString()
   };
 };
 
 // Start monitoring
 export const startMonitoring = () => {
   memoryMonitor();
-  monitorBackups();
   logger.info('Monitoring system started');
 };

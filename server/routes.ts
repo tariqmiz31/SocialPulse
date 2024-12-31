@@ -58,6 +58,33 @@ export function registerRoutes(app: Express): Server {
   // تمكين وسائط المراقبة
   app.use(performanceMonitor);
 
+  // نقطة نهاية الحالة الأساسية
+  app.get("/api/monitoring/status", (_req, res) => {
+    try {
+      res.json({
+        server: "running",
+        timestamp: new Date().toISOString(),
+        environment: process.env.NODE_ENV,
+        database: "connected"
+      });
+    } catch (error) {
+      logger.error('Error in status endpoint:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // نقاط نهاية المراقبة المتقدمة
+  app.get("/api/monitoring/metrics", metricsHandler);
+  app.get("/api/monitoring/health", async (_req, res) => {
+    try {
+      const healthData = await getHealthData();
+      res.json(healthData);
+    } catch (error) {
+      logger.error('Error in health endpoint:', error);
+      res.status(500).json({ error: 'Failed to get health data' });
+    }
+  });
+
   // تكوين التخزين المؤقت للملفات الثابتة
   app.use('/static', express.static('public', {
     maxAge: '1y',
@@ -119,35 +146,10 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
-  // نقاط نهاية API للمراقبة
-  app.get("/api/monitoring/metrics", metricsHandler);
-  app.get("/api/monitoring/health", async (_req, res) => {
-    try {
-      const healthData = await getHealthData();
-      res.json(healthData);
-    } catch (error) {
-      logger.error('خطأ في جلب بيانات الصحة:', error);
-      res.status(500).json({ error: 'خطأ في جلب بيانات الصحة' });
-    }
-  });
-  app.get("/api/monitoring/status", async (_req, res) => {
-    try {
-      const dbStatus = db ? "متصل" : "غير متصل";
-
-      res.json({
-        server: "يعمل",
-        database: dbStatus,
-        environment: process.env.NODE_ENV,
-        domain: process.env.CUSTOM_DOMAIN || process.env.APP_URL
-      });
-    } catch (error) {
-      logger.error('خطأ في جلب حالة النظام:', error);
-      res.status(500).json({ error: 'خطأ في جلب حالة النظام' });
-    }
-  });
 
   // مراقبة النظام والأخطاء
   app.use(errorTracker);
+  app.use(apiMonitor);
 
   // بدء المراقبة والنسخ الاحتياطي التلقائي
   scheduleBackups();
