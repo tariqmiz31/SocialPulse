@@ -8,6 +8,7 @@ dotenv.config();
 
 const PORT = parseInt(process.env.PORT || "5000", 10);
 const HOST = "0.0.0.0";
+const CUSTOM_DOMAIN = "silvariumsocial.com";
 
 // Enhanced security for production
 if (process.env.NODE_ENV === 'production') {
@@ -24,7 +25,7 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      connectSrc: ["'self'", "https://silvariumsocial.com"],
+      connectSrc: ["'self'", `https://${CUSTOM_DOMAIN}`],
       imgSrc: ["'self'", "data:", "blob:"],
       scriptSrc: ["'self'", "'unsafe-inline'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
@@ -39,8 +40,8 @@ app.use(helmet({
 
 // CORS configuration for custom domain
 const allowedOrigins = [
-  "https://silvariumsocial.com",
-  "https://www.silvariumsocial.com",
+  `https://${CUSTOM_DOMAIN}`,
+  `https://www.${CUSTOM_DOMAIN}`,
   process.env.APP_URL
 ].filter(Boolean);
 
@@ -54,13 +55,14 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  maxAge: 86400 // CORS preflight cache for 24 hours
 }));
 
 try {
   app.listen(PORT, HOST, () => {
     log(`Production server running at http://${HOST}:${PORT}`);
-    log(`Custom domain: ${process.env.APP_URL || 'Not configured'}`);
+    log(`Custom domain: ${process.env.APP_URL || CUSTOM_DOMAIN}`);
     log('Security headers and CORS configured for custom domain');
 
     // Log allowed origins for verification
