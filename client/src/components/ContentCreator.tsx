@@ -347,7 +347,9 @@ export function ContentCreator() {
                       [platform.id]: value
                     }))}
                   >
-                    <SelectTrigger className="w-[180px]" className={direction === 'rtl' ? 'text-right' : 'text-left'}>
+                    <SelectTrigger
+                      className={`w-[180px] ${direction === 'rtl' ? 'text-right' : 'text-left'}`}
+                    >
                       <SelectValue placeholder="Select content type" />
                     </SelectTrigger>
                     <SelectContent>

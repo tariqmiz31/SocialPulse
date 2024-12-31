@@ -7,10 +7,13 @@ module.exports = {
       exec_mode: "cluster",
       autorestart: true,
       watch: false,
-      max_memory_restart: "1G",
+      max_memory_restart: "1024M",
       env_production: {
         NODE_ENV: "production",
-        PORT: 5000
+        PORT: 5000,
+        APP_URL: process.env.APP_URL || "https://silvariumsocial.com",
+        CUSTOM_DOMAIN: process.env.CUSTOM_DOMAIN,
+        DATABASE_URL: process.env.DATABASE_URL
       },
       env_development: {
         NODE_ENV: "development",
@@ -20,26 +23,18 @@ module.exports = {
       out_file: "/tmp/socialpulse-out.log",
       merge_logs: true,
       log_date_format: "YYYY-MM-DD HH:mm:ss Z",
-      // إعادة التشغيل عند استخدام أكثر من 70% من الذاكرة
-      max_memory_restart: "70%",
-      // التحقق من صحة التطبيق
       wait_ready: true,
       listen_timeout: 10000,
-      // إعادة المحاولة عند الفشل
       restart_delay: 4000,
-      // التعامل مع الأخطاء القاتلة
       exp_backoff_restart_delay: 100,
-      // مراقبة استخدام الموارد
       monitor: true,
-      // مراقبة الأداء
       metrics: {
         http: true
       },
-      // إعدادات النسخ الاحتياطي
       backup: {
         enabled: true,
         path: "/tmp/backups",
-        interval: "0 4 * * *" // كل يوم الساعة 4 صباحاً
+        interval: "0 4 * * *"
       }
     }
   ]
