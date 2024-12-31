@@ -8,7 +8,7 @@ dotenv.config();
 
 const PORT = parseInt(process.env.PORT || "5000", 10);
 const HOST = "0.0.0.0";
-const CUSTOM_DOMAIN = "silvariumsocial.com";
+const CUSTOM_DOMAIN = process.env.CUSTOM_DOMAIN || "silvariumsocial.com";
 
 // Enhanced security for production
 if (process.env.NODE_ENV === 'production') {
@@ -25,8 +25,8 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      connectSrc: ["'self'", `https://${CUSTOM_DOMAIN}`, "wss://*.silvariumsocial.com"],
-      imgSrc: ["'self'", "data:", "blob:", "https://*.silvariumsocial.com"],
+      connectSrc: ["'self'", `https://${CUSTOM_DOMAIN}`, `wss://*.${CUSTOM_DOMAIN}`],
+      imgSrc: ["'self'", "data:", "blob:", `https://*.${CUSTOM_DOMAIN}`],
       scriptSrc: ["'self'", "'unsafe-inline'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
       frameSrc: ["'self'"],
@@ -53,13 +53,20 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin || allowedOrigins.some(allowed => {
-      if (allowed.includes('*')) {
+    if (!origin) {
+      callback(null, true);
+      return;
+    }
+
+    const isAllowed = allowedOrigins.some(allowed => {
+      if (allowed && allowed.includes('*')) {
         const pattern = new RegExp(allowed.replace('*.', '.*\\.'));
         return pattern.test(origin);
       }
-      return origin === allowed;
-    })) {
+      return allowed && origin === allowed;
+    });
+
+    if (isAllowed) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));
@@ -76,7 +83,7 @@ try {
     log(`Production server running at http://${HOST}:${PORT}`);
     log(`Main domain: ${CUSTOM_DOMAIN}`);
     log('Security headers and CORS configured for domain and subdomains');
-    log(`Allowed origins pattern: ${allowedOrigins.join(', ')}`);
+    log(`Allowed origins: ${allowedOrigins.join(', ')}`);
   });
 } catch (error) {
   console.error("Failed to start production server:", error);

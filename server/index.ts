@@ -48,7 +48,7 @@ app.use((req, res, next) => {
     const server = createServer(app);
 
     // Register routes with domain configuration
-    const domain = process.env.APP_URL || 'silvariumsocial.com';
+    const domain = process.env.CUSTOM_DOMAIN || process.env.APP_URL || 'silvariumsocial.com';
     app.set('trust proxy', 1);
     app.use((req, res, next) => {
       if (process.env.NODE_ENV === 'production' && !req.secure) {
@@ -66,7 +66,7 @@ app.use((req, res, next) => {
 
       res.status(status).json({ 
         message,
-        domain: process.env.APP_URL,
+        domain: process.env.CUSTOM_DOMAIN || process.env.APP_URL,
         timestamp: new Date().toISOString()
       });
 

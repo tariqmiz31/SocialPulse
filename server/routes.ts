@@ -5,17 +5,27 @@ import cors from "cors";
 import compression from "compression";
 import { db } from "@db";
 import { posts } from "@db/schema";
+import rateLimit from "express-rate-limit";
 
 export function registerRoutes(app: Express): Server {
   // Enable compression
   app.use(compression());
+
+  // Rate limiting
+  const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100 // limit each IP to 100 requests per windowMs
+  });
+
+  // Apply rate limiting to all routes
+  app.use(limiter);
 
   // Enhanced security middlewares with subdomain support
   app.use(helmet({
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        connectSrc: ["'self'", "*.silvariumsocial.com"],
+        connectSrc: ["'self'", process.env.APP_URL || "", "*.silvariumsocial.com"].filter(Boolean),
         imgSrc: ["'self'", "data:", "blob:", "*.silvariumsocial.com"],
         scriptSrc: ["'self'", "'unsafe-inline'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
@@ -32,9 +42,9 @@ export function registerRoutes(app: Express): Server {
 
   // Enhanced CORS configuration with wildcard subdomain support
   const allowedDomains = [
-    "silvariumsocial.com",
-    "*.silvariumsocial.com",
     process.env.APP_URL,
+    process.env.CUSTOM_DOMAIN,
+    `*.${process.env.CUSTOM_DOMAIN}`,
   ].filter(Boolean);
 
   app.use(cors({
@@ -45,11 +55,11 @@ export function registerRoutes(app: Express): Server {
       }
 
       const isAllowed = allowedDomains.some(domain => {
-        if (domain.startsWith("*.")) {
+        if (domain && domain.startsWith("*.")) {
           const baseDomain = domain.slice(2);
           return origin.endsWith(baseDomain);
         }
-        return origin === `https://${domain}`;
+        return domain && origin === domain;
       });
 
       if (isAllowed) {
@@ -72,6 +82,7 @@ export function registerRoutes(app: Express): Server {
     res.json({ 
       status: "healthy",
       domain: process.env.APP_URL,
+      customDomain: process.env.CUSTOM_DOMAIN,
       host: host,
       subdomain: subdomain !== 'www' ? subdomain : 'root',
       timestamp: new Date().toISOString(),
