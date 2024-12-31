@@ -8,6 +8,7 @@ import helmet from "helmet";
 import cors from "cors";
 import compression from "compression";
 import { performanceMonitor, startMonitoring } from "./monitoring";
+import { scheduleBackups } from "./backup";
 import logger from "./logConfig";
 
 // Create Express app
@@ -54,7 +55,7 @@ app.use(cors({
   credentials: true
 }));
 
-// Add performance monitoring
+// Add performance monitoring middleware
 app.use(performanceMonitor);
 
 // Initialize server setup
@@ -75,9 +76,12 @@ app.use(performanceMonitor);
       next();
     });
 
-    // Register routes and start monitoring
+    // Register routes
     registerRoutes(app);
+
+    // Start monitoring and backup systems
     startMonitoring();
+    scheduleBackups();
 
     // Error handling middleware
     app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
