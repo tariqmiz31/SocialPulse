@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { db } from "@db";
-import { performanceMonitor, errorTracker, metricsHandler, getHealthData, apiMonitor, startMonitoring } from "./monitoring";
+import { performanceMonitor, errorTracker, metricsHandler, getHealthData, apiMonitor } from "./monitoring";
 import { setupAuth } from "./auth";
 import { createBackup, restoreBackup, scheduleBackups } from "./backup";
 import rateLimit from "express-rate-limit";
@@ -58,7 +58,7 @@ export function registerRoutes(app: Express): Server {
       if (isAllowed) {
         callback(null, true);
       } else {
-        callback(new Error('غير مسموح به بواسطة CORS'));
+        callback(new Error('Not allowed by CORS'));
       }
     },
     credentials: true,
@@ -69,12 +69,12 @@ export function registerRoutes(app: Express): Server {
   app.use(compression({
     level: 6,
     threshold: 1024,
-    filter: (req) => {
+    filter: (req, res) => {
       const userAgent = req.headers['user-agent'] || '';
       if (userAgent.includes('CloudFront') || userAgent.includes('Cloudflare')) {
         return false;
       }
-      return compression.filter(req);
+      return compression.filter(req, res);
     }
   }));
 
@@ -83,7 +83,6 @@ export function registerRoutes(app: Express): Server {
     windowMs: 15 * 60 * 1000,
     max: 100,
     skip: (req) => {
-      // Skip rate limiting for CDN requests
       const userAgent = req.headers['user-agent'] || '';
       return userAgent.includes('CloudFront') || userAgent.includes('Cloudflare');
     }
