@@ -1,34 +1,17 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { db } from "@db";
-import { performanceMonitor, errorTracker, metricsHandler, getHealthData } from "./monitoring";
+import { performanceMonitor, errorTracker, metricsHandler, getHealthData, apiMonitor, startMonitoring } from "./monitoring";
 import { setupAuth } from "./auth";
 import rateLimit from "express-rate-limit";
 import helmet from "helmet";
 import cors from "cors";
 import compression from "compression";
-import logger, { formatError } from "./logConfig";
+import logger from "./logConfig";
 import fs from 'fs/promises';
 
 export function registerRoutes(app: Express): Server {
-  // Set up authentication
-  setupAuth(app);
-
-  // Enable monitoring middleware
-  app.use(performanceMonitor);
-
-  // Enable compression
-  app.use(compression());
-
-  // Configure rate limiting
-  const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100 // limit each IP
-  });
-
-  app.use(limiter);
-
-  // Configure enhanced security with subdomain support
+  // تكوين الأمان المحسّن
   app.use(helmet({
     contentSecurityPolicy: {
       directives: {
@@ -44,7 +27,7 @@ export function registerRoutes(app: Express): Server {
     }
   }));
 
-  // Configure enhanced CORS with subdomain support
+  // تكوين CORS المحسّن
   const allowedDomains = [
     process.env.APP_URL,
     process.env.CUSTOM_DOMAIN,
@@ -75,7 +58,24 @@ export function registerRoutes(app: Express): Server {
     credentials: true
   }));
 
-  // Monitoring routes
+  // تمكين ضغط الاستجابة
+  app.use(compression());
+
+  // تكوين تحديد معدل الطلبات
+  const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 دقيقة
+    max: 100 // حد لكل IP
+  });
+
+  app.use(limiter);
+
+  // إعداد المصادقة
+  setupAuth(app);
+
+  // تمكين وسائط المراقبة
+  app.use(performanceMonitor);
+
+  // طرق المراقبة
   app.get("/api/monitoring/metrics", metricsHandler);
 
   app.get("/api/monitoring/health", async (_req, res) => {
@@ -131,8 +131,11 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
-  // Error tracking middleware should be the last thing
+  // مراقبة النظام والأخطاء
   app.use(errorTracker);
+
+  // بدء المراقبة
+  startMonitoring();
 
   const httpServer = createServer(app);
   return httpServer;
