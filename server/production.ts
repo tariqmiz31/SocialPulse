@@ -3,6 +3,8 @@ import { log } from "./vite";
 import dotenv from "dotenv";
 import helmet from "helmet";
 import cors from "cors";
+import rateLimit from "express-rate-limit";
+import compression from "compression";
 
 dotenv.config();
 
@@ -10,17 +12,7 @@ const PORT = parseInt(process.env.PORT || "5000", 10);
 const HOST = "0.0.0.0";
 const CUSTOM_DOMAIN = process.env.CUSTOM_DOMAIN || "silvariumsocial.com";
 
-// Enhanced security for production
-if (process.env.NODE_ENV === 'production') {
-  // Force HTTPS
-  app.enable('trust proxy');
-  app.use((req, res, next) => {
-    if (req.secure) return next();
-    res.redirect(`https://${req.headers.host}${req.url}`);
-  });
-}
-
-// Additional production security headers
+// Enable security middleware
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -43,7 +35,17 @@ app.use(helmet({
   }
 }));
 
-// CORS configuration for main domain and subdomains
+// Enable compression
+app.use(compression());
+
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100 // limit each IP to 100 requests per windowMs
+});
+app.use(limiter);
+
+// CORS configuration for custom domain
 const allowedOrigins = [
   `https://${CUSTOM_DOMAIN}`,
   `https://www.${CUSTOM_DOMAIN}`,
@@ -77,6 +79,17 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization'],
   maxAge: 86400 // CORS preflight cache for 24 hours
 }));
+
+// Enhanced security for production (retained from original)
+if (process.env.NODE_ENV === 'production') {
+  // Force HTTPS
+  app.enable('trust proxy');
+  app.use((req, res, next) => {
+    if (req.secure) return next();
+    res.redirect(`https://${req.headers.host}${req.url}`);
+  });
+}
+
 
 try {
   app.listen(PORT, HOST, () => {

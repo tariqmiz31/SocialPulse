@@ -21,10 +21,14 @@ logger.addHandler(handler)
 def create_app():
     app = Flask(__name__)
 
-    # Configure Flask app
+    # Configure Flask app for custom domain and security
     app.config.update(
-        SERVER_NAME=os.getenv('APP_URL', 'silvariumsocial.com'),
-        PREFERRED_URL_SCHEME='https'
+        SERVER_NAME=os.getenv('CUSTOM_DOMAIN', 'silvariumsocial.com'),
+        PREFERRED_URL_SCHEME='https',
+        SESSION_COOKIE_SECURE=True,
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE='Strict',
+        PERMANENT_SESSION_LIFETIME=1800  # 30 minutes
     )
 
     return app
@@ -43,7 +47,7 @@ def main():
         port = int(os.getenv("PORT", "5000"))
 
         logger.info(f"Starting production server on port {port}")
-        logger.info(f"Main domain: {os.getenv('APP_URL')}")
+        logger.info(f"Main domain: {os.getenv('CUSTOM_DOMAIN', 'silvariumsocial.com')}")
         logger.info(f"Allowed origins: {os.getenv('ALLOWED_ORIGINS')}")
 
         serve(
