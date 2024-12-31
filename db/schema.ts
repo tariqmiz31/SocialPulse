@@ -37,11 +37,15 @@ export const analytics = pgTable("analytics", {
   shares: integer("shares").default(0),
   comments: integer("comments").default(0),
   reach: integer("reach").default(0),
-  engagementRate: decimal("engagement_rate", { precision: 5, scale: 2 }).default('0'),
+  engagementRate: decimal("engagement_rate", { precision: 5, scale: 2 }),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+export const insertUserSchema = createInsertSchema(users);
+export const selectUserSchema = createSelectSchema(users);
 export type InsertUser = typeof users.$inferInsert;
 export type SelectUser = typeof users.$inferSelect;
 export type InsertPost = typeof posts.$inferInsert;
 export type SelectPost = typeof posts.$inferSelect;
+export type InsertAnalytics = typeof analytics.$inferInsert;
+export type SelectAnalytics = typeof analytics.$inferSelect;

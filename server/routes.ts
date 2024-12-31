@@ -1,20 +1,15 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
+import { db } from "@db";
+import { performanceMonitor, errorTracker, metricsHandler, getHealthData } from "./monitoring";
+import rateLimit from "express-rate-limit";
 import helmet from "helmet";
 import cors from "cors";
 import compression from "compression";
-import { db } from "@db";
-import { users } from "@db/schema";
-import rateLimit from "express-rate-limit";
-import { performanceMonitor, errorTracker, requestCounter, getHealthData, memoryMonitor } from "./monitoring";
 
 export function registerRoutes(app: Express): Server {
   // Enable monitoring middleware
   app.use(performanceMonitor);
-  app.use(requestCounter);
-
-  // Start memory monitoring interval
-  setInterval(memoryMonitor, 60000); // Check memory every minute
 
   // Enable compression
   app.use(compression());
@@ -83,15 +78,18 @@ export function registerRoutes(app: Express): Server {
   }));
 
   // Monitoring Routes
-  app.get("/api/monitoring/health", (_req, res) => {
-    res.json(getHealthData());
+  app.get("/metrics", metricsHandler);
+
+  app.get("/api/monitoring/health", async (_req, res) => {
+    const healthData = await getHealthData();
+    res.json(healthData);
   });
 
   app.get("/api/monitoring/status", (_req, res) => {
-    const dbStatus = db ? "connected" : "disconnected";
+    const dbStatus = db ? "متصل" : "غير متصل";
 
     res.json({
-      server: "running",
+      server: "يعمل",
       database: dbStatus,
       environment: process.env.NODE_ENV,
       domain: process.env.CUSTOM_DOMAIN || process.env.APP_URL
