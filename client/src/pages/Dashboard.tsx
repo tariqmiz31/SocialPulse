@@ -2,6 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ContentCreator } from "@/components/ContentCreator";
 import { PlatformSelector } from "@/components/PlatformSelector";
 import { MonitoringPanel } from "@/components/monitoring/MonitoringPanel";
+import { LogViewer } from "@/components/monitoring/LogViewer";
 import { platforms } from "@/lib/platforms";
 
 export default function Dashboard() {
@@ -25,6 +26,8 @@ export default function Dashboard() {
           </Card>
         ))}
       </div>
+
+      <LogViewer />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div>

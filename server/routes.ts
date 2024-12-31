@@ -6,24 +6,25 @@ import rateLimit from "express-rate-limit";
 import helmet from "helmet";
 import cors from "cors";
 import compression from "compression";
+import logger, { formatError } from "./logConfig";
+import fs from 'fs/promises';
 
 export function registerRoutes(app: Express): Server {
-  // Enable monitoring middleware
+  // تمكين وسيط المراقبة
   app.use(performanceMonitor);
 
-  // Enable compression
+  // تمكين ضغط البيانات
   app.use(compression());
 
-  // Rate limiting
+  // تكوين Rate Limiting
   const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100 // limit each IP to 100 requests per windowMs
+    windowMs: 15 * 60 * 1000, // 15 دقيقة
+    max: 100 // الحد الأقصى لكل IP
   });
 
-  // Apply rate limiting to all routes
   app.use(limiter);
 
-  // Enhanced security middlewares with subdomain support
+  // تكوين الأمان المحسن مع دعم النطاقات الفرعية
   app.use(helmet({
     contentSecurityPolicy: {
       directives: {
@@ -36,14 +37,10 @@ export function registerRoutes(app: Express): Server {
         objectSrc: ["'none'"],
         upgradeInsecureRequests: []
       }
-    },
-    crossOriginEmbedderPolicy: false,
-    crossOriginResourcePolicy: { policy: "cross-origin" },
-    dnsPrefetchControl: { allow: false },
-    referrerPolicy: { policy: "strict-origin-when-cross-origin" }
+    }
   }));
 
-  // Enhanced CORS configuration with wildcard subdomain support
+  // تكوين CORS المحسن مع دعم النطاقات الفرعية
   const allowedDomains = [
     process.env.APP_URL,
     process.env.CUSTOM_DOMAIN,
@@ -58,45 +55,79 @@ export function registerRoutes(app: Express): Server {
       }
 
       const isAllowed = allowedDomains.some(domain => {
-        if (domain && domain.startsWith("*.")) {
+        if (domain?.startsWith("*.")) {
           const baseDomain = domain.slice(2);
           return origin.endsWith(baseDomain);
         }
-        return domain && origin === domain;
+        return domain === origin;
       });
 
       if (isAllowed) {
         callback(null, true);
       } else {
-        callback(new Error('Not allowed by CORS'));
+        callback(new Error('غير مسموح به بواسطة CORS'));
       }
     },
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-    maxAge: 86400 // CORS preflight cache for 24 hours
+    credentials: true
   }));
 
-  // Monitoring Routes
-  app.get("/metrics", metricsHandler);
+  // مسارات المراقبة
+  app.get("/api/monitoring/metrics", metricsHandler);
 
   app.get("/api/monitoring/health", async (_req, res) => {
-    const healthData = await getHealthData();
-    res.json(healthData);
+    try {
+      const healthData = await getHealthData();
+      res.json(healthData);
+    } catch (error) {
+      logger.error('خطأ في جلب بيانات الصحة:', error);
+      res.status(500).json({ error: 'خطأ في جلب بيانات الصحة' });
+    }
   });
 
-  app.get("/api/monitoring/status", (_req, res) => {
-    const dbStatus = db ? "متصل" : "غير متصل";
+  app.get("/api/monitoring/status", async (_req, res) => {
+    try {
+      const dbStatus = db ? "متصل" : "غير متصل";
 
-    res.json({
-      server: "يعمل",
-      database: dbStatus,
-      environment: process.env.NODE_ENV,
-      domain: process.env.CUSTOM_DOMAIN || process.env.APP_URL
-    });
+      res.json({
+        server: "يعمل",
+        database: dbStatus,
+        environment: process.env.NODE_ENV,
+        domain: process.env.CUSTOM_DOMAIN || process.env.APP_URL
+      });
+    } catch (error) {
+      logger.error('خطأ في جلب حالة النظام:', error);
+      res.status(500).json({ error: 'خطأ في جلب حالة النظام' });
+    }
   });
 
-  // Error tracking middleware should be last
+  // مسارات سجلات الأخطاء (محمية بمصادقة المشرف)
+  app.get("/api/monitoring/logs", async (req, res) => {
+    try {
+      // قراءة آخر 100 سطر من ملف السجل
+      const logs = await fs.readFile('/tmp/socialpulse-combined.log', 'utf8');
+      const lastLogs = logs.split('\n').slice(-100).filter(Boolean).map(log => JSON.parse(log));
+
+      res.json(lastLogs);
+    } catch (error) {
+      logger.error('خطأ في جلب السجلات:', error);
+      res.status(500).json({ error: 'خطأ في جلب السجلات' });
+    }
+  });
+
+  app.get("/api/monitoring/errors", async (req, res) => {
+    try {
+      // قراءة آخر 50 خطأ من ملف سجل الأخطاء
+      const errors = await fs.readFile('/tmp/socialpulse-error.log', 'utf8');
+      const lastErrors = errors.split('\n').slice(-50).filter(Boolean).map(error => JSON.parse(error));
+
+      res.json(lastErrors);
+    } catch (error) {
+      logger.error('خطأ في جلب سجلات الأخطاء:', error);
+      res.status(500).json({ error: 'خطأ في جلب سجلات الأخطاء' });
+    }
+  });
+
+  // وسيط تتبع الأخطاء يجب أن يكون آخر شيء
   app.use(errorTracker);
 
   const httpServer = createServer(app);
