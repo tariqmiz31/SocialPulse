@@ -116,10 +116,7 @@ async function restoreBackup(filename: string) {
 
 // جدولة النسخ الاحتياطي التلقائي
 export function scheduleBackups() {
-  // إنشاء نسخة احتياطية كل 24 ساعة
-  const backupInterval = 24 * 60 * 60 * 1000; // 24 ساعة
-
-  setInterval(async () => {
+  const runBackup = async () => {
     try {
       logger.info('بدء النسخ الاحتياطي المجدول');
       await createBackup();
@@ -127,14 +124,27 @@ export function scheduleBackups() {
     } catch (error) {
       logger.error('فشل النسخ الاحتياطي المجدول:', error);
     }
-  }, backupInterval);
+  };
+
+  // حساب الوقت حتى منتصف الليل القادم
+  const now = new Date();
+  const nextMidnight = new Date(now);
+  nextMidnight.setHours(24, 0, 0, 0);
+  const timeUntilMidnight = nextMidnight.getTime() - now.getTime();
+
+  // جدولة النسخ الاحتياطي الأول في منتصف الليل القادم
+  setTimeout(() => {
+    runBackup();
+    // ثم تشغيل النسخ الاحتياطي كل 24 ساعة
+    setInterval(runBackup, 24 * 60 * 60 * 1000);
+  }, timeUntilMidnight);
 
   // إنشاء نسخة احتياطية أولية عند بدء التشغيل
   createBackup().catch(error => {
     logger.error('فشل النسخ الاحتياطي الأولي:', error);
   });
 
-  logger.info('تم تكوين جدولة النسخ الاحتياطي التلقائي');
+  logger.info(`تم تكوين جدولة النسخ الاحتياطي اليومي في الساعة 00:00`);
 }
 
 // تصدير الوظائف
