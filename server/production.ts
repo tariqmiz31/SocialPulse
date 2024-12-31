@@ -25,8 +25,8 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      connectSrc: ["'self'", `https://${CUSTOM_DOMAIN}`],
-      imgSrc: ["'self'", "data:", "blob:"],
+      connectSrc: ["'self'", `https://${CUSTOM_DOMAIN}`, "wss://*.silvariumsocial.com"],
+      imgSrc: ["'self'", "data:", "blob:", "https://*.silvariumsocial.com"],
       scriptSrc: ["'self'", "'unsafe-inline'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
       frameSrc: ["'self'"],
@@ -43,16 +43,23 @@ app.use(helmet({
   }
 }));
 
-// CORS configuration for main domain
+// CORS configuration for main domain and subdomains
 const allowedOrigins = [
   `https://${CUSTOM_DOMAIN}`,
   `https://www.${CUSTOM_DOMAIN}`,
+  `https://*.${CUSTOM_DOMAIN}`,
   process.env.APP_URL
 ].filter(Boolean);
 
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
+    if (!origin || allowedOrigins.some(allowed => {
+      if (allowed.includes('*')) {
+        const pattern = new RegExp(allowed.replace('*.', '.*\\.'));
+        return pattern.test(origin);
+      }
+      return origin === allowed;
+    })) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));
@@ -67,11 +74,9 @@ app.use(cors({
 try {
   app.listen(PORT, HOST, () => {
     log(`Production server running at http://${HOST}:${PORT}`);
-    log(`Main domain: ${process.env.APP_URL || CUSTOM_DOMAIN}`);
-    log('Security headers and CORS configured for main domain');
-
-    // Log allowed origins for verification
-    log(`Allowed origins: ${allowedOrigins.join(', ')}`);
+    log(`Main domain: ${CUSTOM_DOMAIN}`);
+    log('Security headers and CORS configured for domain and subdomains');
+    log(`Allowed origins pattern: ${allowedOrigins.join(', ')}`);
   });
 } catch (error) {
   console.error("Failed to start production server:", error);
