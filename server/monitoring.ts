@@ -3,6 +3,8 @@ import { performance } from "perf_hooks";
 import winston from 'winston';
 import * as promClient from 'prom-client';
 import logger from "./logConfig";
+import fs from 'fs/promises';
+import path from 'path';
 
 // Initialize Prometheus Registry
 const register = new promClient.Registry();
@@ -46,11 +48,18 @@ const activeConnections = new promClient.Gauge({
   help: 'Number of active connections'
 });
 
+const backupMetrics = new promClient.Gauge({
+  name: 'socialpulse_backup_status',
+  help: 'Status of the latest database backup',
+  labelNames: ['status']
+});
+
 register.registerMetric(httpRequestDuration);
 register.registerMetric(httpRequestTotal);
 register.registerMetric(apiLatency);
 register.registerMetric(memoryUsage);
 register.registerMetric(activeConnections);
+register.registerMetric(backupMetrics);
 
 // Performance monitoring middleware
 export const performanceMonitor = (req: Request, res: Response, next: NextFunction) => {
@@ -142,12 +151,66 @@ const memoryMonitor = () => {
   setTimeout(memoryMonitor, 300000);
 };
 
+// Backup monitoring
+async function monitorBackups() {
+  try {
+    const backupDir = '/tmp/backups';
+    const files = await fs.readdir(backupDir);
+    const backupFiles = files.filter(file => file.startsWith('backup-') && file.endsWith('.sql'));
+
+    if (backupFiles.length > 0) {
+      // Get the latest backup file
+      const latestBackup = backupFiles.sort().reverse()[0];
+      const stats = await fs.stat(path.join(backupDir, latestBackup));
+      const backupAge = Date.now() - stats.mtime.getTime();
+
+      // Update backup status metric (1 for success, 0 for failure)
+      backupMetrics.labels('success').set(backupAge < 24 * 60 * 60 * 1000 ? 1 : 0);
+
+      logger.info('Backup status updated:', {
+        latestBackup,
+        age: `${Math.round(backupAge / (60 * 60 * 1000))} hours`
+      });
+    } else {
+      backupMetrics.labels('success').set(0);
+      logger.warn('No backup files found');
+    }
+  } catch (error) {
+    backupMetrics.labels('success').set(0);
+    logger.error('Error monitoring backups:', error);
+  }
+
+  // Check backup status every hour
+  setTimeout(monitorBackups, 60 * 60 * 1000);
+}
+
 // Health check data collector
 export const getHealthData = async () => {
   const metrics = await register.getMetricsAsJSON();
   const uptime = process.uptime();
   const memory = process.memoryUsage();
   const loadavg = require('os').loadavg();
+
+  // Get backup status
+  let backupStatus = "unknown";
+  try {
+    const backupDir = '/tmp/backups';
+    const files = await fs.readdir(backupDir);
+    const backupFiles = files.filter(file => file.startsWith('backup-') && file.endsWith('.sql'));
+
+    if (backupFiles.length > 0) {
+      const latestBackup = backupFiles.sort().reverse()[0];
+      const stats = await fs.stat(path.join(backupDir, latestBackup));
+      const backupAge = Date.now() - stats.mtime.getTime();
+
+      backupStatus = backupAge < 24 * 60 * 60 * 1000 ? "healthy" : "stale";
+    } else {
+      backupStatus = "missing";
+    }
+  } catch (error) {
+    backupStatus = "error";
+    logger.error('Error checking backup status:', error);
+  }
 
   return {
     status: 'healthy',
@@ -164,6 +227,9 @@ export const getHealthData = async () => {
       '1m': loadavg[0],
       '5m': loadavg[1],
       '15m': loadavg[2]
+    },
+    backup: {
+      status: backupStatus
     },
     metrics,
     timestamp: new Date().toISOString()
@@ -216,5 +282,6 @@ export const apiMonitor = (apiName: string) => {
 // Start monitoring
 export const startMonitoring = () => {
   memoryMonitor();
+  monitorBackups();
   logger.info('Monitoring system started');
 };

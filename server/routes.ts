@@ -3,6 +3,7 @@ import { createServer, type Server } from "http";
 import { db } from "@db";
 import { performanceMonitor, errorTracker, metricsHandler, getHealthData, apiMonitor, startMonitoring } from "./monitoring";
 import { setupAuth } from "./auth";
+import { createBackup, restoreBackup, scheduleBackups } from "./backup";
 import rateLimit from "express-rate-limit";
 import helmet from "helmet";
 import cors from "cors";
@@ -10,7 +11,7 @@ import compression from "compression";
 import logger from "./logConfig";
 
 export function registerRoutes(app: Express): Server {
-  // Enhanced security configuration
+  // تكوين الأمان المحسّن
   app.use(helmet({
     contentSecurityPolicy: {
       directives: {
@@ -26,7 +27,7 @@ export function registerRoutes(app: Express): Server {
     }
   }));
 
-  // Enhanced CORS configuration
+  // تكوين CORS المحسّن
   const allowedDomains = [
     process.env.APP_URL,
     process.env.CUSTOM_DOMAIN,
@@ -51,30 +52,51 @@ export function registerRoutes(app: Express): Server {
       if (isAllowed) {
         callback(null, true);
       } else {
-        callback(new Error('Not allowed by CORS'));
+        callback(new Error('غير مسموح به بواسطة CORS'));
       }
     },
     credentials: true
   }));
 
-  // Enable response compression
+  // تمكين ضغط الاستجابة
   app.use(compression());
 
-  // Rate limiting configuration
+  // تكوين تحديد معدل الطلبات
   const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100 // limit each IP to 100 requests per windowMs
+    windowMs: 15 * 60 * 1000, // 15 دقيقة
+    max: 100 // حد لكل IP
   });
 
   app.use(limiter);
 
-  // Setup authentication
+  // إعداد المصادقة
   setupAuth(app);
 
-  // Enable monitoring middleware
+  // تمكين وسائط المراقبة
   app.use(performanceMonitor);
 
-  // Monitoring routes
+  // نقاط نهاية إدارة النسخ الاحتياطي
+  app.post("/api/backup/create", async (req, res) => {
+    try {
+      const result = await createBackup();
+      res.json(result);
+    } catch (error) {
+      logger.error('خطأ في إنشاء النسخة الاحتياطية:', error);
+      res.status(500).json({ error: 'فشل إنشاء النسخة الاحتياطية' });
+    }
+  });
+
+  app.post("/api/backup/restore/:filename", async (req, res) => {
+    try {
+      const result = await restoreBackup(req.params.filename);
+      res.json(result);
+    } catch (error) {
+      logger.error('خطأ في استعادة النسخة الاحتياطية:', error);
+      res.status(500).json({ error: 'فشل استعادة النسخة الاحتياطية' });
+    }
+  });
+
+  // طرق المراقبة
   app.get("/api/monitoring/metrics", metricsHandler);
 
   app.get("/api/monitoring/health", async (_req, res) => {
@@ -82,32 +104,33 @@ export function registerRoutes(app: Express): Server {
       const healthData = await getHealthData();
       res.json(healthData);
     } catch (error) {
-      logger.error('Error fetching health data:', error);
-      res.status(500).json({ error: 'Error fetching health data' });
+      logger.error('خطأ في جلب بيانات الصحة:', error);
+      res.status(500).json({ error: 'خطأ في جلب بيانات الصحة' });
     }
   });
 
   app.get("/api/monitoring/status", async (_req, res) => {
     try {
-      const dbStatus = db ? "connected" : "disconnected";
+      const dbStatus = db ? "متصل" : "غير متصل";
 
       res.json({
-        server: "running",
+        server: "يعمل",
         database: dbStatus,
         environment: process.env.NODE_ENV,
         domain: process.env.CUSTOM_DOMAIN || process.env.APP_URL
       });
     } catch (error) {
-      logger.error('Error fetching system status:', error);
-      res.status(500).json({ error: 'Error fetching system status' });
+      logger.error('خطأ في جلب حالة النظام:', error);
+      res.status(500).json({ error: 'خطأ في جلب حالة النظام' });
     }
   });
 
-  // System and error monitoring
+  // مراقبة النظام والأخطاء
   app.use(errorTracker);
 
-  // Start monitoring
+  // بدء المراقبة والنسخ الاحتياطي التلقائي
   startMonitoring();
+  scheduleBackups();
 
   const httpServer = createServer(app);
   return httpServer;
