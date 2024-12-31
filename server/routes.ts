@@ -9,20 +9,22 @@ import helmet from "helmet";
 import cors from "cors";
 import compression from "compression";
 import logger from "./logConfig";
-import fs from 'fs/promises'; // Added import for file system promises
-import path from 'path';     // Added import for path manipulation
-
+import fs from 'fs/promises';
+import path from 'path';
+import express from 'express';
 
 export function registerRoutes(app: Express): Server {
-  // تكوين الأمان المحسّن
+  // تكوين الأمان المحسّن مع دعم CDN
   app.use(helmet({
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
         connectSrc: ["'self'", process.env.APP_URL || "", process.env.CUSTOM_DOMAIN ? `*.${process.env.CUSTOM_DOMAIN}` : ""].filter(Boolean),
-        imgSrc: ["'self'", "data:", "blob:"],
-        scriptSrc: ["'self'", "'unsafe-inline'"],
-        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", "data:", "blob:", "*.${process.env.CUSTOM_DOMAIN}", "cdn.${process.env.CUSTOM_DOMAIN}"].filter(Boolean),
+        scriptSrc: ["'self'", "'unsafe-inline'", "cdn.${process.env.CUSTOM_DOMAIN}"].filter(Boolean),
+        styleSrc: ["'self'", "'unsafe-inline'", "cdn.${process.env.CUSTOM_DOMAIN}"].filter(Boolean),
+        fontSrc: ["'self'", "cdn.${process.env.CUSTOM_DOMAIN}"].filter(Boolean),
+        mediaSrc: ["'self'", "cdn.${process.env.CUSTOM_DOMAIN}"].filter(Boolean),
         frameSrc: ["'self'"],
         objectSrc: ["'none'"],
         upgradeInsecureRequests: []
@@ -30,11 +32,12 @@ export function registerRoutes(app: Express): Server {
     }
   }));
 
-  // تكوين CORS المحسّن
+  // تكوين CORS المحسّن مع دعم CDN
   const allowedDomains = [
     process.env.APP_URL,
     process.env.CUSTOM_DOMAIN,
     process.env.CUSTOM_DOMAIN ? `*.${process.env.CUSTOM_DOMAIN}` : null,
+    process.env.CUSTOM_DOMAIN ? `cdn.${process.env.CUSTOM_DOMAIN}` : null
   ].filter(Boolean);
 
   app.use(cors({
@@ -58,16 +61,32 @@ export function registerRoutes(app: Express): Server {
         callback(new Error('غير مسموح به بواسطة CORS'));
       }
     },
-    credentials: true
+    credentials: true,
+    maxAge: 86400
   }));
 
-  // تمكين ضغط الاستجابة
-  app.use(compression());
+  // تمكين ضغط الاستجابة مع إعدادات CDN
+  app.use(compression({
+    level: 6,
+    threshold: 1024,
+    filter: (req) => {
+      const userAgent = req.headers['user-agent'] || '';
+      if (userAgent.includes('CloudFront') || userAgent.includes('Cloudflare')) {
+        return false;
+      }
+      return compression.filter(req);
+    }
+  }));
 
   // تكوين تحديد معدل الطلبات
   const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 دقيقة
-    max: 100 // حد لكل IP
+    windowMs: 15 * 60 * 1000,
+    max: 100,
+    skip: (req) => {
+      // Skip rate limiting for CDN requests
+      const userAgent = req.headers['user-agent'] || '';
+      return userAgent.includes('CloudFront') || userAgent.includes('Cloudflare');
+    }
   });
 
   app.use(limiter);
@@ -77,6 +96,13 @@ export function registerRoutes(app: Express): Server {
 
   // تمكين وسائط المراقبة
   app.use(performanceMonitor);
+
+  // تكوين التخزين المؤقت للملفات الثابتة
+  app.use('/static', express.static('public', {
+    maxAge: '1y',
+    etag: true,
+    lastModified: true
+  }));
 
   // نقاط نهاية إدارة النسخ الاحتياطي
   app.post("/api/backup/create", async (req, res) => {
@@ -132,9 +158,8 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
-  // طرق المراقبة
+  // نقاط نهاية API للمراقبة
   app.get("/api/monitoring/metrics", metricsHandler);
-
   app.get("/api/monitoring/health", async (_req, res) => {
     try {
       const healthData = await getHealthData();
@@ -144,7 +169,6 @@ export function registerRoutes(app: Express): Server {
       res.status(500).json({ error: 'خطأ في جلب بيانات الصحة' });
     }
   });
-
   app.get("/api/monitoring/status", async (_req, res) => {
     try {
       const dbStatus = db ? "متصل" : "غير متصل";

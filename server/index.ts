@@ -18,42 +18,83 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
-// Security middleware
+// CDN and Security Headers
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
       connectSrc: ["'self'", process.env.APP_URL || "", process.env.CUSTOM_DOMAIN ? `*.${process.env.CUSTOM_DOMAIN}` : ""].filter(Boolean),
-      imgSrc: ["'self'", "data:", "blob:"],
-      scriptSrc: ["'self'", "'unsafe-inline'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", "data:", "blob:", "*.${process.env.CUSTOM_DOMAIN}", "cdn.${process.env.CUSTOM_DOMAIN}"].filter(Boolean),
+      scriptSrc: ["'self'", "'unsafe-inline'", "cdn.${process.env.CUSTOM_DOMAIN}"].filter(Boolean),
+      styleSrc: ["'self'", "'unsafe-inline'", "cdn.${process.env.CUSTOM_DOMAIN}"].filter(Boolean),
+      fontSrc: ["'self'", "cdn.${process.env.CUSTOM_DOMAIN}"].filter(Boolean),
+      mediaSrc: ["'self'", "cdn.${process.env.CUSTOM_DOMAIN}"].filter(Boolean),
       frameSrc: ["'self'"],
       objectSrc: ["'none'"],
       upgradeInsecureRequests: []
     }
+  },
+  crossOriginEmbedderPolicy: false,
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+  dnsPrefetchControl: { allow: true }
+}));
+
+// Enable compression with CDN-friendly settings
+app.use(compression({
+  level: 6,
+  threshold: 1024,
+  filter: (req) => {
+    // Don't compress if client is a CDN that already handles compression
+    const userAgent = req.headers['user-agent'] || '';
+    if (userAgent.includes('CloudFront') || userAgent.includes('Cloudflare')) {
+      return false;
+    }
+    return compression.filter(req);
   }
 }));
 
-// Enable compression
-app.use(compression());
-
-// Configure CORS
+// Configure CORS with CDN support
 const allowedOrigins = [
   process.env.APP_URL,
   process.env.CUSTOM_DOMAIN,
-  process.env.CUSTOM_DOMAIN ? `*.${process.env.CUSTOM_DOMAIN}` : null
+  process.env.CUSTOM_DOMAIN ? `*.${process.env.CUSTOM_DOMAIN}` : null,
+  process.env.CUSTOM_DOMAIN ? `cdn.${process.env.CUSTOM_DOMAIN}` : null
 ].filter(Boolean);
 
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
+    if (!origin || allowedOrigins.some(allowed => {
+      if (allowed.startsWith('*.')) {
+        const domain = allowed.slice(2);
+        return origin.endsWith(domain);
+      }
+      return origin === allowed;
+    })) {
       callback(null, true);
       return;
     }
     callback(new Error('Not allowed by CORS'));
   },
-  credentials: true
+  credentials: true,
+  maxAge: 86400 // CORS preflight cache for 24 hours
 }));
+
+// Cache Control Headers for static assets
+app.use((req, res, next) => {
+  // Skip for API routes
+  if (req.path.startsWith('/api/')) {
+    return next();
+  }
+
+  // Cache static assets
+  if (req.method === 'GET' && (
+    req.path.match(/\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$/)
+  )) {
+    res.setHeader('Cache-Control', 'public, max-age=31536000'); // 1 year
+    res.setHeader('Vary', 'Accept-Encoding');
+  }
+  next();
+});
 
 // Add performance monitoring middleware
 app.use(performanceMonitor);
@@ -116,6 +157,7 @@ app.use(performanceMonitor);
       logger.info(`Main domain: ${domain}`);
 
       if (domain) {
+        logger.info(`Supporting CDN on cdn.${domain}`);
         logger.info(`Supporting subdomains for: *.${domain}`);
       }
     });
