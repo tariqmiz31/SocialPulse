@@ -4,11 +4,25 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { createServer } from "http";
+import helmet from "helmet";
+import cors from "cors";
+import compression from "compression";
 
 // Create Express app
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
+
+// Security middleware
+app.use(helmet());
+app.use(compression());
+
+// Configure CORS for our domain
+const allowedOrigins = [process.env.APP_URL, process.env.CUSTOM_DOMAIN].filter(Boolean);
+app.use(cors({
+  origin: allowedOrigins,
+  credentials: true
+}));
 
 // Request logging middleware
 app.use((req, res, next) => {

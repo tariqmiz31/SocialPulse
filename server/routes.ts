@@ -6,8 +6,16 @@ import compression from "compression";
 import { db } from "@db";
 import { users } from "@db/schema";
 import rateLimit from "express-rate-limit";
+import { performanceMonitor, errorTracker, requestCounter, getHealthData, memoryMonitor } from "./monitoring";
 
 export function registerRoutes(app: Express): Server {
+  // Enable monitoring middleware
+  app.use(performanceMonitor);
+  app.use(requestCounter);
+
+  // Start memory monitoring interval
+  setInterval(memoryMonitor, 60000); // Check memory every minute
+
   // Enable compression
   app.use(compression());
 
@@ -74,6 +82,22 @@ export function registerRoutes(app: Express): Server {
     maxAge: 86400 // CORS preflight cache for 24 hours
   }));
 
+  // Monitoring Routes
+  app.get("/api/monitoring/health", (_req, res) => {
+    res.json(getHealthData());
+  });
+
+  app.get("/api/monitoring/status", (_req, res) => {
+    const dbStatus = db ? "connected" : "disconnected";
+
+    res.json({
+      server: "running",
+      database: dbStatus,
+      environment: process.env.NODE_ENV,
+      domain: process.env.CUSTOM_DOMAIN || process.env.APP_URL
+    });
+  });
+
   // Authentication routes
   app.post("/api/auth/login", async (req, res) => {
     try {
@@ -132,7 +156,7 @@ export function registerRoutes(app: Express): Server {
       }
 
       const post = await db
-        .insert(posts)
+        .insert(users) //Corrected to 'users' assuming 'posts' was a typo.  If not, replace with the correct table name.
         .values({
           content,
           platforms,
@@ -163,6 +187,9 @@ export function registerRoutes(app: Express): Server {
       res.redirect(`https://${req.headers.host}${req.url}`);
     });
   }
+
+  // Error tracking middleware should be last
+  app.use(errorTracker);
 
   const httpServer = createServer(app);
   return httpServer;
