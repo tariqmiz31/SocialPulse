@@ -77,7 +77,13 @@ app.use((req, res, next) => {
     const PORT = parseInt(process.env.PORT || "5000", 10);
     server.listen(PORT, "0.0.0.0", () => {
       log(`Server running on port ${PORT}`);
-      log(`Custom domain: ${process.env.APP_URL || 'Not configured'}`);
+      log(`Main domain: ${process.env.APP_URL || 'Not configured'}`);
+
+      // Log subdomain configuration
+      const mainDomain = process.env.APP_URL?.replace('https://', '');
+      if (mainDomain) {
+        log(`Supporting subdomains for: *.${mainDomain}`);
+      }
     });
   } catch (error) {
     console.error("Failed to start the server:", error);

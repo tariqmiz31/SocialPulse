@@ -35,10 +35,15 @@ app.use(helmet({
     }
   },
   crossOriginEmbedderPolicy: false,
-  crossOriginResourcePolicy: { policy: "cross-origin" }
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+  hsts: {
+    maxAge: 31536000,
+    includeSubDomains: true,
+    preload: true
+  }
 }));
 
-// CORS configuration for custom domain
+// CORS configuration for main domain
 const allowedOrigins = [
   `https://${CUSTOM_DOMAIN}`,
   `https://www.${CUSTOM_DOMAIN}`,
@@ -62,8 +67,8 @@ app.use(cors({
 try {
   app.listen(PORT, HOST, () => {
     log(`Production server running at http://${HOST}:${PORT}`);
-    log(`Custom domain: ${process.env.APP_URL || CUSTOM_DOMAIN}`);
-    log('Security headers and CORS configured for custom domain');
+    log(`Main domain: ${process.env.APP_URL || CUSTOM_DOMAIN}`);
+    log('Security headers and CORS configured for main domain');
 
     // Log allowed origins for verification
     log(`Allowed origins: ${allowedOrigins.join(', ')}`);

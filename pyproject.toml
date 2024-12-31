@@ -21,4 +21,5 @@ dependencies = [
     "asyncio>=3.4.3",
     "aiohttp>=3.11.11",
     "gunicorn>=23.0.0",
+    "logging>=0.4.9.6",
 ]

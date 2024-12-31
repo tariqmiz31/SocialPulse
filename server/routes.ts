@@ -6,16 +6,16 @@ import { db } from "@db";
 import { posts } from "@db/schema";
 
 export function registerRoutes(app: Express): Server {
-  // Enhanced security middlewares with custom domain support
+  // Enhanced security middlewares with subdomain support
   app.use(helmet({
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        connectSrc: ["'self'", "https://silvariumsocial.com"],
-        imgSrc: ["'self'", "data:", "blob:"],
+        connectSrc: ["'self'", "*.silvariumsocial.com"],
+        imgSrc: ["'self'", "data:", "blob:", "*.silvariumsocial.com"],
         scriptSrc: ["'self'", "'unsafe-inline'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
-        frameSrc: ["'self'"],
+        frameSrc: ["'self'", "*.silvariumsocial.com"],
         objectSrc: ["'none'"],
         upgradeInsecureRequests: []
       }
@@ -23,26 +23,32 @@ export function registerRoutes(app: Express): Server {
     crossOriginEmbedderPolicy: false,
     crossOriginResourcePolicy: { policy: "cross-origin" },
     dnsPrefetchControl: { allow: false },
-    referrerPolicy: { policy: "strict-origin-when-cross-origin" },
-    hsts: {
-      maxAge: 31536000,
-      includeSubDomains: true,
-      preload: true
-    },
-    noSniff: true,
-    hidePoweredBy: true
+    referrerPolicy: { policy: "strict-origin-when-cross-origin" }
   }));
 
-  // Enhanced CORS configuration for custom domain
-  const allowedOrigins = [
-    "https://silvariumsocial.com",
-    "https://www.silvariumsocial.com",
+  // Enhanced CORS configuration with wildcard subdomain support
+  const allowedDomains = [
+    "silvariumsocial.com",
+    "*.silvariumsocial.com",
     process.env.APP_URL,
   ].filter(Boolean);
 
   app.use(cors({
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin)) {
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+
+      const isAllowed = allowedDomains.some(domain => {
+        if (domain.startsWith("*.")) {
+          const baseDomain = domain.slice(2);
+          return origin.endsWith(baseDomain);
+        }
+        return origin === `https://${domain}`;
+      });
+
+      if (isAllowed) {
         callback(null, true);
       } else {
         callback(new Error('Not allowed by CORS'));
@@ -54,12 +60,16 @@ export function registerRoutes(app: Express): Server {
     maxAge: 86400 // CORS preflight cache for 24 hours
   }));
 
-  // Enhanced health check endpoint with domain info
-  app.get("/api/health", (_req, res) => {
+  // Health check endpoint with subdomain info
+  app.get("/api/health", (req, res) => {
+    const host = req.get('host') || '';
+    const subdomain = host.split('.')[0];
+
     res.json({ 
       status: "healthy",
       domain: process.env.APP_URL,
-      customDomain: "silvariumsocial.com",
+      host: host,
+      subdomain: subdomain !== 'www' ? subdomain : 'root',
       timestamp: new Date().toISOString(),
       environment: process.env.NODE_ENV
     });
