@@ -1,5 +1,53 @@
 #!/bin/bash
 
+# استيراد السكربت المشترك
+source ./scripts/ci-deploy.sh
+
+# إضافة خطوات إضافية خاصة بالنشر على Replit
+echo "تحديث تكوين Replit..."
+
+# ضمان وجود التكوينات المطلوبة
+if [ ! -f ".replit" ]; then
+  echo "إنشاء ملف .replit..."
+  cat > .replit << EOL
+run = "npm run start"
+language = "nodejs"
+hidden = [".config", "package-lock.json"]
+
+[packager]
+language = "nodejs"
+  [packager.features]
+  enabledForHosting = true
+  packageSearch = true
+
+[env]
+XDG_CONFIG_HOME = "/home/runner/.config"
+
+[nix]
+channel = "stable-21_11"
+
+[gitHubImport]
+requiredFiles = [".replit", "replit.nix", ".config"]
+EOL
+fi
+
+# تحديث replit.nix إذا لزم الأمر
+if [ ! -f "replit.nix" ]; then
+  echo "إنشاء ملف replit.nix..."
+  cat > replit.nix << EOL
+{ pkgs }: {
+    deps = [
+        pkgs.nodejs-20_x
+        pkgs.nodePackages.typescript
+        pkgs.nodePackages.pm2
+        pkgs.postgresql
+    ];
+}
+EOL
+fi
+
+echo "تم اكتمال النشر على Replit!"
+
 echo "بدء عملية النشر..."
 
 # التحقق من المتغيرات البيئية الضرورية
@@ -28,6 +76,15 @@ pm2 delete socialpulse 2>/dev/null || true
 
 # تنظيف السجلات القديمة
 rm -f /tmp/socialpulse-err.log /tmp/socialpulse-out.log
+
+# التحقق من الاتصال بقاعدة البيانات
+echo "التحقق من الاتصال بقاعدة البيانات..."
+DB_CHECK_SCRIPT="const { db } = require('./dist/db/index.js'); async function checkDb() { try { await db.execute(sql\`SELECT 1\`); console.log('تم الاتصال بقاعدة البيانات بنجاح'); process.exit(0); } catch (error) { console.error('فشل الاتصال بقاعدة البيانات:', error); process.exit(1); } } checkDb();"
+
+if ! node -e "$DB_CHECK_SCRIPT"; then
+    echo "خطأ: فشل الاتصال بقاعدة البيانات"
+    exit 1
+fi
 
 # بدء التطبيق باستخدام PM2
 echo "بدء التطبيق..."

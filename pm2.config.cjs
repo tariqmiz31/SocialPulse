@@ -13,7 +13,12 @@ module.exports = {
         PORT: 5000,
         APP_URL: process.env.APP_URL || "https://silvariumsocial.com",
         CUSTOM_DOMAIN: process.env.CUSTOM_DOMAIN,
-        DATABASE_URL: process.env.DATABASE_URL
+        DATABASE_URL: process.env.DATABASE_URL,
+        PGHOST: process.env.PGHOST,
+        PGPORT: process.env.PGPORT,
+        PGUSER: process.env.PGUSER,
+        PGPASSWORD: process.env.PGPASSWORD,
+        PGDATABASE: process.env.PGDATABASE
       },
       env_development: {
         NODE_ENV: "development",
