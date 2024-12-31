@@ -2,6 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { db } from "@db";
 import { performanceMonitor, errorTracker, metricsHandler, getHealthData } from "./monitoring";
+import { setupAuth } from "./auth";
 import rateLimit from "express-rate-limit";
 import helmet from "helmet";
 import cors from "cors";
@@ -10,21 +11,24 @@ import logger, { formatError } from "./logConfig";
 import fs from 'fs/promises';
 
 export function registerRoutes(app: Express): Server {
-  // تمكين وسيط المراقبة
+  // Set up authentication
+  setupAuth(app);
+
+  // Enable monitoring middleware
   app.use(performanceMonitor);
 
-  // تمكين ضغط البيانات
+  // Enable compression
   app.use(compression());
 
-  // تكوين Rate Limiting
+  // Configure rate limiting
   const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 دقيقة
-    max: 100 // الحد الأقصى لكل IP
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100 // limit each IP
   });
 
   app.use(limiter);
 
-  // تكوين الأمان المحسن مع دعم النطاقات الفرعية
+  // Configure enhanced security with subdomain support
   app.use(helmet({
     contentSecurityPolicy: {
       directives: {
@@ -40,7 +44,7 @@ export function registerRoutes(app: Express): Server {
     }
   }));
 
-  // تكوين CORS المحسن مع دعم النطاقات الفرعية
+  // Configure enhanced CORS with subdomain support
   const allowedDomains = [
     process.env.APP_URL,
     process.env.CUSTOM_DOMAIN,
@@ -71,7 +75,7 @@ export function registerRoutes(app: Express): Server {
     credentials: true
   }));
 
-  // مسارات المراقبة
+  // Monitoring routes
   app.get("/api/monitoring/metrics", metricsHandler);
 
   app.get("/api/monitoring/health", async (_req, res) => {
@@ -100,10 +104,10 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
-  // مسارات سجلات الأخطاء (محمية بمصادقة المشرف)
+  // Log routes (protected by admin authentication)
   app.get("/api/monitoring/logs", async (req, res) => {
     try {
-      // قراءة آخر 100 سطر من ملف السجل
+      // Read the last 100 lines of the log file
       const logs = await fs.readFile('/tmp/socialpulse-combined.log', 'utf8');
       const lastLogs = logs.split('\n').slice(-100).filter(Boolean).map(log => JSON.parse(log));
 
@@ -116,7 +120,7 @@ export function registerRoutes(app: Express): Server {
 
   app.get("/api/monitoring/errors", async (req, res) => {
     try {
-      // قراءة آخر 50 خطأ من ملف سجل الأخطاء
+      // Read the last 50 errors from the error log file
       const errors = await fs.readFile('/tmp/socialpulse-error.log', 'utf8');
       const lastErrors = errors.split('\n').slice(-50).filter(Boolean).map(error => JSON.parse(error));
 
@@ -127,7 +131,7 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
-  // وسيط تتبع الأخطاء يجب أن يكون آخر شيء
+  // Error tracking middleware should be the last thing
   app.use(errorTracker);
 
   const httpServer = createServer(app);
