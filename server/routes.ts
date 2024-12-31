@@ -2,10 +2,14 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import helmet from "helmet";
 import cors from "cors";
+import compression from "compression";
 import { db } from "@db";
 import { posts } from "@db/schema";
 
 export function registerRoutes(app: Express): Server {
+  // Enable compression
+  app.use(compression());
+
   // Enhanced security middlewares with subdomain support
   app.use(helmet({
     contentSecurityPolicy: {
