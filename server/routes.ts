@@ -8,10 +8,9 @@ import helmet from "helmet";
 import cors from "cors";
 import compression from "compression";
 import logger from "./logConfig";
-import fs from 'fs/promises';
 
 export function registerRoutes(app: Express): Server {
-  // تكوين الأمان المحسّن
+  // Enhanced security configuration
   app.use(helmet({
     contentSecurityPolicy: {
       directives: {
@@ -27,7 +26,7 @@ export function registerRoutes(app: Express): Server {
     }
   }));
 
-  // تكوين CORS المحسّن
+  // Enhanced CORS configuration
   const allowedDomains = [
     process.env.APP_URL,
     process.env.CUSTOM_DOMAIN,
@@ -52,30 +51,30 @@ export function registerRoutes(app: Express): Server {
       if (isAllowed) {
         callback(null, true);
       } else {
-        callback(new Error('غير مسموح به بواسطة CORS'));
+        callback(new Error('Not allowed by CORS'));
       }
     },
     credentials: true
   }));
 
-  // تمكين ضغط الاستجابة
+  // Enable response compression
   app.use(compression());
 
-  // تكوين تحديد معدل الطلبات
+  // Rate limiting configuration
   const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 دقيقة
-    max: 100 // حد لكل IP
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100 // limit each IP to 100 requests per windowMs
   });
 
   app.use(limiter);
 
-  // إعداد المصادقة
+  // Setup authentication
   setupAuth(app);
 
-  // تمكين وسائط المراقبة
+  // Enable monitoring middleware
   app.use(performanceMonitor);
 
-  // طرق المراقبة
+  // Monitoring routes
   app.get("/api/monitoring/metrics", metricsHandler);
 
   app.get("/api/monitoring/health", async (_req, res) => {
@@ -83,58 +82,31 @@ export function registerRoutes(app: Express): Server {
       const healthData = await getHealthData();
       res.json(healthData);
     } catch (error) {
-      logger.error('خطأ في جلب بيانات الصحة:', error);
-      res.status(500).json({ error: 'خطأ في جلب بيانات الصحة' });
+      logger.error('Error fetching health data:', error);
+      res.status(500).json({ error: 'Error fetching health data' });
     }
   });
 
   app.get("/api/monitoring/status", async (_req, res) => {
     try {
-      const dbStatus = db ? "متصل" : "غير متصل";
+      const dbStatus = db ? "connected" : "disconnected";
 
       res.json({
-        server: "يعمل",
+        server: "running",
         database: dbStatus,
         environment: process.env.NODE_ENV,
         domain: process.env.CUSTOM_DOMAIN || process.env.APP_URL
       });
     } catch (error) {
-      logger.error('خطأ في جلب حالة النظام:', error);
-      res.status(500).json({ error: 'خطأ في جلب حالة النظام' });
+      logger.error('Error fetching system status:', error);
+      res.status(500).json({ error: 'Error fetching system status' });
     }
   });
 
-  // Log routes (protected by admin authentication)
-  app.get("/api/monitoring/logs", async (req, res) => {
-    try {
-      // Read the last 100 lines of the log file
-      const logs = await fs.readFile('/tmp/socialpulse-combined.log', 'utf8');
-      const lastLogs = logs.split('\n').slice(-100).filter(Boolean).map(log => JSON.parse(log));
-
-      res.json(lastLogs);
-    } catch (error) {
-      logger.error('خطأ في جلب السجلات:', error);
-      res.status(500).json({ error: 'خطأ في جلب السجلات' });
-    }
-  });
-
-  app.get("/api/monitoring/errors", async (req, res) => {
-    try {
-      // Read the last 50 errors from the error log file
-      const errors = await fs.readFile('/tmp/socialpulse-error.log', 'utf8');
-      const lastErrors = errors.split('\n').slice(-50).filter(Boolean).map(error => JSON.parse(error));
-
-      res.json(lastErrors);
-    } catch (error) {
-      logger.error('خطأ في جلب سجلات الأخطاء:', error);
-      res.status(500).json({ error: 'خطأ في جلب سجلات الأخطاء' });
-    }
-  });
-
-  // مراقبة النظام والأخطاء
+  // System and error monitoring
   app.use(errorTracker);
 
-  // بدء المراقبة
+  // Start monitoring
   startMonitoring();
 
   const httpServer = createServer(app);

@@ -2,85 +2,48 @@ import { Request, Response, NextFunction } from "express";
 import { performance } from "perf_hooks";
 import winston from 'winston';
 import * as promClient from 'prom-client';
-import { log } from "./vite";
+import logger from "./logConfig";
 
-// تكوين Winston logger مع تنسيق محسن
-const logger = winston.createLogger({
-  level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
-  format: winston.format.combine(
-    winston.format.timestamp({
-      format: 'YYYY-MM-DD HH:mm:ss'
-    }),
-    winston.format.errors({ stack: true }),
-    winston.format.splat(),
-    winston.format.json()
-  ),
-  defaultMeta: { service: 'socialpulse' },
-  transports: [
-    new winston.transports.File({ 
-      filename: '/tmp/socialpulse-error.log',
-      level: 'error',
-      maxsize: 5242880, // 5MB
-      maxFiles: 5,
-    }),
-    new winston.transports.File({ 
-      filename: '/tmp/socialpulse-combined.log',
-      maxsize: 5242880, // 5MB
-      maxFiles: 5,
-    })
-  ]
-});
-
-// إضافة تسجيل في وحدة التحكم في بيئة التطوير
-if (process.env.NODE_ENV !== 'production') {
-  logger.add(new winston.transports.Console({
-    format: winston.format.combine(
-      winston.format.colorize(),
-      winston.format.simple()
-    )
-  }));
-}
-
-// تهيئة مقاييس Prometheus
+// Initialize Prometheus Registry
 const register = new promClient.Registry();
 
-// المقاييس الافتراضية للنظام
+// Default metrics
 promClient.collectDefaultMetrics({ 
   register,
   prefix: 'socialpulse_',
   labels: { service: 'web' }
 });
 
-// مقاييس مخصصة
+// Custom metrics
 const httpRequestDuration = new promClient.Histogram({
   name: 'socialpulse_http_request_duration_seconds',
-  help: 'مدة طلبات HTTP بالثواني',
+  help: 'Duration of HTTP requests in seconds',
   labelNames: ['method', 'route', 'status_code'],
   buckets: [0.1, 0.3, 0.5, 0.7, 1, 2, 3, 5, 10]
 });
 
 const httpRequestTotal = new promClient.Counter({
   name: 'socialpulse_http_requests_total',
-  help: 'إجمالي عدد طلبات HTTP',
+  help: 'Total number of HTTP requests',
   labelNames: ['method', 'route', 'status_code']
 });
 
 const apiLatency = new promClient.Histogram({
   name: 'socialpulse_api_latency_seconds',
-  help: 'زمن استجابة API بالثواني',
+  help: 'API response time in seconds',
   labelNames: ['api_name'],
   buckets: [0.1, 0.5, 1, 2, 5]
 });
 
 const memoryUsage = new promClient.Gauge({
   name: 'socialpulse_memory_usage_bytes',
-  help: 'استخدام الذاكرة بالبايت',
+  help: 'Memory usage in bytes',
   labelNames: ['type']
 });
 
 const activeConnections = new promClient.Gauge({
   name: 'socialpulse_active_connections',
-  help: 'عدد الاتصالات النشطة'
+  help: 'Number of active connections'
 });
 
 register.registerMetric(httpRequestDuration);
@@ -89,21 +52,20 @@ register.registerMetric(apiLatency);
 register.registerMetric(memoryUsage);
 register.registerMetric(activeConnections);
 
-// وسيط مراقبة الأداء
+// Performance monitoring middleware
 export const performanceMonitor = (req: Request, res: Response, next: NextFunction) => {
   const start = performance.now();
   const path = req.path;
 
-  // تتبع وقت الاستجابة
   res.on('finish', () => {
     const duration = performance.now() - start;
     const status = res.statusCode;
 
-    // تحديث مقاييس Prometheus
+    // Update Prometheus metrics
     httpRequestDuration.labels(req.method, path, status.toString()).observe(duration / 1000);
     httpRequestTotal.labels(req.method, path, status.toString()).inc();
 
-    // تسجيل تفاصيل الطلب
+    // Log request details
     logger.info({
       method: req.method,
       path: path,
@@ -113,10 +75,10 @@ export const performanceMonitor = (req: Request, res: Response, next: NextFuncti
       ip: req.ip
     });
 
-    // تتبع الطلبات البطيئة (أكثر من 1000ms)
+    // Track slow requests (more than 1000ms)
     if (duration > 1000) {
       logger.warn({
-        message: 'تم اكتشاف طلب بطيء',
+        message: 'Slow request detected',
         method: req.method,
         path: path,
         duration: `${duration.toFixed(2)}ms`,
@@ -129,7 +91,7 @@ export const performanceMonitor = (req: Request, res: Response, next: NextFuncti
   next();
 };
 
-// وسيط تتبع الأخطاء
+// Error tracking middleware
 export const errorTracker = (err: Error, req: Request, res: Response, next: NextFunction) => {
   const timestamp = new Date().toISOString();
   const errorId = Math.random().toString(36).substring(7);
@@ -146,19 +108,18 @@ export const errorTracker = (err: Error, req: Request, res: Response, next: Next
     timestamp
   });
 
-  // إرسال رد مناسب للعميل
   res.status(500).json({
     error: true,
-    message: process.env.NODE_ENV === 'production'
-      ? 'حدث خطأ في النظام'
+    message: process.env.NODE_ENV === 'production' 
+      ? 'An internal system error occurred' 
       : err.message,
     errorId,
     timestamp
   });
 };
 
-// مراقبة استخدام الذاكرة
-export const memoryMonitor = () => {
+// Memory monitoring
+const memoryMonitor = () => {
   const used = process.memoryUsage();
 
   memoryUsage.labels('rss').set(used.rss);
@@ -177,11 +138,11 @@ export const memoryMonitor = () => {
     }
   });
 
-  // تشغيل كل 5 دقائق
+  // Run every 5 minutes
   setTimeout(memoryMonitor, 300000);
 };
 
-// جامع بيانات فحص الصحة
+// Health check data collector
 export const getHealthData = async () => {
   const metrics = await register.getMetricsAsJSON();
   const uptime = process.uptime();
@@ -209,28 +170,28 @@ export const getHealthData = async () => {
   };
 };
 
-// معالج نقطة نهاية المقاييس
+// Metrics endpoint handler
 export const metricsHandler = async (_req: Request, res: Response) => {
   try {
     res.set('Content-Type', register.contentType);
     res.end(await register.metrics());
   } catch (error) {
-    logger.error('خطأ في جلب المقاييس:', error);
+    logger.error('Error fetching metrics:', error);
     res.status(500).end(error);
   }
 };
 
-// عداد طلبات API
+// API request counter
 let requestCount = 0;
 export const requestCounter = (req: Request, res: Response, next: NextFunction) => {
   requestCount++;
   if (requestCount % 100 === 0) {
-    logger.info(`[إحصائيات] إجمالي الطلبات المعالجة: ${requestCount}`);
+    logger.info(`[Stats] Total requests processed: ${requestCount}`);
   }
   next();
 };
 
-// مراقب API
+// API monitor
 export const apiMonitor = (apiName: string) => {
   return async (req: Request, res: Response, next: NextFunction) => {
     const start = performance.now();
@@ -239,9 +200,9 @@ export const apiMonitor = (apiName: string) => {
       const duration = performance.now() - start;
       apiLatency.labels(apiName).observe(duration / 1000);
 
-      if (duration > 2000) { // تحذير للطلبات التي تستغرق أكثر من 2 ثوانٍ
+      if (duration > 2000) { // Warning for requests taking more than 2 seconds
         logger.warn({
-          message: 'طلب API بطيء',
+          message: 'Slow API request',
           api: apiName,
           duration: `${duration.toFixed(2)}ms`
         });
@@ -252,8 +213,8 @@ export const apiMonitor = (apiName: string) => {
   };
 };
 
-// بدء المراقبة
+// Start monitoring
 export const startMonitoring = () => {
   memoryMonitor();
-  logger.info('تم بدء نظام المراقبة');
+  logger.info('Monitoring system started');
 };

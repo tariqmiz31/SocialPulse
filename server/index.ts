@@ -7,56 +7,55 @@ import { createServer } from "http";
 import helmet from "helmet";
 import cors from "cors";
 import compression from "compression";
-import { performanceMonitor } from "./monitoring";
+import { performanceMonitor, startMonitoring } from "./monitoring";
+import logger from "./logConfig";
 
 // Create Express app
 const app = express();
 
+// Basic middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
-app.use(performanceMonitor);
 
 // Security middleware
-app.use(helmet());
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      connectSrc: ["'self'", process.env.APP_URL || "", process.env.CUSTOM_DOMAIN ? `*.${process.env.CUSTOM_DOMAIN}` : ""].filter(Boolean),
+      imgSrc: ["'self'", "data:", "blob:"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      frameSrc: ["'self'"],
+      objectSrc: ["'none'"],
+      upgradeInsecureRequests: []
+    }
+  }
+}));
+
+// Enable compression
 app.use(compression());
 
-// CORS configuration
-const allowedOrigins = [process.env.APP_URL, process.env.CUSTOM_DOMAIN].filter(Boolean);
+// Configure CORS
+const allowedOrigins = [
+  process.env.APP_URL,
+  process.env.CUSTOM_DOMAIN,
+  process.env.CUSTOM_DOMAIN ? `*.${process.env.CUSTOM_DOMAIN}` : null
+].filter(Boolean);
+
 app.use(cors({
-  origin: allowedOrigins,
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+      return;
+    }
+    callback(new Error('Not allowed by CORS'));
+  },
   credentials: true
 }));
 
-// Request logging middleware
-app.use((req, res, next) => {
-  const start = Date.now();
-  const path = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
-
-  const originalResJson = res.json;
-  res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
-  };
-
-  res.on("finish", () => {
-    const duration = Date.now() - start;
-    if (path.startsWith("/api")) {
-      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-      }
-
-      if (logLine.length > 80) {
-        logLine = logLine.slice(0, 79) + "…";
-      }
-
-      log(logLine);
-    }
-  });
-
-  next();
-});
+// Add performance monitoring
+app.use(performanceMonitor);
 
 // Initialize server setup
 (async () => {
@@ -76,22 +75,27 @@ app.use((req, res, next) => {
       next();
     });
 
+    // Register routes and start monitoring
     registerRoutes(app);
+    startMonitoring();
 
     // Error handling middleware
     app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
       const status = err.status || err.statusCode || 500;
       const message = err.message || "Internal Server Error";
 
+      logger.error({
+        error: err,
+        status,
+        message,
+        timestamp: new Date().toISOString()
+      });
+
       res.status(status).json({ 
         message,
         domain: process.env.CUSTOM_DOMAIN || process.env.APP_URL,
         timestamp: new Date().toISOString()
       });
-
-      if (app.get("env") === "development") {
-        console.error(err);
-      }
     });
 
     // Setup Vite in development, static files in production
@@ -104,15 +108,15 @@ app.use((req, res, next) => {
     // Start server
     const PORT = parseInt(process.env.PORT || "5000", 10);
     server.listen(PORT, "0.0.0.0", () => {
-      log(`Server running on port ${PORT}`);
-      log(`Main domain: ${domain}`);
+      logger.info(`Server running on port ${PORT}`);
+      logger.info(`Main domain: ${domain}`);
 
       if (domain) {
-        log(`Supporting subdomains for: *.${domain}`);
+        logger.info(`Supporting subdomains for: *.${domain}`);
       }
     });
   } catch (error) {
-    console.error("Failed to start the server:", error);
+    logger.error("Failed to start the server:", error);
     process.exit(1);
   }
 })();
