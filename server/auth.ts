@@ -28,10 +28,17 @@ const crypto = {
   },
 };
 
-// Extend express user object with our schema
+// تعريف نوع المستخدم
+export type User = {
+  id: number;
+  username: string;
+  password: string;
+};
+
+// تمديد كائن المستخدم في Express
 declare global {
   namespace Express {
-    interface User extends SelectUser { }
+    interface User extends User {}
   }
 }
 
@@ -43,7 +50,7 @@ export function setupAuth(app: Express) {
     saveUninitialized: false,
     cookie: {},
     store: new MemoryStore({
-      checkPeriod: 86400000, // prune expired entries every 24h
+      checkPeriod: 86400000, // تنظيف الجلسات المنتهية كل 24 ساعة
     }),
   };
 
@@ -109,7 +116,7 @@ export function setupAuth(app: Express) {
 
       const { username, password } = result.data;
 
-      // Check if user already exists
+      // التحقق من وجود المستخدم
       const [existingUser] = await db
         .select()
         .from(users)
@@ -120,10 +127,10 @@ export function setupAuth(app: Express) {
         return res.status(400).send("اسم المستخدم موجود بالفعل");
       }
 
-      // Hash the password
+      // تشفير كلمة المرور
       const hashedPassword = await crypto.hash(password);
 
-      // Create the new user
+      // إنشاء المستخدم الجديد
       const [newUser] = await db
         .insert(users)
         .values({
@@ -132,7 +139,7 @@ export function setupAuth(app: Express) {
         })
         .returning();
 
-      // Log the user in after registration
+      // تسجيل دخول المستخدم بعد التسجيل
       req.login(newUser, (err) => {
         if (err) {
           return next(err);

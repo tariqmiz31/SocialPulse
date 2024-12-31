@@ -14,17 +14,16 @@ import path from 'path';
 import express from 'express';
 
 export function registerRoutes(app: Express): Server {
-  // تكوين الأمان المحسّن مع دعم CDN
+  // تكوين الأمان المحسّن
   app.use(helmet({
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        connectSrc: ["'self'", process.env.APP_URL || "", process.env.CUSTOM_DOMAIN ? `*.${process.env.CUSTOM_DOMAIN}` : ""].filter(Boolean),
-        imgSrc: ["'self'", "data:", "blob:", "*.${process.env.CUSTOM_DOMAIN}", "cdn.${process.env.CUSTOM_DOMAIN}"].filter(Boolean),
-        scriptSrc: ["'self'", "'unsafe-inline'", "cdn.${process.env.CUSTOM_DOMAIN}"].filter(Boolean),
-        styleSrc: ["'self'", "'unsafe-inline'", "cdn.${process.env.CUSTOM_DOMAIN}"].filter(Boolean),
-        fontSrc: ["'self'", "cdn.${process.env.CUSTOM_DOMAIN}"].filter(Boolean),
-        mediaSrc: ["'self'", "cdn.${process.env.CUSTOM_DOMAIN}"].filter(Boolean),
+        connectSrc: ["'self'", process.env.APP_URL || ""],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        fontSrc: ["'self'"],
+        imgSrc: ["'self'", "data:", "blob:"],
         frameSrc: ["'self'"],
         objectSrc: ["'none'"],
         upgradeInsecureRequests: []
@@ -32,51 +31,14 @@ export function registerRoutes(app: Express): Server {
     }
   }));
 
-  // تكوين CORS المحسّن مع دعم CDN
-  const allowedDomains = [
-    process.env.APP_URL,
-    process.env.CUSTOM_DOMAIN,
-    process.env.CUSTOM_DOMAIN ? `*.${process.env.CUSTOM_DOMAIN}` : null,
-    process.env.CUSTOM_DOMAIN ? `cdn.${process.env.CUSTOM_DOMAIN}` : null
-  ].filter(Boolean);
-
+  // تكوين CORS
   app.use(cors({
-    origin: (origin, callback) => {
-      if (!origin) {
-        callback(null, true);
-        return;
-      }
-
-      const isAllowed = allowedDomains.some(domain => {
-        if (domain?.startsWith("*.")) {
-          const baseDomain = domain.slice(2);
-          return origin.endsWith(baseDomain);
-        }
-        return domain === origin;
-      });
-
-      if (isAllowed) {
-        callback(null, true);
-      } else {
-        callback(new Error('Not allowed by CORS'));
-      }
-    },
-    credentials: true,
-    maxAge: 86400
+    origin: process.env.APP_URL,
+    credentials: true
   }));
 
-  // تمكين ضغط الاستجابة مع إعدادات CDN
-  app.use(compression({
-    level: 6,
-    threshold: 1024,
-    filter: (req, res) => {
-      const userAgent = req.headers['user-agent'] || '';
-      if (userAgent.includes('CloudFront') || userAgent.includes('Cloudflare')) {
-        return false;
-      }
-      return compression.filter(req, res);
-    }
-  }));
+  // تمكين ضغط الاستجابة
+  app.use(compression());
 
   // تكوين تحديد معدل الطلبات
   const limiter = rateLimit({
@@ -188,7 +150,6 @@ export function registerRoutes(app: Express): Server {
   app.use(errorTracker);
 
   // بدء المراقبة والنسخ الاحتياطي التلقائي
-  startMonitoring();
   scheduleBackups();
 
   const httpServer = createServer(app);
