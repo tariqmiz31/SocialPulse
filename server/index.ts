@@ -7,17 +7,38 @@ import { createServer } from "http";
 import helmet from "helmet";
 import cors from "cors";
 import compression from "compression";
+import expressStatusMonitor from 'express-status-monitor';
+import { performanceMonitor } from "./monitoring";
 
 // Create Express app
 const app = express();
+
+// Enable status monitoring
+app.use(expressStatusMonitor({
+  title: 'مراقبة الخادم',
+  theme: 'dark',
+  path: '/status',
+  spans: [{
+    interval: 1,     // Every second
+    retention: 60    // Keep 60 datapoints in memory
+  }, {
+    interval: 5,     // Every 5 seconds
+    retention: 60    // Keep 60 datapoints in memory
+  }, {
+    interval: 15,    // Every 15 seconds
+    retention: 60    // Keep 60 datapoints in memory
+  }]
+}));
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
+app.use(performanceMonitor);
 
 // Security middleware
 app.use(helmet());
 app.use(compression());
 
-// Configure CORS for our domain
+// CORS configuration
 const allowedOrigins = [process.env.APP_URL, process.env.CUSTOM_DOMAIN].filter(Boolean);
 app.use(cors({
   origin: allowedOrigins,
