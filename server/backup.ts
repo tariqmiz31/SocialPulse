@@ -126,25 +126,31 @@ export function scheduleBackups() {
     }
   };
 
-  // حساب الوقت حتى منتصف الليل القادم
+  // حساب الوقت حتى الساعة 4 صباحاً القادمة
   const now = new Date();
-  const nextMidnight = new Date(now);
-  nextMidnight.setHours(24, 0, 0, 0);
-  const timeUntilMidnight = nextMidnight.getTime() - now.getTime();
+  const next4AM = new Date(now);
+  next4AM.setHours(4, 0, 0, 0);
 
-  // جدولة النسخ الاحتياطي الأول في منتصف الليل القادم
+  // إذا كان الوقت الحالي بعد 4 صباحاً، نضيف يوم
+  if (now.getHours() >= 4) {
+    next4AM.setDate(next4AM.getDate() + 1);
+  }
+
+  const timeUntil4AM = next4AM.getTime() - now.getTime();
+
+  // جدولة النسخ الاحتياطي الأول في الساعة 4 صباحاً
   setTimeout(() => {
     runBackup();
     // ثم تشغيل النسخ الاحتياطي كل 24 ساعة
     setInterval(runBackup, 24 * 60 * 60 * 1000);
-  }, timeUntilMidnight);
+  }, timeUntil4AM);
 
   // إنشاء نسخة احتياطية أولية عند بدء التشغيل
   createBackup().catch(error => {
     logger.error('فشل النسخ الاحتياطي الأولي:', error);
   });
 
-  logger.info(`تم تكوين جدولة النسخ الاحتياطي اليومي في الساعة 00:00`);
+  logger.info(`تم تكوين جدولة النسخ الاحتياطي اليومي في الساعة 04:00`);
 }
 
 // تصدير الوظائف
