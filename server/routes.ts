@@ -4,7 +4,7 @@ import helmet from "helmet";
 import cors from "cors";
 import compression from "compression";
 import { db } from "@db";
-import { posts } from "@db/schema";
+import { users } from "@db/schema";
 import rateLimit from "express-rate-limit";
 
 export function registerRoutes(app: Express): Server {
@@ -25,11 +25,11 @@ export function registerRoutes(app: Express): Server {
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        connectSrc: ["'self'", process.env.APP_URL || "", "*.silvariumsocial.com"].filter(Boolean),
-        imgSrc: ["'self'", "data:", "blob:", "*.silvariumsocial.com"],
+        connectSrc: ["'self'", process.env.APP_URL || "", process.env.CUSTOM_DOMAIN ? `*.${process.env.CUSTOM_DOMAIN}` : ""].filter(Boolean),
+        imgSrc: ["'self'", "data:", "blob:"],
         scriptSrc: ["'self'", "'unsafe-inline'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
-        frameSrc: ["'self'", "*.silvariumsocial.com"],
+        frameSrc: ["'self'"],
         objectSrc: ["'none'"],
         upgradeInsecureRequests: []
       }
@@ -44,7 +44,7 @@ export function registerRoutes(app: Express): Server {
   const allowedDomains = [
     process.env.APP_URL,
     process.env.CUSTOM_DOMAIN,
-    `*.${process.env.CUSTOM_DOMAIN}`,
+    process.env.CUSTOM_DOMAIN ? `*.${process.env.CUSTOM_DOMAIN}` : null,
   ].filter(Boolean);
 
   app.use(cors({
@@ -74,7 +74,36 @@ export function registerRoutes(app: Express): Server {
     maxAge: 86400 // CORS preflight cache for 24 hours
   }));
 
-  // Health check endpoint with subdomain info
+  // Authentication routes
+  app.post("/api/auth/login", async (req, res) => {
+    try {
+      const { email, password } = req.body;
+
+      // Basic validation
+      if (!email || !password) {
+        return res.status(400).json({
+          error: "البريد الإلكتروني وكلمة المرور مطلوبة"
+        });
+      }
+
+      // Here you would typically validate against the database
+      // For now, we'll just return a success response
+      return res.status(200).json({
+        message: "تم تسجيل الدخول بنجاح",
+        user: {
+          email,
+          name: "مستخدم تجريبي"
+        }
+      });
+    } catch (error) {
+      console.error("Login error:", error);
+      return res.status(500).json({
+        error: "حدث خطأ أثناء تسجيل الدخول"
+      });
+    }
+  });
+
+  // Health check endpoint with domain info
   app.get("/api/health", (req, res) => {
     const host = req.get('host') || '';
     const subdomain = host.split('.')[0];
@@ -85,8 +114,7 @@ export function registerRoutes(app: Express): Server {
       customDomain: process.env.CUSTOM_DOMAIN,
       host: host,
       subdomain: subdomain !== 'www' ? subdomain : 'root',
-      timestamp: new Date().toISOString(),
-      environment: process.env.NODE_ENV
+      timestamp: new Date().toISOString()
     });
   });
 

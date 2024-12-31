@@ -48,8 +48,10 @@ app.use((req, res, next) => {
     const server = createServer(app);
 
     // Register routes with domain configuration
-    const domain = process.env.CUSTOM_DOMAIN || process.env.APP_URL || 'silvariumsocial.com';
+    const domain = process.env.CUSTOM_DOMAIN || process.env.APP_URL;
     app.set('trust proxy', 1);
+
+    // Force HTTPS in production
     app.use((req, res, next) => {
       if (process.env.NODE_ENV === 'production' && !req.secure) {
         return res.redirect(`https://${req.headers.host}${req.url}`);
@@ -88,7 +90,6 @@ app.use((req, res, next) => {
       log(`Server running on port ${PORT}`);
       log(`Main domain: ${domain}`);
 
-      // Log subdomain configuration
       if (domain) {
         log(`Supporting subdomains for: *.${domain}`);
       }
@@ -99,5 +100,4 @@ app.use((req, res, next) => {
   }
 })();
 
-// Export app for production use
 export { app };
