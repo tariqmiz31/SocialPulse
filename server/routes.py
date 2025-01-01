@@ -1,6 +1,6 @@
 from flask import Flask, send_from_directory, jsonify
 import os
-from .auth import login_required, admin_required
+from auth import login_required, admin_required
 
 def setup_routes(app: Flask):
     """إعداد مسارات التطبيق"""

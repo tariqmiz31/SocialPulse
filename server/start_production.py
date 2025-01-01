@@ -11,6 +11,11 @@ import socket
 from flask import Flask, send_from_directory, request
 from flask_cors import CORS
 
+# إضافة المسار الرئيسي إلى PYTHONPATH
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from server.auth import setup_auth
+from server.routes import setup_routes
+
 # تكوين التسجيل
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger('silvarium')
@@ -52,10 +57,8 @@ def setup_logging():
 
 def create_app():
     """إنشاء وإعداد تطبيق Flask"""
-    # إنشاء تطبيق Flask
     app = Flask(__name__, static_folder='../client/dist', static_url_path='/')
 
-    # إعداد CORS
     CORS(app, 
          supports_credentials=True, 
          resources={
@@ -65,9 +68,6 @@ def create_app():
                  "allow_headers": ["Content-Type", "Authorization"]
              }
          })
-
-    from server.auth import setup_auth
-    from server.routes import setup_routes
 
     # إعداد المصادقة والمسارات
     setup_auth(app)
