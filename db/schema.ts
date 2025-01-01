@@ -1,12 +1,29 @@
-import { pgTable, text, serial, timestamp, jsonb, integer, decimal } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, timestamp, jsonb, integer, decimal, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
+import { z } from "zod";
 
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),
   username: text("username").unique().notNull(),
   password: text("password").notNull(),
+  role: text("role").notNull().default("user"),
+  isApproved: boolean("is_approved").notNull().default(false),
+  status: text("status").notNull().default("pending"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// تعريف مخطط المستخدم للإدخال مع التحقق من الصحة
+export const insertUserSchema = createInsertSchema(users, {
+  role: z.enum(["admin", "user"]),
+  status: z.enum(["active", "pending", "blocked"]),
+});
+
+export const selectUserSchema = createSelectSchema(users);
+export type InsertUser = typeof users.$inferInsert;
+export type SelectUser = typeof users.$inferSelect;
+
+// الجداول الأخرى تبقى كما هي
 export const posts = pgTable("posts", {
   id: serial("id").primaryKey(),
   content: text("content").notNull(),
@@ -41,10 +58,6 @@ export const analytics = pgTable("analytics", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
-export const insertUserSchema = createInsertSchema(users);
-export const selectUserSchema = createSelectSchema(users);
-export type InsertUser = typeof users.$inferInsert;
-export type SelectUser = typeof users.$inferSelect;
 export type InsertPost = typeof posts.$inferInsert;
 export type SelectPost = typeof posts.$inferSelect;
 export type InsertAnalytics = typeof analytics.$inferInsert;

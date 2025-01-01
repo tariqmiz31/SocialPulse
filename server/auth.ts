@@ -32,7 +32,9 @@ const crypto = {
 export type User = {
   id: number;
   username: string;
-  password: string;
+  role: string;
+  isApproved: boolean;
+  status: string;
 };
 
 // تمديد كائن المستخدم في Express
@@ -41,6 +43,14 @@ declare global {
     interface User extends User {}
   }
 }
+
+// التحقق من صلاحيات المشرف
+const isAdmin = (req: Express.Request, res: Express.Response, next: Express.NextFunction) => {
+  if (req.isAuthenticated() && req.user.role === "admin") {
+    return next();
+  }
+  res.status(403).send("غير مصرح بالوصول");
+};
 
 export function setupAuth(app: Express) {
   const MemoryStore = createMemoryStore(session);
@@ -77,6 +87,16 @@ export function setupAuth(app: Express) {
         if (!user) {
           return done(null, false, { message: "اسم المستخدم غير صحيح" });
         }
+
+        // التحقق من حالة الحساب
+        if (user.status === "blocked") {
+          return done(null, false, { message: "تم حظر الحساب" });
+        }
+
+        if (!user.isApproved) {
+          return done(null, false, { message: "الحساب في انتظار الموافقة" });
+        }
+
         const isMatch = await crypto.compare(password, user.password);
         if (!isMatch) {
           return done(null, false, { message: "كلمة المرور غير صحيحة" });
@@ -105,6 +125,7 @@ export function setupAuth(app: Express) {
     }
   });
 
+  // التسجيل العادي للمستخدمين
   app.post("/api/register", async (req, res, next) => {
     try {
       const result = insertUserSchema.safeParse(req.body);
@@ -136,24 +157,80 @@ export function setupAuth(app: Express) {
         .values({
           username,
           password: hashedPassword,
+          role: "user",
+          isApproved: false,
+          status: "pending"
         })
         .returning();
 
-      // تسجيل دخول المستخدم بعد التسجيل
-      req.login(newUser, (err) => {
-        if (err) {
-          return next(err);
-        }
-        return res.json({
-          message: "تم التسجيل بنجاح",
-          user: { id: newUser.id, username: newUser.username },
-        });
+      return res.json({
+        message: "تم التسجيل بنجاح. في انتظار موافقة المشرف",
+        user: { id: newUser.id, username: newUser.username, status: newUser.status },
       });
     } catch (error) {
       next(error);
     }
   });
 
+  // واجهات برمجة تطبيقات المشرف
+  app.get("/api/admin/users", isAdmin, async (_req, res) => {
+    try {
+      const usersList = await db
+        .select({
+          id: users.id,
+          username: users.username,
+          role: users.role,
+          isApproved: users.isApproved,
+          status: users.status,
+          createdAt: users.createdAt,
+        })
+        .from(users);
+      res.json(usersList);
+    } catch (error) {
+      res.status(500).send("خطأ في استرجاع قائمة المستخدمين");
+    }
+  });
+
+  app.post("/api/admin/users/:userId/approve", isAdmin, async (req, res) => {
+    try {
+      const userId = parseInt(req.params.userId);
+      await db
+        .update(users)
+        .set({ isApproved: true, status: "active" })
+        .where(eq(users.id, userId));
+      res.json({ message: "تمت الموافقة على المستخدم بنجاح" });
+    } catch (error) {
+      res.status(500).send("خطأ في تحديث حالة المستخدم");
+    }
+  });
+
+  app.post("/api/admin/users/:userId/block", isAdmin, async (req, res) => {
+    try {
+      const userId = parseInt(req.params.userId);
+      await db
+        .update(users)
+        .set({ status: "blocked" })
+        .where(eq(users.id, userId));
+      res.json({ message: "تم حظر المستخدم بنجاح" });
+    } catch (error) {
+      res.status(500).send("خطأ في تحديث حالة المستخدم");
+    }
+  });
+
+  app.post("/api/admin/users/:userId/unblock", isAdmin, async (req, res) => {
+    try {
+      const userId = parseInt(req.params.userId);
+      await db
+        .update(users)
+        .set({ status: "active" })
+        .where(eq(users.id, userId));
+      res.json({ message: "تم إلغاء حظر المستخدم بنجاح" });
+    } catch (error) {
+      res.status(500).send("خطأ في تحديث حالة المستخدم");
+    }
+  });
+
+  // تسجيل الدخول
   app.post("/api/login", (req, res, next) => {
     const result = insertUserSchema.safeParse(req.body);
     if (!result.success) {
