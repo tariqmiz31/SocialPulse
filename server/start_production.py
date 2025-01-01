@@ -22,8 +22,11 @@ def create_test_user():
             # Create test user with hashed password
             hashed_password = generate_password_hash('Test@123')
             cur.execute(
-                "INSERT INTO users (username, password) VALUES (%s, %s)",
-                ('test_user', hashed_password)
+                """
+                INSERT INTO users (username, password, role, is_approved, status)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                ('test_user', hashed_password, 'user', True, 'active')
             )
             conn.commit()
             print("Test user created successfully")
