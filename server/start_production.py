@@ -8,11 +8,24 @@ import prometheus_client
 from prometheus_client import Counter, Histogram
 import time
 import socket
-from server import app
+from flask import Flask, send_from_directory, request
+from flask_cors import CORS
 
 # تكوين التسجيل
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger('silvarium')
+
+# إنشاء تطبيق Flask
+app = Flask(__name__, static_folder='../client/dist', static_url_path='/')
+CORS(app, 
+     supports_credentials=True, 
+     resources={
+         r"/api/*": {
+             "origins": ["https://*.repl.co", "https://*.repl.dev"],
+             "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+             "allow_headers": ["Content-Type", "Authorization"]
+         }
+     })
 
 def is_port_in_use(port: int) -> bool:
     """التحقق مما إذا كان المنفذ قيد الاستخدام"""
@@ -49,6 +62,18 @@ def setup_logging():
     ))
     logger.addHandler(file_handler)
 
+# مقاييس Prometheus
+REQUEST_COUNT = Counter('request_count', 'Total number of requests', ['method', 'endpoint', 'status'])
+REQUEST_LATENCY = Histogram('request_latency_seconds', 'Request latency in seconds', ['method', 'endpoint'])
+
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def serve_static(path):
+    """خدمة الملفات الثابتة للتطبيق"""
+    if path and os.path.exists(os.path.join(app.static_folder, path)):
+        return send_from_directory(app.static_folder, path)
+    return send_from_directory(app.static_folder, 'index.html')
+
 def main():
     """الدالة الرئيسية لبدء الخادم"""
     try:
@@ -62,15 +87,6 @@ def main():
         # تحديد المنفذ
         port = int(os.getenv("PORT", "5001"))
 
-        # انتظار حتى يصبح المنفذ متاحاً
-        if not wait_for_port(port):
-            port += 1
-            logger.warning(f"المنفذ {port} مشغول، جاري المحاولة على المنفذ التالي")
-            os.environ["PORT"] = str(port)
-
-            if not wait_for_port(port):
-                raise RuntimeError("لا توجد منافذ متاحة")
-
         # بدء خادم المقاييس
         metrics_port = port + 1
         prometheus_client.start_http_server(metrics_port)
@@ -78,9 +94,7 @@ def main():
 
         # تكوين التطبيق
         app.config.update(
-            WAIT_FOR_PORT=True,
-            PORT=port,
-            SECRET_KEY=os.getenv('SECRET_KEY', os.urandom(24)),
+            SECRET_KEY=os.getenv('SECRET_KEY', os.urandom(24).hex()),
             SESSION_COOKIE_SECURE=True,
             SESSION_COOKIE_HTTPONLY=True,
             SESSION_COOKIE_SAMESITE='Lax',
@@ -92,23 +106,9 @@ def main():
         # بدء خادم الإنتاج مع waitress
         serve(
             app,
-            host="0.0.0.0",
-            port=port,
-            url_scheme='https',
-            threads=4,
-            connection_limit=1000,
-            channel_timeout=30,
-            _quiet=True
+            listen=f'*:{port}'
         )
 
-        # انتظار حتى يتم تشغيل الخادم بنجاح
-        start_time = time.time()
-        while not is_port_in_use(port):
-            if time.time() - start_time > 30:
-                raise RuntimeError("فشل في بدء الخادم")
-            time.sleep(1)
-
-        logger.info("تم بدء الخادم بنجاح")
         return True
     except Exception as e:
         logger.error(f"خطأ في بدء الخادم: {e}")

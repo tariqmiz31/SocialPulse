@@ -45,7 +45,7 @@ declare global {
 }
 
 // التحقق من صلاحيات المشرف
-const isAdmin = (req: Express.Request, res: Express.Response, next: Express.NextFunction) => {
+export const isAdmin = (req: Express.Request, res: Express.Response, next: Express.NextFunction) => {
   if (req.isAuthenticated() && req.user.role === "admin") {
     return next();
   }
@@ -169,64 +169,6 @@ export function setupAuth(app: Express) {
       });
     } catch (error) {
       next(error);
-    }
-  });
-
-  // واجهات برمجة تطبيقات المشرف
-  app.get("/api/admin/users", isAdmin, async (_req, res) => {
-    try {
-      const usersList = await db
-        .select({
-          id: users.id,
-          username: users.username,
-          role: users.role,
-          isApproved: users.isApproved,
-          status: users.status,
-          createdAt: users.createdAt,
-        })
-        .from(users);
-      res.json(usersList);
-    } catch (error) {
-      res.status(500).send("خطأ في استرجاع قائمة المستخدمين");
-    }
-  });
-
-  app.post("/api/admin/users/:userId/approve", isAdmin, async (req, res) => {
-    try {
-      const userId = parseInt(req.params.userId);
-      await db
-        .update(users)
-        .set({ isApproved: true, status: "active" })
-        .where(eq(users.id, userId));
-      res.json({ message: "تمت الموافقة على المستخدم بنجاح" });
-    } catch (error) {
-      res.status(500).send("خطأ في تحديث حالة المستخدم");
-    }
-  });
-
-  app.post("/api/admin/users/:userId/block", isAdmin, async (req, res) => {
-    try {
-      const userId = parseInt(req.params.userId);
-      await db
-        .update(users)
-        .set({ status: "blocked" })
-        .where(eq(users.id, userId));
-      res.json({ message: "تم حظر المستخدم بنجاح" });
-    } catch (error) {
-      res.status(500).send("خطأ في تحديث حالة المستخدم");
-    }
-  });
-
-  app.post("/api/admin/users/:userId/unblock", isAdmin, async (req, res) => {
-    try {
-      const userId = parseInt(req.params.userId);
-      await db
-        .update(users)
-        .set({ status: "active" })
-        .where(eq(users.id, userId));
-      res.json({ message: "تم إلغاء حظر المستخدم بنجاح" });
-    } catch (error) {
-      res.status(500).send("خطأ في تحديث حالة المستخدم");
     }
   });
 

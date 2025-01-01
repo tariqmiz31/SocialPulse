@@ -1,13 +1,16 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { db } from "@db";
-import { performanceMonitor, errorTracker, metricsHandler, getHealthData, apiMonitor } from "./monitoring";
-import { setupAuth } from "./auth";
-import rateLimit from "express-rate-limit";
-import helmet from "helmet";
-import cors from "cors";
-import compression from "compression";
-import logger from "./logConfig";
+import { users } from "@db/schema";
+import { eq } from "drizzle-orm";
+
+// وظيفة مساعدة للتحقق من صلاحيات المشرف
+const isAdmin = (req: any, res: any, next: any) => {
+  if (req.isAuthenticated() && req.user.role === "admin") {
+    return next();
+  }
+  res.status(403).send("غير مصرح بالوصول");
+};
 
 export function registerRoutes(app: Express): Server {
   // تكوين الأمان المحسّن
@@ -52,6 +55,65 @@ export function registerRoutes(app: Express): Server {
 
   // تمكين وسائط المراقبة
   app.use(performanceMonitor);
+
+  // نقاط نهاية لوحة الإشراف
+  app.get("/api/admin/users", isAdmin, async (_req, res) => {
+    try {
+      const usersList = await db
+        .select({
+          id: users.id,
+          username: users.username,
+          role: users.role,
+          isApproved: users.isApproved,
+          status: users.status,
+          createdAt: users.createdAt,
+        })
+        .from(users);
+      res.json(usersList);
+    } catch (error) {
+      res.status(500).send("خطأ في استرجاع قائمة المستخدمين");
+    }
+  });
+
+  app.post("/api/admin/users/:userId/approve", isAdmin, async (req, res) => {
+    try {
+      const userId = parseInt(req.params.userId);
+      await db
+        .update(users)
+        .set({ isApproved: true, status: "active" })
+        .where(eq(users.id, userId));
+      res.json({ message: "تمت الموافقة على المستخدم بنجاح" });
+    } catch (error) {
+      res.status(500).send("خطأ في تحديث حالة المستخدم");
+    }
+  });
+
+  app.post("/api/admin/users/:userId/block", isAdmin, async (req, res) => {
+    try {
+      const userId = parseInt(req.params.userId);
+      await db
+        .update(users)
+        .set({ status: "blocked" })
+        .where(eq(users.id, userId));
+      res.json({ message: "تم حظر المستخدم بنجاح" });
+    } catch (error) {
+      res.status(500).send("خطأ في تحديث حالة المستخدم");
+    }
+  });
+
+  app.post("/api/admin/users/:userId/unblock", isAdmin, async (req, res) => {
+    try {
+      const userId = parseInt(req.params.userId);
+      await db
+        .update(users)
+        .set({ status: "active" })
+        .where(eq(users.id, userId));
+      res.json({ message: "تم إلغاء حظر المستخدم بنجاح" });
+    } catch (error) {
+      res.status(500).send("خطأ في تحديث حالة المستخدم");
+    }
+  });
+
 
   // نقطة نهاية الحالة الأساسية
   app.get("/api/status", (_req, res) => {
