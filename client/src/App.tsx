@@ -4,6 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { AlertCircle, Loader2 } from "lucide-react";
 import AuthPage from "@/pages/AuthPage";
 import { useUser } from "@/hooks/use-user";
+import { Navbar } from "@/components/ui/navbar";
 
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
 const Calendar = lazy(() => import("@/pages/Calendar"));
@@ -26,7 +27,8 @@ function App() {
   }
 
   return (
-    <div className="flex min-h-screen bg-background" dir="rtl">
+    <div className="flex flex-col min-h-screen bg-background" dir="rtl">
+      <Navbar />
       <main className="flex-1">
         <Suspense fallback={
           <div className="flex items-center justify-center min-h-screen">

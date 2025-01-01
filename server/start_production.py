@@ -1,9 +1,10 @@
 import os
 import sys
 import socket
+import time
 from dotenv import load_dotenv
 from waitress import serve
-from flask import Flask
+from flask import Flask, Blueprint
 from flask_cors import CORS
 from werkzeug.security import generate_password_hash
 import psycopg2
@@ -26,6 +27,14 @@ def is_port_in_use(port: int) -> bool:
             return False
         except socket.error:
             return True
+
+def wait_for_port_availability(port: int, timeout: int = 60) -> bool:
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        if not is_port_in_use(port):
+            return True
+        time.sleep(1)
+    return False
 
 def setup_logging():
     log_dir = '/tmp/logs'
@@ -66,53 +75,57 @@ def create_admin_user():
         conn.close()
     except Exception as e:
         logger.error(f"Error creating admin user: {e}")
+        raise
 
 def main():
-    # Load environment variables
-    load_dotenv()
-
-    # Setup logging
-    setup_logging()
-
-    # Start metrics server
-    metrics_port = int(os.getenv('METRICS_PORT', '9090'))
-    while is_port_in_use(metrics_port):
-        logger.warning(f"Port {metrics_port} is in use, trying next port")
-        metrics_port += 1
-
     try:
-        start_http_server(metrics_port)
-        logger.info(f"Metrics server started on port {metrics_port}")
-    except Exception as e:
-        logger.error(f"Failed to start metrics server: {e}")
+        # Load environment variables
+        load_dotenv()
 
-    # Validate required environment variables
-    required_vars = ['DATABASE_URL']
-    missing_vars = [var for var in required_vars if not os.getenv(var)]
+        # Setup logging
+        setup_logging()
 
-    if missing_vars:
-        logger.error(f"Missing required environment variables: {', '.join(missing_vars)}")
-        sys.exit(1)
+        # Validate required environment variables
+        required_vars = ['DATABASE_URL']
+        missing_vars = [var for var in required_vars if not os.getenv(var)]
 
-    # Configure app
-    app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')
-    app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', os.urandom(24))
+        if missing_vars:
+            logger.error(f"Missing required environment variables: {', '.join(missing_vars)}")
+            sys.exit(1)
 
-    # Create admin user
-    create_admin_user()
+        # Create admin user
+        create_admin_user()
 
-    # Get port from environment variable with fallback
-    port = int(os.getenv("PORT", "5000"))
+        # Configure app
+        app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')
+        app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', os.urandom(24))
+        app.config['SESSION_COOKIE_SECURE'] = True
+        app.config['SESSION_COOKIE_HTTPONLY'] = True
 
-    # Check if port is in use and find next available port
-    while is_port_in_use(port):
-        logger.warning(f"Port {port} is in use, trying next port")
-        port += 1
+        # Start metrics server
+        metrics_port = int(os.getenv('METRICS_PORT', '9090'))
+        if not wait_for_port_availability(metrics_port):
+            logger.warning(f"Port {metrics_port} is in use, trying next port")
+            metrics_port += 1
+        try:
+            start_http_server(metrics_port)
+            logger.info(f"Metrics server started on port {metrics_port}")
+        except Exception as e:
+            logger.error(f"Failed to start metrics server: {e}")
+            # Continue even if metrics server fails
 
-    logger.info(f"Starting production server on port {port}")
-    logger.info(f"Database URL configured: {bool(app.config['SQLALCHEMY_DATABASE_URI'])}")
+        # Get port from environment variable with fallback
+        port = int(os.getenv("PORT", "5001"))
 
-    try:
+        # Wait for port availability
+        if not wait_for_port_availability(port):
+            logger.warning(f"Port {port} is in use, trying next port")
+            port += 1
+
+        # Configure server settings
+        logger.info(f"Starting production server on port {port}")
+        logger.info(f"Database URL configured: {bool(app.config['SQLALCHEMY_DATABASE_URI'])}")
+
         # Start production server with waitress
         serve(
             app,
@@ -123,9 +136,11 @@ def main():
             connection_limit=1000,
             channel_timeout=30
         )
+
+        return True
     except Exception as e:
         logger.error(f"Error starting server: {e}")
-        sys.exit(1)
+        raise
 
 if __name__ == "__main__":
     main()
