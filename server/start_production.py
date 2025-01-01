@@ -4,13 +4,12 @@ import socket
 import time
 from dotenv import load_dotenv
 from waitress import serve
-from flask import Flask, Blueprint
+from flask import Flask
 from flask_cors import CORS
 from werkzeug.security import generate_password_hash
 import psycopg2
 import logging
 from logging.handlers import RotatingFileHandler
-from prometheus_client import start_http_server
 
 # Create Flask app
 app = Flask(__name__)
@@ -19,22 +18,6 @@ CORS(app)
 # تكوين التسجيل
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger('silvarium')
-
-def is_port_in_use(port: int) -> bool:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        try:
-            s.bind(('0.0.0.0', port))
-            return False
-        except socket.error:
-            return True
-
-def wait_for_port_availability(port: int, timeout: int = 60) -> bool:
-    start_time = time.time()
-    while time.time() - start_time < timeout:
-        if not is_port_in_use(port):
-            return True
-        time.sleep(1)
-    return False
 
 def setup_logging():
     log_dir = '/tmp/logs'
@@ -86,43 +69,24 @@ def main():
         setup_logging()
 
         # Validate required environment variables
-        required_vars = ['DATABASE_URL']
-        missing_vars = [var for var in required_vars if not os.getenv(var)]
-
-        if missing_vars:
-            logger.error(f"Missing required environment variables: {', '.join(missing_vars)}")
+        if not os.getenv('DATABASE_URL'):
+            logger.error("Missing DATABASE_URL environment variable")
             sys.exit(1)
+
+        # Configure app
+        app.config.update(
+            SQLALCHEMY_DATABASE_URI=os.getenv('DATABASE_URL'),
+            SECRET_KEY=os.getenv('SECRET_KEY', os.urandom(24)),
+            SESSION_COOKIE_SECURE=True,
+            SESSION_COOKIE_HTTPONLY=True,
+            PERMANENT_SESSION_LIFETIME=1800  # 30 minutes
+        )
 
         # Create admin user
         create_admin_user()
 
-        # Configure app
-        app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')
-        app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', os.urandom(24))
-        app.config['SESSION_COOKIE_SECURE'] = True
-        app.config['SESSION_COOKIE_HTTPONLY'] = True
-
-        # Start metrics server
-        metrics_port = int(os.getenv('METRICS_PORT', '9090'))
-        if not wait_for_port_availability(metrics_port):
-            logger.warning(f"Port {metrics_port} is in use, trying next port")
-            metrics_port += 1
-        try:
-            start_http_server(metrics_port)
-            logger.info(f"Metrics server started on port {metrics_port}")
-        except Exception as e:
-            logger.error(f"Failed to start metrics server: {e}")
-            # Continue even if metrics server fails
-
-        # Get port from environment variable with fallback
         port = int(os.getenv("PORT", "5001"))
 
-        # Wait for port availability
-        if not wait_for_port_availability(port):
-            logger.warning(f"Port {port} is in use, trying next port")
-            port += 1
-
-        # Configure server settings
         logger.info(f"Starting production server on port {port}")
         logger.info(f"Database URL configured: {bool(app.config['SQLALCHEMY_DATABASE_URI'])}")
 

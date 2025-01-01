@@ -3,7 +3,6 @@ import { createServer, type Server } from "http";
 import { db } from "@db";
 import { performanceMonitor, errorTracker, metricsHandler, getHealthData, apiMonitor } from "./monitoring";
 import { setupAuth } from "./auth";
-import { createBackup, restoreBackup, scheduleBackups } from "./backup";
 import rateLimit from "express-rate-limit";
 import helmet from "helmet";
 import cors from "cors";
@@ -40,14 +39,10 @@ export function registerRoutes(app: Express): Server {
   // تكوين تحديد معدل الطلبات
   const limiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 100,
-    skip: (req) => {
-      const userAgent = req.headers['user-agent'] || '';
-      return userAgent.includes('CloudFront') || userAgent.includes('Cloudflare');
-    }
+    max: 100
   });
 
-  app.use(limiter);
+  app.use("/api", limiter);
 
   // إعداد المصادقة
   setupAuth(app);
@@ -56,29 +51,28 @@ export function registerRoutes(app: Express): Server {
   app.use(performanceMonitor);
 
   // نقطة نهاية الحالة الأساسية
-  app.get("/api/monitoring/status", (_req, res) => {
+  app.get("/api/status", (_req, res) => {
     try {
       res.json({
-        server: "running",
+        status: "running",
         timestamp: new Date().toISOString(),
-        environment: process.env.NODE_ENV,
-        database: "connected"
+        environment: process.env.NODE_ENV
       });
     } catch (error) {
       logger.error('Error in status endpoint:', error);
-      res.status(500).json({ error: 'Internal server error' });
+      res.status(500).json({ error: 'خطأ في الخادم' });
     }
   });
 
-  // نقاط نهاية المراقبة المتقدمة
-  app.get("/api/monitoring/metrics", metricsHandler);
-  app.get("/api/monitoring/health", async (_req, res) => {
+  // نقاط نهاية المراقبة
+  app.get("/api/metrics", metricsHandler);
+  app.get("/api/health", async (_req, res) => {
     try {
       const healthData = await getHealthData();
       res.json(healthData);
     } catch (error) {
       logger.error('Error in health endpoint:', error);
-      res.status(500).json({ error: 'Failed to get health data' });
+      res.status(500).json({ error: 'فشل في الحصول على بيانات الصحة' });
     }
   });
 

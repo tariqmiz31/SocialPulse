@@ -17,7 +17,7 @@ function App() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <Loader2 className="h-8 w-8 animate-spin text-border" />
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
   }
@@ -29,10 +29,10 @@ function App() {
   return (
     <div className="flex flex-col min-h-screen bg-background" dir="rtl">
       <Navbar />
-      <main className="flex-1">
+      <main className="flex-1 container mx-auto py-8">
         <Suspense fallback={
-          <div className="flex items-center justify-center min-h-screen">
-            <Loader2 className="h-8 w-8 animate-spin text-border" />
+          <div className="flex items-center justify-center min-h-[60vh]">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
           </div>
         }>
           <Switch>
@@ -50,10 +50,9 @@ function App() {
   );
 }
 
-// fallback 404 not found page
 function NotFound() {
   return (
-    <div className="min-h-screen w-full flex items-center justify-center bg-background">
+    <div className="min-h-[60vh] w-full flex items-center justify-center">
       <Card className="w-full max-w-md mx-4">
         <CardContent className="pt-6">
           <div className="flex mb-4 gap-2">
