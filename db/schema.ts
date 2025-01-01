@@ -1,4 +1,4 @@
-import { pgTable, text, serial, timestamp, jsonb, integer, decimal, boolean } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, timestamp, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -6,14 +6,13 @@ export const users = pgTable("users", {
   id: serial("id").primaryKey(),
   username: text("username").unique().notNull(),
   password: text("password").notNull(),
-  role: text("role").notNull().default("user"),
+  role: text("role", { enum: ["admin", "user"] }).notNull().default("user"),
   isApproved: boolean("is_approved").notNull().default(false),
-  status: text("status").notNull().default("pending"),
+  status: text("status", { enum: ["active", "pending", "blocked"] }).notNull().default("pending"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
-// تعريف مخطط المستخدم للإدخال مع التحقق من الصحة
 export const insertUserSchema = createInsertSchema(users, {
   role: z.enum(["admin", "user"]),
   status: z.enum(["active", "pending", "blocked"]),
@@ -23,11 +22,10 @@ export const selectUserSchema = createSelectSchema(users);
 export type InsertUser = typeof users.$inferInsert;
 export type SelectUser = typeof users.$inferSelect;
 
-// الجداول الأخرى تبقى كما هي
 export const posts = pgTable("posts", {
   id: serial("id").primaryKey(),
   content: text("content").notNull(),
-  platforms: jsonb("platforms").notNull().$type<string[]>(),
+  platforms: text("platforms").notNull(), // Changed from jsonb
   scheduledFor: timestamp("scheduled_for").notNull(),
   status: text("status").notNull(),
   userId: serial("user_id").references(() => users.id),
@@ -50,11 +48,11 @@ export const analytics = pgTable("analytics", {
   id: serial("id").primaryKey(),
   postId: serial("post_id").references(() => posts.id),
   platform: text("platform").notNull(),
-  likes: integer("likes").default(0),
-  shares: integer("shares").default(0),
-  comments: integer("comments").default(0),
-  reach: integer("reach").default(0),
-  engagementRate: decimal("engagement_rate", { precision: 5, scale: 2 }),
+  likes: text("likes").default("0"), // Changed from integer
+  shares: text("shares").default("0"), // Changed from integer
+  comments: text("comments").default("0"), // Changed from integer
+  reach: text("reach").default("0"),     // Changed from integer
+  engagementRate: text("engagement_rate"), // Changed from decimal
   createdAt: timestamp("created_at").defaultNow(),
 });
 
