@@ -13,16 +13,16 @@ export function Navbar() {
             <Link href="/">
               <a className="text-xl font-bold">سيلفاريوم</a>
             </Link>
-            <div className="space-x-2">
+            <div className="space-x-4">
               <Link href="/calendar">
-                <a className="text-sm text-muted-foreground hover:text-foreground">التقويم</a>
+                <a className="text-sm text-muted-foreground hover:text-foreground mr-4">التقويم</a>
               </Link>
               <Link href="/analytics">
-                <a className="text-sm text-muted-foreground hover:text-foreground">التحليلات</a>
+                <a className="text-sm text-muted-foreground hover:text-foreground mr-4">التحليلات</a>
               </Link>
               {user?.role === 'admin' && (
                 <Link href="/admin">
-                  <a className="text-sm text-muted-foreground hover:text-foreground">لوحة الإشراف</a>
+                  <a className="text-sm text-muted-foreground hover:text-foreground mr-4">لوحة الإشراف</a>
                 </Link>
               )}
             </div>

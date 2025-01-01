@@ -52,34 +52,53 @@ def start_server():
     logger = setup_workflow_logging()
     try:
         logger.info("بدء تشغيل خادم Silvarium Social...")
+
+        # تحديد المنفذ
         port = int(os.getenv("PORT", "5001"))
+
+        # تعيين متغيرات البيئة للتكوين
+        os.environ["WAIT_FOR_PORT"] = "true"
+        os.environ["PORT"] = str(port)
+
+        # تكوين التطبيق
+        app.config.update(
+            WAIT_FOR_PORT=True,
+            PORT=port
+        )
 
         # انتظار حتى يصبح المنفذ متاحًا
         if not wait_for_port(port, logger):
-            port += 1  # تجربة المنفذ التالي إذا كان المنفذ الحالي مشغولاً
+            port += 1
             logger.warning(f"تم تغيير المنفذ إلى {port}")
+            os.environ["PORT"] = str(port)
 
             if not wait_for_port(port, logger, timeout=30):
                 logger.error("فشل في العثور على منفذ متاح")
                 raise RuntimeError("لا توجد منافذ متاحة")
 
-        # تحديث متغير البيئة بالمنفذ الجديد
-        os.environ["PORT"] = str(port)
-
         # بدء التطبيق
-        app.config['WAIT_FOR_PORT'] = True
-        app.config['PORT'] = port
-        main()
-        logger.info(f"تم بدء الخادم بنجاح على المنفذ {port}")
+        logger.info(f"بدء تشغيل الخادم على المنفذ {port}")
+        serve(
+            app,
+            host="0.0.0.0",
+            port=port,
+            url_scheme='https',
+            threads=4,
+            connection_limit=1000,
+            channel_timeout=30,
+            _quiet=True
+        )
 
-        # انتظار حتى يصبح المنفذ مشغولاً (يعني أن الخادم بدأ بنجاح)
+        # انتظار حتى يبدأ الخادم
         start_time = time.time()
         while not is_port_in_use(port):
             if time.time() - start_time > 30:
                 raise RuntimeError("فشل في بدء الخادم")
             time.sleep(1)
 
+        logger.info("تم بدء الخادم بنجاح")
         return True
+
     except Exception as e:
         logger.error(f"خطأ في بدء الخادم: {str(e)}")
         raise

@@ -41,8 +41,8 @@ CORS(app,
      resources={
          r"/api/*": {
              "origins": ["https://*.repl.co", "https://*.repl.dev"],
-             "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-             "allow_headers": ["Content-Type", "Authorization"]
+             "methods": ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+             "allow_headers": ['Content-Type', 'Authorization']
          }
      })
 
@@ -71,7 +71,7 @@ def after_request(response):
         status=response.status_code
     ).inc()
 
-    # Add CORS headers
+    # إضافة رؤوس CORS
     response.headers.add('Access-Control-Allow-Credentials', 'true')
     return response
 
@@ -109,21 +109,6 @@ def create_admin_user():
     except Exception as e:
         logger.error(f"خطأ في إنشاء حساب المشرف: {e}")
 
-@app.route('/api/health')
-def health_check():
-    """نقطة نهاية فحص الصحة"""
-    return jsonify({
-        'status': 'healthy',
-        'timestamp': time.time()
-    })
-
-@app.route('/api/admin/check')
-def admin_check():
-    """التحقق من صلاحيات المشرف"""
-    if session.get('user_role') == 'admin':
-        return jsonify({'isAdmin': True})
-    return jsonify({'isAdmin': False}), 403
-
 def main():
     """الدالة الرئيسية لبدء الخادم"""
     try:
@@ -138,7 +123,7 @@ def main():
             SESSION_COOKIE_HTTPONLY=True,
             SESSION_COOKIE_SAMESITE='Lax',
             PERMANENT_SESSION_LIFETIME=1800,
-            WAIT_FOR_PORT=True
+            WAIT_FOR_PORT=True  # إضافة إعداد انتظار المنفذ
         )
 
         # إنشاء مستخدم مشرف
@@ -148,12 +133,13 @@ def main():
         port = int(os.getenv("PORT", "5001"))
 
         # انتظار حتى يصبح المنفذ متاحاً
-        if not wait_for_port(port):
-            logger.warning(f"المنفذ {port} مشغول، جاري المحاولة على المنفذ التالي")
-            port += 1
-
+        if app.config['WAIT_FOR_PORT']:
             if not wait_for_port(port):
-                raise RuntimeError("لا توجد منافذ متاحة")
+                logger.warning(f"المنفذ {port} مشغول، جاري المحاولة على المنفذ التالي")
+                port += 1
+
+                if not wait_for_port(port):
+                    raise RuntimeError("لا توجد منافذ متاحة")
 
         logger.info(f"بدء تشغيل الخادم على المنفذ {port}")
 
