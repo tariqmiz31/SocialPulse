@@ -30,7 +30,9 @@ export function registerRoutes(app: Express): Server {
   // تكوين CORS
   app.use(cors({
     origin: process.env.APP_URL,
-    credentials: true
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
   }));
 
   // تمكين ضغط الاستجابة
@@ -39,7 +41,8 @@ export function registerRoutes(app: Express): Server {
   // تكوين تحديد معدل الطلبات
   const limiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 100
+    max: 100,
+    message: "تم تجاوز عدد الطلبات المسموح به. يرجى المحاولة مرة أخرى لاحقاً."
   });
 
   app.use("/api", limiter);

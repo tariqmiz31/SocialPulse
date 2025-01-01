@@ -13,8 +13,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger('silvarium')
 
 # إنشاء تطبيق Flask
-app = Flask(__name__)
-CORS(app)
+app = Flask(__name__, static_folder='../client/dist', static_url_path='/')
+CORS(app, supports_credentials=True, resources={r"/api/*": {"origins": "*"}})
 
 def is_port_in_use(port: int) -> bool:
     """التحقق مما إذا كان المنفذ قيد الاستخدام"""
@@ -63,10 +63,7 @@ def create_admin_user():
 
 @app.route('/')
 def index():
-    return jsonify({
-        'status': 'running',
-        'version': '1.0.0'
-    })
+    return app.send_static_file('index.html')
 
 @app.route('/api/admin/check')
 def admin_check():
@@ -86,7 +83,9 @@ def main():
             SECRET_KEY=os.getenv('SECRET_KEY', os.urandom(24).hex()),
             SESSION_COOKIE_SECURE=True,
             SESSION_COOKIE_HTTPONLY=True,
-            PERMANENT_SESSION_LIFETIME=1800
+            SESSION_COOKIE_SAMESITE='Lax',
+            PERMANENT_SESSION_LIFETIME=1800,
+            WAIT_FOR_PORT=True
         )
 
         # إنشاء مستخدم مشرف

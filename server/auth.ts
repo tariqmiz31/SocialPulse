@@ -29,7 +29,7 @@ const crypto = {
 };
 
 // تعريف نوع المستخدم
-export type User = {
+type User = {
   id: number;
   username: string;
   role: string;

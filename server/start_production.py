@@ -4,22 +4,27 @@ import socket
 import time
 from dotenv import load_dotenv
 from waitress import serve
-from flask import Flask
+from flask import Flask, jsonify, request, session
 from flask_cors import CORS
 from werkzeug.security import generate_password_hash
 import psycopg2
 import logging
 from logging.handlers import RotatingFileHandler
+import prometheus_client
+from prometheus_client import Counter, Histogram
 
 # Create Flask app
-app = Flask(__name__)
-CORS(app)
+app = Flask(__name__, static_folder='../client/dist', static_url_path='/')
+CORS(app, 
+     supports_credentials=True, 
+     resources={r"/api/*": {"origins": ["https://*.repl.co", "https://*.repl.dev"]}})
 
 # تكوين التسجيل
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger('silvarium')
 
 def setup_logging():
+    """إعداد التسجيل مع التدوير التلقائي للملفات"""
     log_dir = '/tmp/logs'
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
@@ -34,15 +39,29 @@ def setup_logging():
     ))
     logger.addHandler(file_handler)
 
+@app.route('/')
+def serve_static():
+    """خدمة الملف الرئيسي للتطبيق"""
+    return app.send_static_file('index.html')
+
+@app.route('/<path:path>')
+def serve_static_paths(path):
+    """خدمة المسارات الثابتة للتطبيق"""
+    try:
+        return app.send_static_file(path)
+    except:
+        return app.send_static_file('index.html')
+
 def create_admin_user():
+    """إنشاء مستخدم مشرف إذا لم يكن موجوداً"""
     try:
         conn = psycopg2.connect(os.getenv('DATABASE_URL'))
         cur = conn.cursor()
 
-        # Check if admin exists
+        # التحقق من وجود المشرف
         cur.execute("SELECT id FROM users WHERE username = 'admin'")
         if cur.fetchone() is None:
-            # Create admin user with hashed password
+            # إنشاء مستخدم مشرف جديد
             hashed_password = generate_password_hash('admin123')
             cur.execute(
                 """
@@ -52,70 +71,95 @@ def create_admin_user():
                 ('admin', hashed_password, 'admin', True, 'active')
             )
             conn.commit()
-            logger.info("Admin user created successfully")
+            logger.info("تم إنشاء حساب المشرف بنجاح")
 
         cur.close()
         conn.close()
     except Exception as e:
-        logger.error(f"Error creating admin user: {e}")
+        logger.error(f"خطأ في إنشاء حساب المشرف: {e}")
         raise
 
-def is_port_in_use(port: int) -> bool:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        try:
-            s.bind(('0.0.0.0', port))
-            return False
-        except socket.error:
-            return True
+@app.route('/metrics')
+def metrics():
+    """نقطة نهاية مقاييس Prometheus"""
+    return prometheus_client.generate_latest()
 
-def wait_for_port(port: int, timeout: int = 60) -> bool:
-    start_time = time.time()
-    while time.time() - start_time < timeout:
-        if not is_port_in_use(port):
-            return True
-        time.sleep(1)
-    return False
+@app.route('/api/admin/status')
+def admin_status():
+    """نقطة نهاية حالة النظام للمشرفين"""
+    if session.get('user_role') != 'admin':
+        return jsonify({'error': 'غير مصرح'}), 403
+
+    return jsonify({
+        'status': 'running',
+        'server_time': time.time(),
+        'uptime': time.time() - app.start_time,
+        'environment': os.getenv('FLASK_ENV', 'production')
+    })
+
+@app.before_request
+def before_request():
+    """تسجيل وقت بدء الطلب"""
+    request.start_time = time.time()
+
+@app.after_request
+def after_request(response):
+    """تسجيل معلومات الطلب ومدته"""
+    if hasattr(request, 'start_time'):
+        duration = time.time() - request.start_time
+        REQUEST_LATENCY.labels(
+            method=request.method,
+            endpoint=request.path
+        ).observe(duration)
+
+        REQUEST_COUNT.labels(
+            method=request.method,
+            endpoint=request.path,
+            status=response.status_code
+        ).inc()
+    return response
+
+# مقاييس Prometheus
+REQUEST_COUNT = Counter('request_count', 'Total number of requests', ['method', 'endpoint', 'status'])
+REQUEST_LATENCY = Histogram('request_latency_seconds', 'Request latency in seconds', ['method', 'endpoint'])
+
 
 def main():
     try:
-        # Load environment variables
+        # تحميل متغيرات البيئة
         load_dotenv()
 
-        # Setup logging
+        # إعداد التسجيل
         setup_logging()
 
-        # Validate required environment variables
+        # التحقق من متغيرات البيئة المطلوبة
         if not os.getenv('DATABASE_URL'):
-            logger.error("Missing DATABASE_URL environment variable")
+            logger.error("DATABASE_URL غير موجود")
             sys.exit(1)
 
-        # Configure app
+        # تكوين التطبيق
         app.config.update(
             SQLALCHEMY_DATABASE_URI=os.getenv('DATABASE_URL'),
             SECRET_KEY=os.getenv('SECRET_KEY', os.urandom(24)),
             SESSION_COOKIE_SECURE=True,
             SESSION_COOKIE_HTTPONLY=True,
+            SESSION_COOKIE_SAMESITE='Lax',
             PERMANENT_SESSION_LIFETIME=1800,  # 30 minutes
-            WAIT_FOR_PORT=True  # إضافة هذا الإعداد
+            WAIT_FOR_PORT=True
         )
 
-        # Create admin user
-        create_admin_user()
-
+        # تحديد المنفذ
         port = int(os.getenv("PORT", "5001"))
 
-        # انتظار حتى يصبح المنفذ متاحاً
-        if not wait_for_port(port, timeout=30):
-            logger.warning(f"Port {port} is busy, trying next port")
-            port += 1
+        logger.info(f"بدء تشغيل الخادم على المنفذ {port}")
+        logger.info(f"تم تكوين قاعدة البيانات: {bool(app.config['SQLALCHEMY_DATABASE_URI'])}")
 
-            if not wait_for_port(port, timeout=30):
-                raise RuntimeError("No available ports")
+        # بدء خادم المقاييس
+        metrics_port = port + 1
+        prometheus_client.start_http_server(metrics_port)
+        logger.info(f"تم بدء خادم المقاييس على المنفذ {metrics_port}")
 
-        logger.info(f"Starting production server on port {port}")
-        logger.info(f"Database URL configured: {bool(app.config['SQLALCHEMY_DATABASE_URI'])}")
-
-        # Start production server with waitress
+        # بدء خادم الإنتاج مع waitress
         serve(
             app,
             host="0.0.0.0",
@@ -123,12 +167,13 @@ def main():
             url_scheme='https',
             threads=4,
             connection_limit=1000,
-            channel_timeout=30
+            channel_timeout=30,
+            _quiet=True  # Reduce waitress logging
         )
 
         return True
     except Exception as e:
-        logger.error(f"Error starting server: {e}")
+        logger.error(f"خطأ في بدء الخادم: {e}")
         raise
 
 if __name__ == "__main__":

@@ -67,8 +67,8 @@ def start_server():
         os.environ["PORT"] = str(port)
 
         # بدء التطبيق
-        app.config['wait_for_port'] = True
-        app.config['port'] = port
+        app.config['WAIT_FOR_PORT'] = True
+        app.config['PORT'] = port
         main()
         logger.info(f"تم بدء الخادم بنجاح على المنفذ {port}")
 
