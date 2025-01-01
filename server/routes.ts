@@ -9,9 +9,6 @@ import helmet from "helmet";
 import cors from "cors";
 import compression from "compression";
 import logger from "./logConfig";
-import fs from 'fs/promises';
-import path from 'path';
-import express from 'express';
 
 export function registerRoutes(app: Express): Server {
   // تكوين الأمان المحسّن
@@ -85,74 +82,9 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
-  // تكوين التخزين المؤقت للملفات الثابتة
-  app.use('/static', express.static('public', {
-    maxAge: '1y',
-    etag: true,
-    lastModified: true
-  }));
-
-  // نقاط نهاية إدارة النسخ الاحتياطي
-  app.post("/api/backup/create", async (req, res) => {
-    try {
-      logger.info('بدء عملية النسخ الاحتياطي...');
-      const result = await createBackup();
-      logger.info('تم إنشاء النسخة الاحتياطية بنجاح:', result);
-      res.json(result);
-    } catch (error) {
-      logger.error('خطأ في إنشاء النسخة الاحتياطية:', error);
-      res.status(500).json({ error: 'فشل إنشاء النسخة الاحتياطية' });
-    }
-  });
-
-  app.get("/api/backup/status", async (req, res) => {
-    try {
-      const backupDir = '/tmp/backups';
-      const files = await fs.readdir(backupDir);
-      const backupFiles = files.filter(file => file.startsWith('backup-') && file.endsWith('.sql'));
-
-      const backupsInfo = await Promise.all(backupFiles.map(async (file) => {
-        const stats = await fs.stat(path.join(backupDir, file));
-        return {
-          filename: file,
-          createdAt: stats.mtime,
-          size: stats.size
-        };
-      }));
-
-      res.json({
-        totalBackups: backupFiles.length,
-        backups: backupsInfo.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-      });
-    } catch (error) {
-      if (error.code === 'ENOENT') {
-        logger.warn('Directory not found:', error);
-        res.json({ totalBackups: 0, backups: [] }); //Handle the case where the directory doesn't exist
-      } else {
-        logger.error('خطأ في جلب حالة النسخ الاحتياطي:', error);
-        res.status(500).json({ error: 'فشل جلب حالة النسخ الاحتياطي' });
-      }
-    }
-  });
-
-  app.post("/api/backup/restore/:filename", async (req, res) => {
-    try {
-      const result = await restoreBackup(req.params.filename);
-      logger.info('تم استعادة النسخة الاحتياطية بنجاح:', result);
-      res.json(result);
-    } catch (error) {
-      logger.error('خطأ في استعادة النسخة الاحتياطية:', error);
-      res.status(500).json({ error: 'فشل استعادة النسخة الاحتياطية' });
-    }
-  });
-
-
   // مراقبة النظام والأخطاء
   app.use(errorTracker);
   app.use(apiMonitor);
-
-  // بدء المراقبة والنسخ الاحتياطي التلقائي
-  scheduleBackups();
 
   const httpServer = createServer(app);
   return httpServer;
