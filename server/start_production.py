@@ -4,10 +4,11 @@ from dotenv import load_dotenv
 from waitress import serve
 from flask import Flask
 from flask_cors import CORS
-from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.security import generate_password_hash
 import psycopg2
 import logging
 from logging.handlers import RotatingFileHandler
+from prometheus_client import start_http_server
 
 # Create Flask app
 app = Flask(__name__)
@@ -32,30 +33,30 @@ def setup_logging():
     ))
     logger.addHandler(file_handler)
 
-def create_test_user():
+def create_admin_user():
     try:
         conn = psycopg2.connect(os.getenv('DATABASE_URL'))
         cur = conn.cursor()
 
-        # Check if test user exists
-        cur.execute("SELECT id FROM users WHERE username = 'test_user'")
+        # Check if admin exists
+        cur.execute("SELECT id FROM users WHERE username = 'admin'")
         if cur.fetchone() is None:
-            # Create test user with hashed password
-            hashed_password = generate_password_hash('Test@123')
+            # Create admin user with hashed password
+            hashed_password = generate_password_hash('admin123')
             cur.execute(
                 """
                 INSERT INTO users (username, password, role, is_approved, status)
                 VALUES (%s, %s, %s, %s, %s)
                 """,
-                ('test_user', hashed_password, 'user', True, 'active')
+                ('admin', hashed_password, 'admin', True, 'active')
             )
             conn.commit()
-            logger.info("Test user created successfully")
+            logger.info("Admin user created successfully")
 
         cur.close()
         conn.close()
     except Exception as e:
-        logger.error(f"Error creating test user: {e}")
+        logger.error(f"Error creating admin user: {e}")
 
 def main():
     # Load environment variables
@@ -64,23 +65,31 @@ def main():
     # Setup logging
     setup_logging()
 
+    # Start metrics server
+    metrics_port = int(os.getenv('METRICS_PORT', '9090'))
+    try:
+        start_http_server(metrics_port)
+        logger.info(f"Metrics server started on port {metrics_port}")
+    except Exception as e:
+        logger.error(f"Failed to start metrics server: {e}")
+
     # Validate required environment variables
-    required_vars = ['DATABASE_URL', 'SECRET_KEY']
+    required_vars = ['DATABASE_URL']
     missing_vars = [var for var in required_vars if not os.getenv(var)]
 
     if missing_vars:
         logger.error(f"Missing required environment variables: {', '.join(missing_vars)}")
         sys.exit(1)
 
-    # Configure app from environment
+    # Configure app
     app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')
     app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', os.urandom(24))
 
+    # Create admin user
+    create_admin_user()
+
     # Get port from environment variable with fallback
     port = int(os.getenv("PORT", "5000"))
-
-    # Create test user
-    create_test_user()
 
     logger.info(f"Starting production server on port {port}")
     logger.info(f"Database URL configured: {bool(app.config['SQLALCHEMY_DATABASE_URI'])}")
