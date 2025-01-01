@@ -67,8 +67,17 @@ def start_server():
         os.environ["PORT"] = str(port)
 
         # بدء التطبيق
+        app.config['wait_for_port'] = True
+        app.config['port'] = port
         main()
         logger.info(f"تم بدء الخادم بنجاح على المنفذ {port}")
+
+        # انتظار حتى يصبح المنفذ مشغولاً (يعني أن الخادم بدأ بنجاح)
+        start_time = time.time()
+        while not is_port_in_use(port):
+            if time.time() - start_time > 30:
+                raise RuntimeError("فشل في بدء الخادم")
+            time.sleep(1)
 
         return True
     except Exception as e:

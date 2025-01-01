@@ -60,6 +60,22 @@ def create_admin_user():
         logger.error(f"Error creating admin user: {e}")
         raise
 
+def is_port_in_use(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.bind(('0.0.0.0', port))
+            return False
+        except socket.error:
+            return True
+
+def wait_for_port(port: int, timeout: int = 60) -> bool:
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        if not is_port_in_use(port):
+            return True
+        time.sleep(1)
+    return False
+
 def main():
     try:
         # Load environment variables
@@ -79,13 +95,22 @@ def main():
             SECRET_KEY=os.getenv('SECRET_KEY', os.urandom(24)),
             SESSION_COOKIE_SECURE=True,
             SESSION_COOKIE_HTTPONLY=True,
-            PERMANENT_SESSION_LIFETIME=1800  # 30 minutes
+            PERMANENT_SESSION_LIFETIME=1800,  # 30 minutes
+            WAIT_FOR_PORT=True  # إضافة هذا الإعداد
         )
 
         # Create admin user
         create_admin_user()
 
         port = int(os.getenv("PORT", "5001"))
+
+        # انتظار حتى يصبح المنفذ متاحاً
+        if not wait_for_port(port, timeout=30):
+            logger.warning(f"Port {port} is busy, trying next port")
+            port += 1
+
+            if not wait_for_port(port, timeout=30):
+                raise RuntimeError("No available ports")
 
         logger.info(f"Starting production server on port {port}")
         logger.info(f"Database URL configured: {bool(app.config['SQLALCHEMY_DATABASE_URI'])}")
