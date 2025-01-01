@@ -26,6 +26,12 @@ echo "تثبيت الاعتماديات..."
 npm ci
 npm install -g pm2
 
+# التحقق من تثبيت الاعتماديات
+if [ $? -ne 0 ]; then
+  echo "خطأ: فشل تثبيت الاعتماديات"
+  exit 1
+fi
+
 # بناء التطبيق
 echo "بناء التطبيق..."
 NODE_ENV=production npm run build
@@ -44,6 +50,8 @@ npm run db:push
 echo "التحقق من الاتصال بقاعدة البيانات..."
 node -e "
 const { db } = require('./dist/db');
+const { sql } = require('drizzle-orm');
+
 async function checkDb() {
   try {
     await db.execute(sql\`SELECT 1\`);
@@ -73,7 +81,7 @@ verify_deployment() {
   if [ $? -eq 0 ]; then
     server_status=$(echo "$response" | grep -o '"server":"[^"]*"' | cut -d'"' -f4)
     db_status=$(echo "$response" | grep -o '"database":"[^"]*"' | cut -d'"' -f4)
-    
+
     if [ "$server_status" = "running" ] && [ "$db_status" = "connected" ]; then
       return 0
     fi
@@ -87,14 +95,14 @@ while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
     pm2 list
     exit 0
   fi
-  
+
   RETRY_COUNT=$((RETRY_COUNT + 1))
   if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
     echo "خطأ: فشل التحقق من صحة النشر بعد $MAX_RETRIES محاولة"
     pm2 logs socialpulse --lines 100
     exit 1
   fi
-  
+
   echo "محاولة $RETRY_COUNT من $MAX_RETRIES - انتظار..."
   sleep $RETRY_INTERVAL
 done
