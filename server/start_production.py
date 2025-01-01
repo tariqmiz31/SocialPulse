@@ -1,27 +1,50 @@
 import os
 import sys
-import socket
-import time
-from dotenv import load_dotenv
+from flask import Flask, send_from_directory, request
 from waitress import serve
-from flask import Flask, jsonify, request, session
-from flask_cors import CORS
-from werkzeug.security import generate_password_hash
-import psycopg2
+from dotenv import load_dotenv
 import logging
 from logging.handlers import RotatingFileHandler
+from flask_cors import CORS
 import prometheus_client
 from prometheus_client import Counter, Histogram
-
-# Create Flask app
-app = Flask(__name__, static_folder='../client/dist', static_url_path='/')
-CORS(app, 
-     supports_credentials=True, 
-     resources={r"/api/*": {"origins": ["https://*.repl.co", "https://*.repl.dev"]}})
+import time
+import socket
 
 # تكوين التسجيل
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger('silvarium')
+
+def is_port_in_use(port: int) -> bool:
+    """التحقق مما إذا كان المنفذ قيد الاستخدام"""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.bind(('0.0.0.0', port))
+            return False
+        except socket.error:
+            return True
+
+def wait_for_port(port: int, timeout: int = 60) -> bool:
+    """انتظار حتى يصبح المنفذ متاحاً"""
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        if not is_port_in_use(port):
+            logger.info(f"المنفذ {port} متاح الآن")
+            return True
+        time.sleep(1)
+    return False
+
+# إنشاء تطبيق Flask
+app = Flask(__name__, static_folder='../client/dist', static_url_path='/')
+CORS(app, 
+     supports_credentials=True, 
+     resources={
+         r"/api/*": {
+             "origins": ["https://*.repl.co", "https://*.repl.dev"],
+             "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+             "allow_headers": ["Content-Type", "Authorization"]
+         }
+     })
 
 def setup_logging():
     """إعداد التسجيل مع التدوير التلقائي للملفات"""
@@ -39,63 +62,17 @@ def setup_logging():
     ))
     logger.addHandler(file_handler)
 
-@app.route('/')
-def serve_static():
-    """خدمة الملف الرئيسي للتطبيق"""
-    return app.send_static_file('index.html')
-
+@app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
-def serve_static_paths(path):
-    """خدمة المسارات الثابتة للتطبيق"""
-    try:
-        return app.send_static_file(path)
-    except:
-        return app.send_static_file('index.html')
+def serve_static(path):
+    """خدمة الملفات الثابتة للتطبيق"""
+    if path != "" and os.path.exists(os.path.join(app.static_folder, path)):
+        return send_from_directory(app.static_folder, path)
+    return send_from_directory(app.static_folder, 'index.html')
 
-def create_admin_user():
-    """إنشاء مستخدم مشرف إذا لم يكن موجوداً"""
-    try:
-        conn = psycopg2.connect(os.getenv('DATABASE_URL'))
-        cur = conn.cursor()
-
-        # التحقق من وجود المشرف
-        cur.execute("SELECT id FROM users WHERE username = 'admin'")
-        if cur.fetchone() is None:
-            # إنشاء مستخدم مشرف جديد
-            hashed_password = generate_password_hash('admin123')
-            cur.execute(
-                """
-                INSERT INTO users (username, password, role, is_approved, status)
-                VALUES (%s, %s, %s, %s, %s)
-                """,
-                ('admin', hashed_password, 'admin', True, 'active')
-            )
-            conn.commit()
-            logger.info("تم إنشاء حساب المشرف بنجاح")
-
-        cur.close()
-        conn.close()
-    except Exception as e:
-        logger.error(f"خطأ في إنشاء حساب المشرف: {e}")
-        raise
-
-@app.route('/metrics')
-def metrics():
-    """نقطة نهاية مقاييس Prometheus"""
-    return prometheus_client.generate_latest()
-
-@app.route('/api/admin/status')
-def admin_status():
-    """نقطة نهاية حالة النظام للمشرفين"""
-    if session.get('user_role') != 'admin':
-        return jsonify({'error': 'غير مصرح'}), 403
-
-    return jsonify({
-        'status': 'running',
-        'server_time': time.time(),
-        'uptime': time.time() - app.start_time,
-        'environment': os.getenv('FLASK_ENV', 'production')
-    })
+# مقاييس Prometheus
+REQUEST_COUNT = Counter('request_count', 'Total number of requests', ['method', 'endpoint', 'status'])
+REQUEST_LATENCY = Histogram('request_latency_seconds', 'Request latency in seconds', ['method', 'endpoint'])
 
 @app.before_request
 def before_request():
@@ -119,20 +96,17 @@ def after_request(response):
         ).inc()
     return response
 
-# مقاييس Prometheus
-REQUEST_COUNT = Counter('request_count', 'Total number of requests', ['method', 'endpoint', 'status'])
-REQUEST_LATENCY = Histogram('request_latency_seconds', 'Request latency in seconds', ['method', 'endpoint'])
-
-
 def main():
+    """الدالة الرئيسية لبدء الخادم"""
     try:
         # تحميل متغيرات البيئة
         load_dotenv()
 
         # إعداد التسجيل
         setup_logging()
+        logger.info("بدء تشغيل خادم الإنتاج...")
 
-        # التحقق من متغيرات البيئة المطلوبة
+        # التحقق من المتغيرات المطلوبة
         if not os.getenv('DATABASE_URL'):
             logger.error("DATABASE_URL غير موجود")
             sys.exit(1)
@@ -151,6 +125,14 @@ def main():
         # تحديد المنفذ
         port = int(os.getenv("PORT", "5001"))
 
+        # انتظار حتى يصبح المنفذ متاحاً
+        if not wait_for_port(port):
+            logger.warning(f"المنفذ {port} مشغول، جاري المحاولة على المنفذ التالي")
+            port += 1
+
+            if not wait_for_port(port):
+                raise RuntimeError("لا توجد منافذ متاحة")
+
         logger.info(f"بدء تشغيل الخادم على المنفذ {port}")
         logger.info(f"تم تكوين قاعدة البيانات: {bool(app.config['SQLALCHEMY_DATABASE_URI'])}")
 
@@ -168,7 +150,7 @@ def main():
             threads=4,
             connection_limit=1000,
             channel_timeout=30,
-            _quiet=True  # Reduce waitress logging
+            _quiet=True  # تقليل سجلات waitress
         )
 
         return True

@@ -1,7 +1,7 @@
 from flask_cors import CORS
 from flask import Flask
 from waitress import serve
-from .start import app, main
+from .app import app, main
 import logging
 from logging.handlers import RotatingFileHandler
 import socket
