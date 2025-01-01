@@ -15,18 +15,6 @@ from flask_cors import CORS
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger('silvarium')
 
-# إنشاء تطبيق Flask
-app = Flask(__name__, static_folder='../client/dist', static_url_path='/')
-CORS(app, 
-     supports_credentials=True, 
-     resources={
-         r"/api/*": {
-             "origins": ["https://*.repl.co", "https://*.repl.dev"],
-             "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-             "allow_headers": ["Content-Type", "Authorization"]
-         }
-     })
-
 def is_port_in_use(port: int) -> bool:
     """التحقق مما إذا كان المنفذ قيد الاستخدام"""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -62,17 +50,30 @@ def setup_logging():
     ))
     logger.addHandler(file_handler)
 
-# مقاييس Prometheus
-REQUEST_COUNT = Counter('request_count', 'Total number of requests', ['method', 'endpoint', 'status'])
-REQUEST_LATENCY = Histogram('request_latency_seconds', 'Request latency in seconds', ['method', 'endpoint'])
+def create_app():
+    """إنشاء وإعداد تطبيق Flask"""
+    # إنشاء تطبيق Flask
+    app = Flask(__name__, static_folder='../client/dist', static_url_path='/')
 
-@app.route('/', defaults={'path': ''})
-@app.route('/<path:path>')
-def serve_static(path):
-    """خدمة الملفات الثابتة للتطبيق"""
-    if path and os.path.exists(os.path.join(app.static_folder, path)):
-        return send_from_directory(app.static_folder, path)
-    return send_from_directory(app.static_folder, 'index.html')
+    # إعداد CORS
+    CORS(app, 
+         supports_credentials=True, 
+         resources={
+             r"/api/*": {
+                 "origins": ["https://*.repl.co", "https://*.repl.dev"],
+                 "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+                 "allow_headers": ["Content-Type", "Authorization"]
+             }
+         })
+
+    from server.auth import setup_auth
+    from server.routes import setup_routes
+
+    # إعداد المصادقة والمسارات
+    setup_auth(app)
+    setup_routes(app)
+
+    return app
 
 def main():
     """الدالة الرئيسية لبدء الخادم"""
@@ -87,10 +88,13 @@ def main():
         # تحديد المنفذ
         port = int(os.getenv("PORT", "5001"))
 
-        # بدء خادم المقاييس
-        metrics_port = port + 1
-        prometheus_client.start_http_server(metrics_port)
-        logger.info(f"تم بدء خادم المقاييس على المنفذ {metrics_port}")
+        # انتظار المنفذ
+        if not wait_for_port(port, timeout=60):
+            logger.error(f"المنفذ {port} غير متاح بعد انتظار 60 ثانية")
+            sys.exit(1)
+
+        # إنشاء التطبيق
+        app = create_app()
 
         # تكوين التطبيق
         app.config.update(
@@ -101,12 +105,22 @@ def main():
             PERMANENT_SESSION_LIFETIME=1800  # 30 minutes
         )
 
+        # بدء خادم المقاييس
+        metrics_port = port + 1
+        prometheus_client.start_http_server(metrics_port)
+        logger.info(f"تم بدء خادم المقاييس على المنفذ {metrics_port}")
+
         logger.info(f"بدء تشغيل الخادم على المنفذ {port}")
 
         # بدء خادم الإنتاج مع waitress
         serve(
             app,
-            listen=f'*:{port}'
+            host="0.0.0.0",
+            port=port,
+            threads=4,
+            connection_limit=1000,
+            channel_timeout=30,
+            _quiet=True
         )
 
         return True
