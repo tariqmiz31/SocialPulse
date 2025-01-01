@@ -1,5 +1,6 @@
 import os
 import sys
+import socket
 from dotenv import load_dotenv
 from waitress import serve
 from flask import Flask
@@ -17,6 +18,14 @@ CORS(app)
 # تكوين التسجيل
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger('silvarium')
+
+def is_port_in_use(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.bind(('0.0.0.0', port))
+            return False
+        except socket.error:
+            return True
 
 def setup_logging():
     log_dir = '/tmp/logs'
@@ -67,6 +76,10 @@ def main():
 
     # Start metrics server
     metrics_port = int(os.getenv('METRICS_PORT', '9090'))
+    while is_port_in_use(metrics_port):
+        logger.warning(f"Port {metrics_port} is in use, trying next port")
+        metrics_port += 1
+
     try:
         start_http_server(metrics_port)
         logger.info(f"Metrics server started on port {metrics_port}")
@@ -90,6 +103,11 @@ def main():
 
     # Get port from environment variable with fallback
     port = int(os.getenv("PORT", "5000"))
+
+    # Check if port is in use and find next available port
+    while is_port_in_use(port):
+        logger.warning(f"Port {port} is in use, trying next port")
+        port += 1
 
     logger.info(f"Starting production server on port {port}")
     logger.info(f"Database URL configured: {bool(app.config['SQLALCHEMY_DATABASE_URI'])}")
