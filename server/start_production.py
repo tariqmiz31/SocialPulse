@@ -10,6 +10,8 @@ from flask import Flask, send_from_directory, request
 from flask_cors import CORS
 from flask_session import Session
 import psycopg2
+import time
+import socket
 
 # إضافة المسار الرئيسي إلى PYTHONPATH
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -19,6 +21,25 @@ from server.routes import setup_routes
 # تكوين التسجيل
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger('silvarium')
+
+def is_port_in_use(port: int) -> bool:
+    """التحقق مما إذا كان المنفذ قيد الاستخدام"""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.bind(('0.0.0.0', port))
+            return False
+        except socket.error:
+            return True
+
+def wait_for_port(port: int, timeout=60):
+    """انتظار حتى يصبح المنفذ متاحًا"""
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        if not is_port_in_use(port):
+            logger.info(f"المنفذ {port} متاح الآن")
+            return True
+        time.sleep(1)
+    return False
 
 def create_app():
     """إنشاء وإعداد تطبيق Flask"""
@@ -53,6 +74,11 @@ def main():
 
         # تحديد المنفذ
         port = int(os.getenv("PORT", "5001"))
+
+        # انتظار حتى يصبح المنفذ متاحًا
+        if not wait_for_port(port):
+            logger.error(f"المنفذ {port} مشغول")
+            return False
 
         # إنشاء التطبيق
         app = create_app()

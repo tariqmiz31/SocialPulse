@@ -1,5 +1,6 @@
-from flask_cors import CORS
 from flask import Flask
+from flask_cors import CORS
+from flask_session import Session
 from waitress import serve
 import logging
 from logging.handlers import RotatingFileHandler
@@ -52,6 +53,7 @@ def create_app():
     """إنشاء وإعداد تطبيق Flask"""
     app = Flask(__name__, static_folder='../client/dist', static_url_path='/')
 
+    # تكوين CORS
     CORS(app, 
          supports_credentials=True, 
          resources={
@@ -61,6 +63,13 @@ def create_app():
                  "allow_headers": ["Content-Type", "Authorization"]
              }
          })
+
+    # تكوين الجلسة
+    app.config['SESSION_TYPE'] = 'filesystem'
+    Session(app)
+
+    # تكوين السر
+    app.secret_key = os.getenv('SECRET_KEY', os.urandom(24).hex())
 
     # إعداد المصادقة والمسارات
     app = setup_auth(app)
@@ -77,33 +86,22 @@ def start_server():
         # تحديد المنفذ
         port = int(os.getenv("PORT", "5001"))
 
-        # تعيين متغيرات البيئة للتكوين
-        os.environ["WAIT_FOR_PORT"] = "true"
-        os.environ["PORT"] = str(port)
+        # انتظار حتى يصبح المنفذ متاحًا
+        if not wait_for_port(port, logger):
+            logger.error(f"المنفذ {port} مشغول")
+            return False
 
         # إنشاء وتكوين التطبيق
         app = create_app()
         app.config.update(
-            WAIT_FOR_PORT=True,
             PORT=port,
-            SECRET_KEY=os.getenv('SECRET_KEY', os.urandom(24).hex()),
             SESSION_COOKIE_SECURE=True,
             SESSION_COOKIE_HTTPONLY=True,
             SESSION_COOKIE_SAMESITE='Lax',
             PERMANENT_SESSION_LIFETIME=1800  # 30 minutes
         )
 
-        # انتظار حتى يصبح المنفذ متاحًا
-        if not wait_for_port(port, logger):
-            logger.warning(f"المنفذ {port} مشغول، جاري المحاولة على المنفذ التالي")
-            port += 1
-            os.environ["PORT"] = str(port)
-
-            if not wait_for_port(port, logger, timeout=30):
-                logger.error("فشل في العثور على منفذ متاح")
-                raise RuntimeError("لا توجد منافذ متاحة")
-
-        # بدء التطبيق
+        # بدء التشغيل
         logger.info(f"بدء تشغيل الخادم على المنفذ {port}")
         serve(
             app,
@@ -116,14 +114,6 @@ def start_server():
             _quiet=True
         )
 
-        # التحقق من تشغيل الخادم
-        start_time = time.time()
-        while not is_port_in_use(port):
-            if time.time() - start_time > 30:
-                raise RuntimeError("فشل في بدء الخادم")
-            time.sleep(1)
-
-        logger.info("تم بدء الخادم بنجاح")
         return True
 
     except Exception as e:
