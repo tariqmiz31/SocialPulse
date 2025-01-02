@@ -22,13 +22,12 @@ export const selectUserSchema = createSelectSchema(users);
 export type InsertUser = typeof users.$inferInsert;
 export type SelectUser = typeof users.$inferSelect;
 
-export const posts = pgTable("posts", {
+export const socialPlatforms = pgTable("social_platforms", {
   id: serial("id").primaryKey(),
-  content: text("content").notNull(),
-  platforms: text("platforms").notNull(), // Changed from jsonb
-  scheduledFor: timestamp("scheduled_for").notNull(),
-  status: text("status").notNull(),
-  userId: serial("user_id").references(() => users.id),
+  name: text("name").notNull(),
+  apiKey: text("api_key"),
+  apiSecret: text("api_secret"),
+  active: boolean("active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -36,10 +35,74 @@ export const posts = pgTable("posts", {
 export const platformConnections = pgTable("platform_connections", {
   id: serial("id").primaryKey(),
   userId: serial("user_id").references(() => users.id),
-  platform: text("platform").notNull(),
+  platformId: serial("platform_id").references(() => socialPlatforms.id),
   accessToken: text("access_token").notNull(),
   refreshToken: text("refresh_token"),
   expiresAt: timestamp("expires_at"),
+  platformUsername: text("platform_username"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const tasks = pgTable("tasks", {
+  id: serial("id").primaryKey(),
+  title: text("title").notNull(),
+  description: text("description"),
+  content: text("content").notNull(),
+  platformIds: text("platform_ids").array(),
+  scheduledTime: timestamp("scheduled_time"),
+  status: text("status", {
+    enum: ["draft", "scheduled", "published", "failed"]
+  }).notNull().default("draft"),
+  userId: serial("user_id").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const taskAnalytics = pgTable("task_analytics", {
+  id: serial("id").primaryKey(),
+  taskId: serial("task_id").references(() => tasks.id),
+  platformId: serial("platform_id").references(() => socialPlatforms.id),
+  engagement: text("engagement").default("0"),
+  likes: text("likes").default("0"),
+  shares: text("shares").default("0"),
+  comments: text("comments").default("0"),
+  reach: text("reach").default("0"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Export types for TaskAnalytics
+export const insertTaskAnalyticsSchema = createInsertSchema(taskAnalytics);
+export const selectTaskAnalyticsSchema = createSelectSchema(taskAnalytics);
+export type InsertTaskAnalytics = typeof taskAnalytics.$inferInsert;
+export type SelectTaskAnalytics = typeof taskAnalytics.$inferSelect;
+
+// Export types for Tasks
+export const insertTaskSchema = createInsertSchema(tasks);
+export const selectTaskSchema = createSelectSchema(tasks);
+export type InsertTask = typeof tasks.$inferInsert;
+export type SelectTask = typeof tasks.$inferSelect;
+
+// Export types for SocialPlatforms
+export const insertSocialPlatformSchema = createInsertSchema(socialPlatforms);
+export const selectSocialPlatformSchema = createSelectSchema(socialPlatforms);
+export type InsertSocialPlatform = typeof socialPlatforms.$inferInsert;
+export type SelectSocialPlatform = typeof socialPlatforms.$inferSelect;
+
+// Export types for PlatformConnections
+export const insertPlatformConnectionSchema = createInsertSchema(platformConnections);
+export const selectPlatformConnectionSchema = createSelectSchema(platformConnections);
+export type InsertPlatformConnection = typeof platformConnections.$inferInsert;
+export type SelectPlatformConnection = typeof platformConnections.$inferSelect;
+
+export const posts = pgTable("posts", {
+  id: serial("id").primaryKey(),
+  content: text("content").notNull(),
+  platforms: text("platforms").notNull(), // Changed from jsonb
+  scheduledFor: timestamp("scheduled_for").notNull(),
+  status: text("status").notNull(),
+  userId: serial("user_id").references(() => users.id),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

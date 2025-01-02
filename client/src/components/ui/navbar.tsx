@@ -14,6 +14,9 @@ export function Navbar() {
               <a className="text-xl font-bold">سيلفاريوم</a>
             </Link>
             <div className="space-x-4">
+              <Link href="/social">
+                <a className="text-sm text-muted-foreground hover:text-foreground mr-4">إدارة المحتوى</a>
+              </Link>
               <Link href="/calendar">
                 <a className="text-sm text-muted-foreground hover:text-foreground mr-4">التقويم</a>
               </Link>
@@ -22,14 +25,19 @@ export function Navbar() {
               </Link>
               {user?.role === 'admin' && (
                 <Link href="/admin">
-                  <a className="text-sm text-muted-foreground hover:text-foreground mr-4">لوحة الإشراف</a>
+                  <a className="text-sm text-muted-foreground hover:text-foreground mr-4 font-semibold">لوحة الإشراف</a>
                 </Link>
               )}
             </div>
           </div>
-          <Button variant="outline" onClick={() => logout()}>
-            تسجيل الخروج
-          </Button>
+          <div className="flex items-center space-x-4">
+            <span className="text-sm text-muted-foreground ml-4">
+              {user?.username}
+            </span>
+            <Button variant="outline" onClick={() => logout()}>
+              تسجيل الخروج
+            </Button>
+          </div>
         </div>
       </div>
     </nav>
