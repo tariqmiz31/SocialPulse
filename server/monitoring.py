@@ -6,6 +6,7 @@ import time
 from functools import wraps
 from typing import Callable
 from flask import request, Response
+import psycopg2
 
 # تكوين التسجيل
 logging.basicConfig(level=logging.INFO)
@@ -28,55 +29,112 @@ logger.addHandler(file_handler)
 
 # مقاييس Prometheus
 REQUEST_COUNT = Counter(
-    'request_count',
+    'silvarium_request_count',
     'Total number of requests',
     ['method', 'endpoint', 'status']
 )
 
 REQUEST_LATENCY = Histogram(
-    'request_latency_seconds',
+    'silvarium_request_latency_seconds',
     'Request latency in seconds',
     ['method', 'endpoint']
 )
 
 ERROR_COUNT = Counter(
-    'error_count',
+    'silvarium_error_count',
     'Total number of errors',
     ['type']
 )
 
-def start_metrics_server():
-    """بدء خادم مقاييس Prometheus"""
-    metrics_port = int(os.getenv('METRICS_PORT', '9090'))
+DB_QUERY_LATENCY = Histogram(
+    'silvarium_db_query_latency_seconds',
+    'Database query latency in seconds',
+    ['query_type']
+)
+
+def setup_monitoring(app, metrics_port=9090):
+    """إعداد المراقبة للتطبيق"""
+    # بدء خادم مقاييس Prometheus
     start_http_server(metrics_port)
-    logger.info(f'Metrics server started on port {metrics_port}')
+    logger.info(f'تم بدء خادم المقاييس على المنفذ {metrics_port}')
+
+    # إضافة التسجيل لكل الطلبات
+    @app.before_request
+    def before_request():
+        request.start_time = time.time()
+
+    @app.after_request
+    def after_request(response):
+        if hasattr(request, 'start_time'):
+            duration = time.time() - request.start_time
+            REQUEST_COUNT.labels(
+                method=request.method,
+                endpoint=request.endpoint or 'unknown',
+                status=response.status_code
+            ).inc()
+
+            REQUEST_LATENCY.labels(
+                method=request.method,
+                endpoint=request.endpoint or 'unknown'
+            ).observe(duration)
+
+            if response.status_code >= 400:
+                ERROR_COUNT.labels(type=str(response.status_code)).inc()
+
+        return response
+
+    # نقطة نهاية لفحص الصحة
+    @app.route('/api/monitoring/health')
+    def health_check():
+        try:
+            # فحص اتصال قاعدة البيانات
+            start_time = time.time()
+            conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+            duration = time.time() - start_time
+            DB_QUERY_LATENCY.labels(query_type='connection').observe(duration)
+
+            conn.close()
+            return {
+                'status': 'healthy',
+                'database': 'connected',
+                'timestamp': time.time()
+            }
+        except Exception as e:
+            logger.error(f'فشل فحص الصحة: {str(e)}')
+            return {
+                'status': 'unhealthy',
+                'database': 'disconnected',
+                'error': str(e)
+            }, 500
+
+    return app
 
 def monitor_performance(func: Callable) -> Callable:
     """مراقب أداء نقاط النهاية"""
     @wraps(func)
     def wrapper(*args, **kwargs):
         start_time = time.time()
-        
+
         try:
             response = func(*args, **kwargs)
             status = response.status_code if isinstance(response, Response) else 200
         except Exception as e:
-            logger.error(f'Error in {func.__name__}: {str(e)}')
+            logger.error(f'خطأ في {func.__name__}: {str(e)}')
             ERROR_COUNT.labels(type=type(e).__name__).inc()
             raise
-        
+
         duration = time.time() - start_time
         REQUEST_COUNT.labels(
             method=request.method,
             endpoint=request.path,
             status=status
         ).inc()
-        
+
         REQUEST_LATENCY.labels(
             method=request.method,
             endpoint=request.path
         ).observe(duration)
-        
+
         return response
     return wrapper
 

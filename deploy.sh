@@ -1,24 +1,14 @@
 #!/bin/bash
 
-# استيراد السكربت المشترك
-source ./scripts/ci-deploy.sh
-
-# إضافة خطوات إضافية خاصة بالنشر على Replit
 echo "تحديث تكوين Replit..."
 
-# ضمان وجود التكوينات المطلوبة
+# تأكد من وجود التكوينات المطلوبة
 if [ ! -f ".replit" ]; then
   echo "إنشاء ملف .replit..."
   cat > .replit << EOL
-run = "npm run start"
-language = "nodejs"
+run = "python server/start_production.py"
+language = "python3"
 hidden = [".config", "package-lock.json"]
-
-[packager]
-language = "nodejs"
-  [packager.features]
-  enabledForHosting = true
-  packageSearch = true
 
 [env]
 XDG_CONFIG_HOME = "/home/runner/.config"
@@ -37,107 +27,63 @@ if [ ! -f "replit.nix" ]; then
   cat > replit.nix << EOL
 { pkgs }: {
     deps = [
-        pkgs.nodejs-20_x
-        pkgs.nodePackages.typescript
-        pkgs.nodePackages.pm2
+        pkgs.python39
         pkgs.postgresql
     ];
 }
 EOL
 fi
 
-echo "تم اكتمال النشر على Replit!"
-
 echo "بدء عملية النشر..."
 
-# التحقق من المتغيرات البيئية الضرورية
+# التحقق من المتغيرات البيئية
 if [ -z "$DATABASE_URL" ]; then
     echo "خطأ: DATABASE_URL غير موجود"
     exit 1
 fi
 
-# تحديث التطبيق وتثبيت الاعتماديات
+# تثبيت الاعتماديات
 echo "تثبيت الاعتماديات..."
-npm install
-npm install -g pm2
+pip install -r requirements.txt
 
-# بناء التطبيق
-echo "بناء التطبيق..."
-npm run build
+# التأكد من إيقاف أي عمليات سابقة على المنفذ 3000
+echo "إيقاف العمليات السابقة..."
+pkill -f "python server/start_production.py" || true
 
-# التحقق من صحة البناء
-if [ ! -d "dist" ]; then
-    echo "خطأ: فشل البناء"
-    exit 1
-fi
-
-# إيقاف التطبيق القديم إذا كان قيد التشغيل
-pm2 delete socialpulse 2>/dev/null || true
-
-# تنظيف السجلات القديمة
-rm -f /tmp/socialpulse-err.log /tmp/socialpulse-out.log
-
-# التحقق من الاتصال بقاعدة البيانات
-echo "التحقق من الاتصال بقاعدة البيانات..."
-DB_CHECK_SCRIPT="const { db } = require('./dist/db/index.js'); async function checkDb() { try { await db.execute(sql\`SELECT 1\`); console.log('تم الاتصال بقاعدة البيانات بنجاح'); process.exit(0); } catch (error) { console.error('فشل الاتصال بقاعدة البيانات:', error); process.exit(1); } } checkDb();"
-
-if ! node -e "$DB_CHECK_SCRIPT"; then
-    echo "خطأ: فشل الاتصال بقاعدة البيانات"
-    exit 1
-fi
-
-# بدء التطبيق باستخدام PM2
-echo "بدء التطبيق..."
-NODE_ENV=production pm2 start pm2.config.cjs --env production
-
-# انتظار بدء التطبيق
-echo "انتظار بدء التطبيق..."
-sleep 20
-
-# التحقق من صحة النشر
-echo "التحقق من صحة النشر..."
-STATUS_URL="http://localhost:5000/api/monitoring/status"
-RETRY_COUNT=0
-MAX_RETRIES=15
-RETRY_INTERVAL=10
-
-verify_deployment() {
-    HTTP_RESPONSE=$(curl -s -w "\n%{http_code}" $STATUS_URL)
-    HTTP_BODY=$(echo "$HTTP_RESPONSE" | head -n 1)
-    HTTP_STATUS=$(echo "$HTTP_RESPONSE" | tail -n 1)
-
-    if [ "$HTTP_STATUS" -eq 200 ]; then
-        # التحقق من حالة الخادم وقاعدة البيانات
-        SERVER_STATUS=$(echo "$HTTP_BODY" | grep -o '"server":"[^"]*"' | cut -d'"' -f4)
-        DB_STATUS=$(echo "$HTTP_BODY" | grep -o '"database":"[^"]*"' | cut -d'"' -f4)
-
-        if [ "$SERVER_STATUS" = "running" ] && [ "$DB_STATUS" = "connected" ]; then
+# انتظار حتى يصبح المنفذ متاحاً
+wait_for_port() {
+    local port=$1
+    local retries=10
+    local wait=2
+    while [ $retries -gt 0 ]; do
+        if ! lsof -i :$port > /dev/null 2>&1; then
             return 0
         fi
-    fi
+        retries=$((retries - 1))
+        echo "المنفذ $port مشغول، انتظار..."
+        sleep $wait
+    done
     return 1
 }
 
-while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-    if verify_deployment; then
-        echo "تم النشر بنجاح!"
-        echo "حالة التطبيق:"
-        curl -s $STATUS_URL | json_pp
-        echo "معلومات عمليات التشغيل:"
-        pm2 list
-        echo "تم اكتمال عملية النشر بنجاح!"
-        exit 0
-    else
-        RETRY_COUNT=$((RETRY_COUNT + 1))
-        if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
-            echo "خطأ: فشل التحقق من صحة النشر بعد $MAX_RETRIES محاولة"
-            echo "آخر استجابة:"
-            curl -s $STATUS_URL || echo "لا يمكن الوصول إلى نقطة النهاية"
-            echo "سجلات التطبيق:"
-            pm2 logs socialpulse --lines 100
-            exit 1
-        fi
-        echo "محاولة $RETRY_COUNT من $MAX_RETRIES - انتظار..."
-        sleep $RETRY_INTERVAL
-    fi
-done
+if ! wait_for_port 3000; then
+    echo "خطأ: المنفذ 3000 لا يزال مشغولاً"
+    exit 1
+fi
+
+# بدء التطبيق
+echo "بدء التطبيق..."
+python server/start_production.py &
+
+# انتظار بدء التطبيق
+echo "انتظار بدء التطبيق..."
+sleep 5
+
+# التحقق من حالة التطبيق
+if curl -s http://localhost:3000/api/monitoring/health > /dev/null; then
+    echo "تم بدء التطبيق بنجاح!"
+    exit 0
+else
+    echo "فشل بدء التطبيق"
+    exit 1
+fi

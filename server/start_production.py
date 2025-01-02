@@ -7,8 +7,10 @@ import logging
 from logging.handlers import RotatingFileHandler
 import time
 import socket
+import signal
+import psutil
 
-# Add the project root to PYTHONPATH
+# إضافة مسار المشروع إلى PYTHONPATH
 sys.path.insert(0, os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
 
 from server import create_app
@@ -44,8 +46,22 @@ def setup_logging():
 
     return logger
 
+def cleanup_port(port: int, logger):
+    """تنظيف المنفذ إذا كان مشغولاً"""
+    for proc in psutil.process_iter(['pid', 'name', 'connections']):
+        try:
+            for conn in proc.connections():
+                if conn.laddr.port == port:
+                    logger.info(f"إيقاف العملية {proc.pid} التي تستخدم المنفذ {port}")
+                    psutil.Process(proc.pid).terminate()
+                    time.sleep(1)  # انتظار لإغلاق العملية
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+
 def wait_for_port(port: int, host: str, logger, timeout=30):
     """انتظار حتى يصبح المنفذ متاحاً"""
+    cleanup_port(port, logger)  # تنظيف المنفذ أولاً
+
     start_time = time.time()
     while True:
         try:
@@ -60,16 +76,26 @@ def wait_for_port(port: int, host: str, logger, timeout=30):
             time.sleep(1)
             continue
 
+def signal_handler(signum, frame):
+    """معالج إشارات النظام"""
+    logger = logging.getLogger('silvarium_production')
+    logger.info(f"تم استلام الإشارة {signum}")
+    sys.exit(0)
+
 def main():
     """النقطة الرئيسية لبدء الخادم"""
     try:
         logger = setup_logging()
         logger.info("بدء تشغيل خادم Silvarium Social...")
 
+        # تسجيل معالجات الإشارات
+        signal.signal(signal.SIGTERM, signal_handler)
+        signal.signal(signal.SIGINT, signal_handler)
+
         load_dotenv()
 
         host = "0.0.0.0"
-        port = int(os.getenv("PORT", "5000"))
+        port = int(os.getenv("PORT", "3000"))
 
         if not wait_for_port(port, host, logger):
             logger.error(f"فشل في انتظار المنفذ {port}")
@@ -85,6 +111,7 @@ def main():
             threads=4,
             connection_limit=1000,
             channel_timeout=30,
+            cleanup_interval=30,
             url_scheme='http'
         )
         return 0

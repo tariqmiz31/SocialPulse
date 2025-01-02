@@ -6,13 +6,14 @@ from flask_session import Session
 from datetime import timedelta
 import logging
 from logging.handlers import RotatingFileHandler
+from server.monitoring import setup_monitoring
 
 def create_app():
     app = Flask(__name__, static_folder='../client/dist', static_url_path='/')
 
     # إعداد التسجيل
     logger = logging.getLogger('silvarium')
-    logger.setLevel(logging.DEBUG)
+    logger.setLevel(logging.INFO)
 
     formatter = logging.Formatter('%(asctime)s [%(levelname)s] [%(name)s] %(message)s')
 
@@ -50,12 +51,12 @@ def create_app():
     # تكوين الجلسة
     app.config.update(
         SESSION_TYPE='filesystem',
-        SESSION_COOKIE_SECURE=False,  # تعطيل في بيئة التطوير
+        SESSION_COOKIE_SECURE=True if os.getenv('FLASK_ENV') == 'production' else False,
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE='Lax',
         PERMANENT_SESSION_LIFETIME=timedelta(days=1),
         SECRET_KEY=os.getenv('SECRET_KEY', os.urandom(24).hex()),
-        DEBUG=True
+        DEBUG=os.getenv('FLASK_ENV') != 'production'
     )
     Session(app)
 
@@ -65,6 +66,10 @@ def create_app():
     # إعداد المصادقة والمسارات
     app = setup_auth(app)
     app = setup_routes(app)
+
+    # إعداد المراقبة
+    metrics_port = int(os.getenv('METRICS_PORT', '9090'))
+    app = setup_monitoring(app, metrics_port=metrics_port)
 
     # تسجيل بدء تشغيل التطبيق
     logger.info('تم بدء تشغيل التطبيق بنجاح')
@@ -76,4 +81,4 @@ app = create_app()
 if __name__ == '__main__':
     # تكوين سجلات Flask
     logging.getLogger('werkzeug').setLevel(logging.INFO)
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=3000, debug=True)

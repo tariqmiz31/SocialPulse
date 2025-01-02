@@ -1,16 +1,17 @@
 module.exports = {
   apps: [
     {
-      name: "socialpulse",
-      script: "./dist/index.js",
-      instances: "max",
-      exec_mode: "cluster",
+      name: "silvarium-social",
+      script: "server/start_production.py",
+      interpreter: "python3",
+      instances: 1,
+      exec_mode: "fork",
       autorestart: true,
       watch: false,
-      max_memory_restart: "1024M",
+      max_memory_restart: "1G",
       env_production: {
         NODE_ENV: "production",
-        PORT: 5000,
+        PORT: 3000,
         APP_URL: process.env.APP_URL || "https://silvariumsocial.com",
         CUSTOM_DOMAIN: process.env.CUSTOM_DOMAIN,
         DATABASE_URL: process.env.DATABASE_URL,
@@ -22,24 +23,18 @@ module.exports = {
       },
       env_development: {
         NODE_ENV: "development",
-        PORT: 5000
+        PORT: 3000
       },
-      error_file: "/tmp/socialpulse-err.log",
-      out_file: "/tmp/socialpulse-out.log",
+      error_file: "/tmp/silvarium-err.log",
+      out_file: "/tmp/silvarium-out.log",
       merge_logs: true,
       log_date_format: "YYYY-MM-DD HH:mm:ss Z",
       listen_timeout: 10000,
+      kill_timeout: 5000,
+      wait_ready: true,
+      max_restarts: 10,
       restart_delay: 4000,
-      exp_backoff_restart_delay: 100,
-      monitor: true,
-      metrics: {
-        http: true
-      },
-      backup: {
-        enabled: true,
-        path: "/tmp/backups",
-        interval: "0 4 * * *"
-      }
+      exp_backoff_restart_delay: 100
     }
   ]
 };
