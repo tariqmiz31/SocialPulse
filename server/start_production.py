@@ -76,9 +76,7 @@ def create_app():
              r"/api/*": {
                  "origins": ["https://*.repl.co", "https://*.repl.dev"],
                  "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-                 "allow_headers": ["Content-Type", "Authorization"],
-                 "expose_headers": ["Content-Range", "X-Content-Range"],
-                 "supports_credentials": True
+                 "allow_headers": ["Content-Type", "Authorization"]
              }
          })
 

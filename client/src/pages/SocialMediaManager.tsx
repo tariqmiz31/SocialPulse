@@ -20,7 +20,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Plus, Calendar as CalendarIcon, Loader2 } from "lucide-react";
+import { Plus, Calendar as CalendarIcon, Loader2, Settings } from "lucide-react";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -34,6 +34,11 @@ const taskSchema = z.object({
   content: z.string().min(1, "المحتوى مطلوب"),
   platformIds: z.array(z.string()).min(1, "يجب اختيار منصة واحدة على الأقل"),
   scheduledTime: z.date(),
+  platformSettings: z.record(z.object({
+    hashtags: z.string().optional(),
+    targetAudience: z.string().optional(),
+    postType: z.string().optional(),
+  })).optional(),
 });
 
 type Task = z.infer<typeof taskSchema>;
@@ -49,6 +54,7 @@ export default function SocialMediaManager() {
   const queryClient = useQueryClient();
   const [isAddTaskOpen, setIsAddTaskOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date>();
+  const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([]);
 
   const form = useForm<Task>({
     resolver: zodResolver(taskSchema),
@@ -57,6 +63,7 @@ export default function SocialMediaManager() {
       description: "",
       content: "",
       platformIds: [],
+      platformSettings: {},
     },
   });
 
@@ -103,6 +110,16 @@ export default function SocialMediaManager() {
     },
   });
 
+  const handlePlatformSelect = (platformId: string) => {
+    const currentPlatforms = form.getValues("platformIds") || [];
+    const newPlatforms = currentPlatforms.includes(platformId)
+      ? currentPlatforms.filter(id => id !== platformId)
+      : [...currentPlatforms, platformId];
+
+    form.setValue("platformIds", newPlatforms);
+    setSelectedPlatforms(newPlatforms);
+  };
+
   const onSubmit = (data: Task) => {
     createTask.mutate(data);
   };
@@ -127,7 +144,7 @@ export default function SocialMediaManager() {
                 إضافة مهمة جديدة
               </Button>
             </DialogTrigger>
-            <DialogContent className="sm:max-w-[425px]">
+            <DialogContent className="sm:max-w-[600px]">
               <DialogHeader>
                 <DialogTitle>إضافة مهمة جديدة</DialogTitle>
               </DialogHeader>
@@ -160,31 +177,80 @@ export default function SocialMediaManager() {
 
                   <div className="space-y-2">
                     <label>المنصات</label>
-                    <Select
-                      onValueChange={(value) =>
-                        form.setValue("platformIds", [value])
-                      }
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="اختر المنصة" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {platforms?.map((platform) => (
-                          <SelectItem
-                            key={platform.id}
-                            value={platform.id.toString()}
-                          >
-                            {platform.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <div className="flex flex-wrap gap-2">
+                      {platforms?.map((platform) => (
+                        <Button
+                          key={platform.id}
+                          type="button"
+                          variant={selectedPlatforms.includes(platform.id.toString()) ? "default" : "outline"}
+                          onClick={() => handlePlatformSelect(platform.id.toString())}
+                        >
+                          {platform.name}
+                        </Button>
+                      ))}
+                    </div>
                     {form.formState.errors.platformIds && (
                       <p className="text-sm text-destructive">
                         {form.formState.errors.platformIds.message}
                       </p>
                     )}
                   </div>
+
+                  {selectedPlatforms.map((platformId) => {
+                    const platform = platforms?.find(p => p.id.toString() === platformId);
+                    if (!platform) return null;
+
+                    return (
+                      <Card key={platformId} className="p-4">
+                        <h3 className="font-semibold mb-2">إعدادات {platform.name}</h3>
+                        <div className="space-y-2">
+                          <div>
+                            <label className="text-sm">الهاشتاغات</label>
+                            <Input
+                              {...form.register(`platformSettings.${platformId}.hashtags`)}
+                              placeholder="مثال: #تسويق #اعمال"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-sm">الجمهور المستهدف</label>
+                            <Select
+                              onValueChange={(value) =>
+                                form.setValue(`platformSettings.${platformId}.targetAudience`, value)
+                              }
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="اختر الجمهور المستهدف" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="general">عام</SelectItem>
+                                <SelectItem value="business">رجال أعمال</SelectItem>
+                                <SelectItem value="youth">شباب</SelectItem>
+                                <SelectItem value="professionals">محترفين</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div>
+                            <label className="text-sm">نوع المنشور</label>
+                            <Select
+                              onValueChange={(value) =>
+                                form.setValue(`platformSettings.${platformId}.postType`, value)
+                              }
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="اختر نوع المنشور" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="text">نص</SelectItem>
+                                <SelectItem value="image">صورة</SelectItem>
+                                <SelectItem value="video">فيديو</SelectItem>
+                                <SelectItem value="link">رابط</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+                      </Card>
+                    );
+                  })}
 
                   <div className="space-y-2">
                     <label>موعد النشر</label>
@@ -225,34 +291,50 @@ export default function SocialMediaManager() {
               {tasks?.map((task) => (
                 <Card key={task.id}>
                   <CardContent className="pt-6">
-                    <h3 className="font-semibold mb-2">{task.title}</h3>
-                    <p className="text-sm text-muted-foreground mb-4">
-                      {task.description}
-                    </p>
-                    <div className="flex justify-between items-center">
+                    <div className="flex justify-between items-start mb-4">
+                      <div>
+                        <h3 className="font-semibold mb-2">{task.title}</h3>
+                        <p className="text-sm text-muted-foreground">
+                          {task.description}
+                        </p>
+                      </div>
+                      <Button variant="ghost" size="icon">
+                        <Settings className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <div className="flex flex-wrap gap-2 mb-4">
+                      {task.platformIds.map((platformId) => {
+                        const platform = platforms?.find(
+                          (p) => p.id === parseInt(platformId)
+                        );
+                        return (
+                          <span
+                            key={platformId}
+                            className="px-2 py-1 rounded-full bg-primary/10 text-primary text-sm"
+                          >
+                            {platform?.name}
+                          </span>
+                        );
+                      })}
+                    </div>
+                    <div className="flex justify-between items-center text-sm text-muted-foreground">
                       <div className="flex items-center gap-2">
                         <CalendarIcon className="h-4 w-4" />
-                        <span className="text-sm">
+                        <span>
                           {format(new Date(task.scheduledTime), "PPP", {
                             locale: ar,
                           })}
                         </span>
                       </div>
-                      <div className="flex gap-2">
-                        {task.platformIds.map((platformId) => {
-                          const platform = platforms?.find(
-                            (p) => p.id === parseInt(platformId)
-                          );
-                          return (
-                            <span
-                              key={platformId}
-                              className="px-2 py-1 rounded-full bg-primary/10 text-primary text-sm"
-                            >
-                              {platform?.name}
-                            </span>
-                          );
-                        })}
-                      </div>
+                      <span className="capitalize">
+                        {task.status === "draft"
+                          ? "مسودة"
+                          : task.status === "scheduled"
+                          ? "مجدول"
+                          : task.status === "published"
+                          ? "منشور"
+                          : "فشل"}
+                      </span>
                     </div>
                   </CardContent>
                 </Card>
