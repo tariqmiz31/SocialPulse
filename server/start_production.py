@@ -22,9 +22,9 @@ from server.routes import setup_routes
 def setup_logging():
     """إعداد التسجيل"""
     logger = logging.getLogger('silvarium_production')
-    logger.setLevel(logging.INFO)
+    logger.setLevel(logging.DEBUG)  # تغيير مستوى التسجيل إلى DEBUG للمزيد من التفاصيل
 
-    formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
+    formatter = logging.Formatter('%(asctime)s [%(levelname)s] [%(name)s] %(message)s')
 
     # إعداد تسجيل الملف
     log_dir = '/tmp/logs'
@@ -34,7 +34,7 @@ def setup_logging():
     file_handler = RotatingFileHandler(
         f'{log_dir}/silvarium_production.log',
         maxBytes=1024 * 1024,  # 1MB
-        backupCount=3
+        backupCount=5
     )
     file_handler.setFormatter(formatter)
 
@@ -44,6 +44,18 @@ def setup_logging():
 
     logger.addHandler(file_handler)
     logger.addHandler(console_handler)
+
+    # إضافة تسجيل لمكتبة Flask
+    flask_logger = logging.getLogger('flask')
+    flask_logger.setLevel(logging.DEBUG)
+    flask_logger.addHandler(file_handler)
+    flask_logger.addHandler(console_handler)
+
+    # إضافة تسجيل للمصادقة
+    auth_logger = logging.getLogger('silvarium_auth')
+    auth_logger.setLevel(logging.DEBUG)
+    auth_logger.addHandler(file_handler)
+    auth_logger.addHandler(console_handler)
 
     return logger
 
@@ -69,25 +81,28 @@ def create_app(logger):
     """إنشاء وإعداد تطبيق Flask"""
     app = Flask(__name__, static_folder='../client/dist', static_url_path='/')
     app.config['PROPAGATE_EXCEPTIONS'] = True
+    app.config['DEBUG'] = True  # تمكين وضع التصحيح مؤقتاً
 
     # تكوين CORS
     CORS(app, 
          supports_credentials=True, 
          resources={
              r"/api/*": {
-                 "origins": ["https://*.repl.co", "https://*.repl.dev"],
+                 "origins": ["*"],  # السماح بجميع المصادر في بيئة التطوير
                  "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-                 "allow_headers": ["Content-Type", "Authorization"]
+                 "allow_headers": ["Content-Type", "Authorization"],
+                 "expose_headers": ["Content-Range", "X-Content-Range"],
+                 "supports_credentials": True
              }
          })
 
     # تكوين الجلسة
     app.config.update(
         SESSION_TYPE='filesystem',
-        SESSION_COOKIE_SECURE=True,
+        SESSION_COOKIE_SECURE=False,  # تعطيل في بيئة التطوير
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE='Lax',
-        PERMANENT_SESSION_LIFETIME=1800,  # 30 minutes
+        PERMANENT_SESSION_LIFETIME=1800,  # 30 دقيقة
         SECRET_KEY=os.getenv('SECRET_KEY', os.urandom(24).hex())
     )
     Session(app)
@@ -109,7 +124,7 @@ def main():
         load_dotenv()
 
         # تحديد المنفذ
-        port = int(os.getenv("PORT", "5001"))
+        port = int(os.getenv("PORT", "5000"))
 
         # انتظار المنفذ
         if not wait_for_port(port, logger):
@@ -139,7 +154,7 @@ def main():
             app,
             host="0.0.0.0",
             port=port,
-            url_scheme='https',
+            url_scheme='http',  # تغيير إلى http للتطوير
             threads=4,
             connection_limit=1000,
             channel_timeout=30

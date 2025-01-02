@@ -36,17 +36,25 @@ class User:
                 WHERE username = %s
             """, (username,))
             user_data = cur.fetchone()
-            cur.close()
-            conn.close()
-            return user_data
+            if user_data:
+                logger.debug(f"تم العثور على المستخدم: {username}")
+                return user_data
+            logger.warning(f"لم يتم العثور على المستخدم: {username}")
+            return None
         except Exception as e:
             logger.error(f"خطأ في البحث عن المستخدم: {str(e)}")
             return None
+        finally:
+            if 'cur' in locals():
+                cur.close()
+            if 'conn' in locals():
+                conn.close()
 
 def admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if not current_user.is_authenticated or current_user.role != 'admin':
+            logger.warning(f"محاولة وصول غير مصرح بها من المستخدم: {current_user.username if current_user.is_authenticated else 'غير مسجل'}")
             return jsonify({"error": "غير مصرح بالوصول"}), 403
         return f(*args, **kwargs)
     return decorated_function
@@ -55,6 +63,7 @@ def setup_auth(app):
     """إعداد المصادقة"""
     login_manager.init_app(app)
     login_manager.login_view = 'login'
+    login_manager.session_protection = 'strong'
 
     @login_manager.user_loader
     def load_user(user_id):
@@ -68,7 +77,9 @@ def setup_auth(app):
             """, (user_id,))
             user_data = cur.fetchone()
             if user_data:
-                return User(*user_data)
+                logger.debug(f"تم تحميل المستخدم: {user_data[1]}")
+                return User(user_data[0], user_data[1], user_data[2], user_data[3], user_data[4])
+            logger.warning(f"لم يتم العثور على المستخدم بالمعرف: {user_id}")
             return None
         except Exception as e:
             logger.error(f"خطأ في تحميل المستخدم: {str(e)}")
@@ -85,12 +96,14 @@ def setup_auth(app):
         try:
             data = request.get_json()
             if not data:
+                logger.warning("محاولة تسجيل دخول بدون بيانات")
                 return jsonify({"error": "البيانات غير صالحة"}), 400
 
             username = data.get('username')
             password = data.get('password')
 
             if not username or not password:
+                logger.warning("محاولة تسجيل دخول مع بيانات ناقصة")
                 return jsonify({"error": "يجب توفير اسم المستخدم وكلمة المرور"}), 400
 
             logger.info(f"محاولة تسجيل الدخول للمستخدم: {username}")
@@ -98,11 +111,11 @@ def setup_auth(app):
 
             if not user_data:
                 logger.warning(f"محاولة تسجيل دخول فاشلة - المستخدم غير موجود: {username}")
-                return jsonify({"error": "اسم المستخدم غير صحيح"}), 401
+                return jsonify({"error": "اسم المستخدم أو كلمة المرور غير صحيحة"}), 401
 
             if not check_password_hash(user_data[2], password):
                 logger.warning(f"محاولة تسجيل دخول فاشلة - كلمة مرور غير صحيحة: {username}")
-                return jsonify({"error": "كلمة المرور غير صحيحة"}), 401
+                return jsonify({"error": "اسم المستخدم أو كلمة المرور غير صحيحة"}), 401
 
             if not user_data[4]:  # is_approved
                 logger.warning(f"محاولة تسجيل دخول فاشلة - الحساب غير معتمد: {username}")
@@ -147,6 +160,7 @@ def setup_auth(app):
         """الحصول على معلومات المستخدم الحالي"""
         try:
             if current_user.is_authenticated:
+                logger.debug(f"تم جلب معلومات المستخدم: {current_user.username}")
                 return jsonify({
                     "id": current_user.id,
                     "username": current_user.username,
@@ -154,6 +168,7 @@ def setup_auth(app):
                     "isApproved": current_user.is_approved,
                     "status": current_user.status
                 })
+            logger.debug("محاولة جلب معلومات المستخدم - غير مسجل الدخول")
             return jsonify({"error": "لم يتم تسجيل الدخول"}), 401
         except Exception as e:
             logger.error(f"خطأ في جلب معلومات المستخدم: {str(e)}")

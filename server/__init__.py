@@ -3,6 +3,7 @@ import os
 from flask import Flask
 from flask_cors import CORS
 from flask_session import Session
+from datetime import timedelta
 
 app = Flask(__name__, static_folder='../client/dist', static_url_path='/')
 
@@ -11,19 +12,21 @@ CORS(app,
      supports_credentials=True, 
      resources={
          r"/api/*": {
-             "origins": ["https://*.repl.co", "https://*.repl.dev"],
+             "origins": ["*"],  # السماح بجميع المصادر في بيئة التطوير
              "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-             "allow_headers": ["Content-Type", "Authorization"]
+             "allow_headers": ["Content-Type", "Authorization"],
+             "expose_headers": ["Content-Range", "X-Content-Range"],
+             "supports_credentials": True
          }
      })
 
 # تكوين الجلسة
 app.config.update(
     SESSION_TYPE='filesystem',
-    SESSION_COOKIE_SECURE=True,
+    SESSION_COOKIE_SECURE=False,  # تعطيل في بيئة التطوير
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE='Lax',
-    PERMANENT_SESSION_LIFETIME=1800,  # 30 minutes
+    PERMANENT_SESSION_LIFETIME=timedelta(days=1),  # زيادة مدة الجلسة
     SECRET_KEY=os.getenv('SECRET_KEY', os.urandom(24).hex())
 )
 Session(app)
@@ -35,3 +38,6 @@ from server.auth import setup_auth
 # إعداد المصادقة والمسارات
 app = setup_auth(app)
 app = setup_routes(app)
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
