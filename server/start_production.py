@@ -10,6 +10,8 @@ import time
 import socket
 from flask import Flask, send_from_directory, request
 from flask_cors import CORS
+from werkzeug.security import generate_password_hash
+import psycopg2
 
 # إضافة المسار الرئيسي إلى PYTHONPATH
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -55,6 +57,32 @@ def setup_logging():
     ))
     logger.addHandler(file_handler)
 
+def create_admin_user():
+    """إنشاء حساب المشرف إذا لم يكن موجوداً"""
+    try:
+        conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+        cur = conn.cursor()
+
+        # التحقق من وجود المشرف
+        cur.execute("SELECT id FROM users WHERE username = 'admin'")
+        if cur.fetchone() is None:
+            # إنشاء مستخدم مشرف جديد
+            hashed_password = generate_password_hash('admin123')
+            cur.execute(
+                """
+                INSERT INTO users (username, password, role, is_approved, status)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                ('admin', hashed_password, 'admin', True, 'active')
+            )
+            conn.commit()
+            logger.info("تم إنشاء حساب المشرف بنجاح")
+
+        cur.close()
+        conn.close()
+    except Exception as e:
+        logger.error(f"خطأ في إنشاء حساب المشرف: {e}")
+
 def create_app():
     """إنشاء وإعداد تطبيق Flask"""
     app = Flask(__name__, static_folder='../client/dist', static_url_path='/')
@@ -70,8 +98,8 @@ def create_app():
          })
 
     # إعداد المصادقة والمسارات
-    setup_auth(app)
-    setup_routes(app)
+    app = setup_auth(app)
+    app = setup_routes(app)
 
     return app
 
@@ -85,13 +113,19 @@ def main():
         setup_logging()
         logger.info("بدء تشغيل خادم الإنتاج...")
 
+        # إنشاء حساب المشرف
+        create_admin_user()
+
         # تحديد المنفذ
         port = int(os.getenv("PORT", "5001"))
 
-        # انتظار المنفذ
+        # انتظار حتى يصبح المنفذ متاحاً
         if not wait_for_port(port, timeout=60):
-            logger.error(f"المنفذ {port} غير متاح بعد انتظار 60 ثانية")
-            sys.exit(1)
+            logger.warning(f"المنفذ {port} مشغول، جاري المحاولة على المنفذ التالي")
+            port += 1
+            if not wait_for_port(port, timeout=30):
+                logger.error(f"لا يمكن العثور على منفذ متاح بعد انتظار 30 ثانية")
+                sys.exit(1)
 
         # إنشاء التطبيق
         app = create_app()
@@ -117,6 +151,7 @@ def main():
             app,
             host="0.0.0.0",
             port=port,
+            url_scheme='https',
             threads=4,
             connection_limit=1000,
             channel_timeout=30,

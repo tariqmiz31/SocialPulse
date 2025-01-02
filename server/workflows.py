@@ -68,8 +68,8 @@ def start_server():
 
         # انتظار حتى يصبح المنفذ متاحًا
         if not wait_for_port(port, logger):
+            logger.warning(f"المنفذ {port} مشغول، جاري المحاولة على المنفذ التالي")
             port += 1
-            logger.warning(f"تم تغيير المنفذ إلى {port}")
             os.environ["PORT"] = str(port)
 
             if not wait_for_port(port, logger, timeout=30):
