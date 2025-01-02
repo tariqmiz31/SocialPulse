@@ -1,12 +1,13 @@
 from flask_cors import CORS
 from flask import Flask
 from waitress import serve
-from .app import app, main
 import logging
 from logging.handlers import RotatingFileHandler
 import socket
 import os
 import time
+from server.auth import setup_auth
+from server.routes import setup_routes
 
 def setup_workflow_logging():
     """إعداد التسجيل للتدفق العملي"""
@@ -47,6 +48,26 @@ def wait_for_port(port: int, logger, timeout=60):
         time.sleep(1)
     return False
 
+def create_app():
+    """إنشاء وإعداد تطبيق Flask"""
+    app = Flask(__name__, static_folder='../client/dist', static_url_path='/')
+
+    CORS(app, 
+         supports_credentials=True, 
+         resources={
+             r"/api/*": {
+                 "origins": ["https://*.repl.co", "https://*.repl.dev"],
+                 "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+                 "allow_headers": ["Content-Type", "Authorization"]
+             }
+         })
+
+    # إعداد المصادقة والمسارات
+    app = setup_auth(app)
+    app = setup_routes(app)
+
+    return app
+
 def start_server():
     """بدء تشغيل الخادم مع التعامل مع الأخطاء وإدارة المنافذ"""
     logger = setup_workflow_logging()
@@ -60,10 +81,16 @@ def start_server():
         os.environ["WAIT_FOR_PORT"] = "true"
         os.environ["PORT"] = str(port)
 
-        # تكوين التطبيق
+        # إنشاء وتكوين التطبيق
+        app = create_app()
         app.config.update(
             WAIT_FOR_PORT=True,
-            PORT=port
+            PORT=port,
+            SECRET_KEY=os.getenv('SECRET_KEY', os.urandom(24).hex()),
+            SESSION_COOKIE_SECURE=True,
+            SESSION_COOKIE_HTTPONLY=True,
+            SESSION_COOKIE_SAMESITE='Lax',
+            PERMANENT_SESSION_LIFETIME=1800  # 30 minutes
         )
 
         # انتظار حتى يصبح المنفذ متاحًا
@@ -89,7 +116,7 @@ def start_server():
             _quiet=True
         )
 
-        # انتظار حتى يبدأ الخادم
+        # التحقق من تشغيل الخادم
         start_time = time.time()
         while not is_port_in_use(port):
             if time.time() - start_time > 30:
