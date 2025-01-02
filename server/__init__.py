@@ -4,40 +4,76 @@ from flask import Flask
 from flask_cors import CORS
 from flask_session import Session
 from datetime import timedelta
+import logging
+from logging.handlers import RotatingFileHandler
 
-app = Flask(__name__, static_folder='../client/dist', static_url_path='/')
+def create_app():
+    app = Flask(__name__, static_folder='../client/dist', static_url_path='/')
 
-# تكوين CORS
-CORS(app, 
-     supports_credentials=True, 
-     resources={
-         r"/api/*": {
-             "origins": ["*"],  # السماح بجميع المصادر في بيئة التطوير
-             "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-             "allow_headers": ["Content-Type", "Authorization"],
-             "expose_headers": ["Content-Range", "X-Content-Range"],
-             "supports_credentials": True
-         }
-     })
+    # إعداد التسجيل
+    logger = logging.getLogger('silvarium')
+    logger.setLevel(logging.DEBUG)
 
-# تكوين الجلسة
-app.config.update(
-    SESSION_TYPE='filesystem',
-    SESSION_COOKIE_SECURE=False,  # تعطيل في بيئة التطوير
-    SESSION_COOKIE_HTTPONLY=True,
-    SESSION_COOKIE_SAMESITE='Lax',
-    PERMANENT_SESSION_LIFETIME=timedelta(days=1),  # زيادة مدة الجلسة
-    SECRET_KEY=os.getenv('SECRET_KEY', os.urandom(24).hex())
-)
-Session(app)
+    formatter = logging.Formatter('%(asctime)s [%(levelname)s] [%(name)s] %(message)s')
 
-from server.config import Config, ProductionConfig, DevelopmentConfig
-from server.routes import setup_routes
-from server.auth import setup_auth
+    # إعداد تسجيل الملف
+    log_dir = '/tmp/logs'
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
 
-# إعداد المصادقة والمسارات
-app = setup_auth(app)
-app = setup_routes(app)
+    file_handler = RotatingFileHandler(
+        f'{log_dir}/silvarium.log',
+        maxBytes=1024 * 1024,
+        backupCount=5
+    )
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+
+    # إضافة تسجيل وحدة التحكم
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
+
+    # تكوين CORS
+    CORS(app, 
+         supports_credentials=True, 
+         resources={
+             r"/api/*": {
+                 "origins": ["*"],
+                 "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+                 "allow_headers": ["Content-Type", "Authorization"],
+                 "expose_headers": ["Content-Range", "X-Content-Range"],
+                 "supports_credentials": True
+             }
+         })
+
+    # تكوين الجلسة
+    app.config.update(
+        SESSION_TYPE='filesystem',
+        SESSION_COOKIE_SECURE=False,  # تعطيل في بيئة التطوير
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE='Lax',
+        PERMANENT_SESSION_LIFETIME=timedelta(days=1),
+        SECRET_KEY=os.getenv('SECRET_KEY', os.urandom(24).hex()),
+        DEBUG=True
+    )
+    Session(app)
+
+    from server.auth import setup_auth
+    from server.routes import setup_routes
+
+    # إعداد المصادقة والمسارات
+    app = setup_auth(app)
+    app = setup_routes(app)
+
+    # تسجيل بدء تشغيل التطبيق
+    logger.info('تم بدء تشغيل التطبيق بنجاح')
+
+    return app
+
+app = create_app()
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    # تكوين سجلات Flask
+    logging.getLogger('werkzeug').setLevel(logging.INFO)
+    app.run(host='0.0.0.0', port=5000, debug=True)

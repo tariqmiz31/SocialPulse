@@ -1,14 +1,22 @@
+import logging
 from functools import wraps
 from flask import request, jsonify, session, current_app
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 import psycopg2
 import os
-import logging
+import traceback
 
 # إعداد التسجيل
 logger = logging.getLogger('silvarium_auth')
-login_manager = LoginManager()
+logger.setLevel(logging.DEBUG)
+
+# إضافة معالج لتسجيل السجلات في ملف
+handler = logging.FileHandler('/tmp/auth.log')
+handler.setLevel(logging.DEBUG)
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+handler.setFormatter(formatter)
+logger.addHandler(handler)
 
 class User:
     def __init__(self, id, username, role, is_approved, status):
@@ -28,21 +36,29 @@ class User:
     def get_by_username(username):
         """البحث عن مستخدم باستخدام اسم المستخدم"""
         try:
+            logger.debug(f"جاري البحث عن المستخدم: {username}")
             conn = psycopg2.connect(os.getenv('DATABASE_URL'))
             cur = conn.cursor()
+
             cur.execute("""
                 SELECT id, username, password, role, is_approved, status 
                 FROM users 
                 WHERE username = %s
             """, (username,))
+
             user_data = cur.fetchone()
+
             if user_data:
                 logger.debug(f"تم العثور على المستخدم: {username}")
+                logger.debug(f"حالة المستخدم - معتمد: {user_data[4]}, الحالة: {user_data[5]}")
                 return user_data
+
             logger.warning(f"لم يتم العثور على المستخدم: {username}")
             return None
+
         except Exception as e:
             logger.error(f"خطأ في البحث عن المستخدم: {str(e)}")
+            logger.error(traceback.format_exc())
             return None
         finally:
             if 'cur' in locals():
@@ -61,28 +77,37 @@ def admin_required(f):
 
 def setup_auth(app):
     """إعداد المصادقة"""
+    login_manager = LoginManager()
     login_manager.init_app(app)
     login_manager.login_view = 'login'
     login_manager.session_protection = 'strong'
 
     @login_manager.user_loader
     def load_user(user_id):
+        """تحميل المستخدم من قاعدة البيانات"""
         try:
+            logger.debug(f"محاولة تحميل المستخدم بالمعرف: {user_id}")
             conn = psycopg2.connect(os.getenv('DATABASE_URL'))
             cur = conn.cursor()
+
             cur.execute("""
                 SELECT id, username, role, is_approved, status 
                 FROM users 
                 WHERE id = %s
             """, (user_id,))
+
             user_data = cur.fetchone()
+
             if user_data:
-                logger.debug(f"تم تحميل المستخدم: {user_data[1]}")
+                logger.debug(f"تم تحميل المستخدم بنجاح: {user_data[1]}")
                 return User(user_data[0], user_data[1], user_data[2], user_data[3], user_data[4])
-            logger.warning(f"لم يتم العثور على المستخدم بالمعرف: {user_id}")
+
+            logger.warning(f"فشل تحميل المستخدم بالمعرف: {user_id}")
             return None
+
         except Exception as e:
             logger.error(f"خطأ في تحميل المستخدم: {str(e)}")
+            logger.error(traceback.format_exc())
             return None
         finally:
             if 'cur' in locals():
@@ -95,6 +120,8 @@ def setup_auth(app):
         """تسجيل الدخول"""
         try:
             data = request.get_json()
+            logger.debug(f"بيانات طلب تسجيل الدخول: {data}")
+
             if not data:
                 logger.warning("محاولة تسجيل دخول بدون بيانات")
                 return jsonify({"error": "البيانات غير صالحة"}), 400
@@ -102,31 +129,36 @@ def setup_auth(app):
             username = data.get('username')
             password = data.get('password')
 
+            logger.debug(f"محاولة تسجيل الدخول - المستخدم: {username}")
+
             if not username or not password:
-                logger.warning("محاولة تسجيل دخول مع بيانات ناقصة")
+                logger.warning(f"بيانات غير مكتملة - اسم المستخدم: {username}")
                 return jsonify({"error": "يجب توفير اسم المستخدم وكلمة المرور"}), 400
 
-            logger.info(f"محاولة تسجيل الدخول للمستخدم: {username}")
             user_data = User.get_by_username(username)
 
             if not user_data:
-                logger.warning(f"محاولة تسجيل دخول فاشلة - المستخدم غير موجود: {username}")
+                logger.warning(f"المستخدم غير موجود: {username}")
                 return jsonify({"error": "اسم المستخدم أو كلمة المرور غير صحيحة"}), 401
 
-            if not check_password_hash(user_data[2], password):
-                logger.warning(f"محاولة تسجيل دخول فاشلة - كلمة مرور غير صحيحة: {username}")
+            stored_password = user_data[2]
+            logger.debug(f"التحقق من كلمة المرور للمستخدم: {username}")
+
+            if not check_password_hash(stored_password, password):
+                logger.warning(f"كلمة مرور غير صحيحة للمستخدم: {username}")
                 return jsonify({"error": "اسم المستخدم أو كلمة المرور غير صحيحة"}), 401
 
             if not user_data[4]:  # is_approved
-                logger.warning(f"محاولة تسجيل دخول فاشلة - الحساب غير معتمد: {username}")
+                logger.warning(f"حساب غير معتمد: {username}")
                 return jsonify({"error": "الحساب في انتظار الموافقة"}), 401
 
             if user_data[5] == 'blocked':  # status
-                logger.warning(f"محاولة تسجيل دخول فاشلة - الحساب محظور: {username}")
+                logger.warning(f"حساب محظور: {username}")
                 return jsonify({"error": "تم حظر الحساب"}), 401
 
             user = User(user_data[0], user_data[1], user_data[3], user_data[4], user_data[5])
             login_user(user)
+
             logger.info(f"تم تسجيل دخول المستخدم بنجاح: {username}")
 
             return jsonify({
@@ -140,7 +172,8 @@ def setup_auth(app):
 
         except Exception as e:
             logger.error(f"خطأ في تسجيل الدخول: {str(e)}")
-            return jsonify({"error": "حدث خطأ في تسجيل الدخول"}), 500
+            logger.error(traceback.format_exc())
+            return jsonify({"error": str(e)}), 500
 
     @app.route('/api/logout', methods=['POST'])
     @login_required
