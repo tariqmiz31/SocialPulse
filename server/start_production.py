@@ -52,12 +52,21 @@ def create_app():
              r"/api/*": {
                  "origins": ["https://*.repl.co", "https://*.repl.dev"],
                  "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-                 "allow_headers": ["Content-Type", "Authorization"]
+                 "allow_headers": ["Content-Type", "Authorization"],
+                 "expose_headers": ["Content-Range", "X-Content-Range"],
+                 "supports_credentials": True
              }
          })
 
     # تكوين الجلسة
-    app.config['SESSION_TYPE'] = 'filesystem'
+    app.config.update(
+        SESSION_TYPE='filesystem',
+        SESSION_COOKIE_SECURE=True,
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE='Lax',
+        PERMANENT_SESSION_LIFETIME=1800,  # 30 minutes
+        SECRET_KEY=os.getenv('SECRET_KEY', os.urandom(24).hex())
+    )
     Session(app)
 
     # إعداد المصادقة والمسارات
@@ -78,19 +87,10 @@ def main():
         # انتظار حتى يصبح المنفذ متاحًا
         if not wait_for_port(port):
             logger.error(f"المنفذ {port} مشغول")
-            return False
+            sys.exit(1)
 
         # إنشاء التطبيق
         app = create_app()
-
-        # تكوين التطبيق
-        app.config.update(
-            SECRET_KEY=os.getenv('SECRET_KEY', os.urandom(24).hex()),
-            SESSION_COOKIE_SECURE=True,
-            SESSION_COOKIE_HTTPONLY=True,
-            SESSION_COOKIE_SAMESITE='Lax',
-            PERMANENT_SESSION_LIFETIME=1800  # 30 minutes
-        )
 
         # بدء خادم المقاييس
         metrics_port = port + 1

@@ -36,22 +36,29 @@ def is_port_in_use(port: int) -> bool:
         try:
             s.bind(('0.0.0.0', port))
             return False
-        except socket.error:
+        except socket.error as e:
+            logging.error(f"خطأ في فحص المنفذ {port}: {str(e)}")
             return True
 
 def wait_for_port(port: int, logger, timeout=60):
     """انتظار حتى يصبح المنفذ متاحًا"""
+    logger.info(f"بدء انتظار المنفذ {port}...")
     start_time = time.time()
+
     while time.time() - start_time < timeout:
         if not is_port_in_use(port):
             logger.info(f"المنفذ {port} متاح الآن")
             return True
+        logger.debug(f"المنفذ {port} مشغول، انتظار...")
         time.sleep(1)
+
+    logger.error(f"انتهت مهلة انتظار المنفذ {port}")
     return False
 
 def create_app():
     """إنشاء وإعداد تطبيق Flask"""
     app = Flask(__name__, static_folder='../client/dist', static_url_path='/')
+    app.config['PROPAGATE_EXCEPTIONS'] = True
 
     # تكوين CORS
     CORS(app, 
@@ -60,16 +67,22 @@ def create_app():
              r"/api/*": {
                  "origins": ["https://*.repl.co", "https://*.repl.dev"],
                  "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-                 "allow_headers": ["Content-Type", "Authorization"]
+                 "allow_headers": ["Content-Type", "Authorization"],
+                 "expose_headers": ["Content-Range", "X-Content-Range"],
+                 "supports_credentials": True
              }
          })
 
     # تكوين الجلسة
-    app.config['SESSION_TYPE'] = 'filesystem'
+    app.config.update(
+        SESSION_TYPE='filesystem',
+        SESSION_COOKIE_SECURE=True,
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE='Lax',
+        PERMANENT_SESSION_LIFETIME=1800,  # 30 minutes
+        SECRET_KEY=os.getenv('SECRET_KEY', os.urandom(24).hex())
+    )
     Session(app)
-
-    # تكوين السر
-    app.secret_key = os.getenv('SECRET_KEY', os.urandom(24).hex())
 
     # إعداد المصادقة والمسارات
     app = setup_auth(app)
@@ -87,19 +100,13 @@ def start_server():
         port = int(os.getenv("PORT", "5001"))
 
         # انتظار حتى يصبح المنفذ متاحًا
-        if not wait_for_port(port, logger):
-            logger.error(f"المنفذ {port} مشغول")
+        if not wait_for_port(port, logger, timeout=120):  # زيادة مهلة الانتظار إلى دقيقتين
+            logger.error(f"فشل في انتظار المنفذ {port}")
             return False
 
         # إنشاء وتكوين التطبيق
         app = create_app()
-        app.config.update(
-            PORT=port,
-            SESSION_COOKIE_SECURE=True,
-            SESSION_COOKIE_HTTPONLY=True,
-            SESSION_COOKIE_SAMESITE='Lax',
-            PERMANENT_SESSION_LIFETIME=1800  # 30 minutes
-        )
+        logger.info("تم إنشاء التطبيق بنجاح")
 
         # بدء التشغيل
         logger.info(f"بدء تشغيل الخادم على المنفذ {port}")
@@ -111,7 +118,7 @@ def start_server():
             threads=4,
             connection_limit=1000,
             channel_timeout=30,
-            _quiet=True
+            _quiet=False  # تمكين سجلات Waitress
         )
 
         return True
