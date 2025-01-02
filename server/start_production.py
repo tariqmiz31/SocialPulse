@@ -12,6 +12,7 @@ from flask_session import Session
 import psycopg2
 import time
 import socket
+import signal
 
 # إضافة المسار الرئيسي إلى PYTHONPATH
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -22,28 +23,51 @@ from server.routes import setup_routes
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger('silvarium')
 
+def cleanup_port(port: int):
+    """محاولة تحرير المنفذ إذا كان مشغولاً"""
+    try:
+        # Try to create a socket with SO_REUSEADDR
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind(('0.0.0.0', port))
+        sock.close()
+        logger.info(f"تم تحرير المنفذ {port} بنجاح")
+        return True
+    except Exception as e:
+        logger.error(f"فشل في تحرير المنفذ {port}: {str(e)}")
+        return False
+
 def is_port_in_use(port: int) -> bool:
     """التحقق مما إذا كان المنفذ قيد الاستخدام"""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         try:
             s.bind(('0.0.0.0', port))
             return False
-        except socket.error:
+        except socket.error as e:
+            logger.error(f"خطأ في فحص المنفذ {port}: {str(e)}")
             return True
 
 def wait_for_port(port: int, timeout=60):
     """انتظار حتى يصبح المنفذ متاحًا"""
     start_time = time.time()
+    logger.info(f"انتظار المنفذ {port}...")
+
     while time.time() - start_time < timeout:
         if not is_port_in_use(port):
             logger.info(f"المنفذ {port} متاح الآن")
             return True
+        # محاولة تحرير المنفذ
+        if cleanup_port(port):
+            return True
         time.sleep(1)
+
+    logger.error(f"انتهت مهلة انتظار المنفذ {port}")
     return False
 
 def create_app():
     """إنشاء وإعداد تطبيق Flask"""
     app = Flask(__name__, static_folder='../client/dist', static_url_path='/')
+    app.config['PROPAGATE_EXCEPTIONS'] = True
 
     # تكوين CORS
     CORS(app, 
@@ -75,9 +99,18 @@ def create_app():
 
     return app
 
+def handle_shutdown(signum, frame):
+    """معالجة إشارات إيقاف التشغيل"""
+    logger.info("تم استلام إشارة إيقاف التشغيل، جاري إغلاق التطبيق...")
+    sys.exit(0)
+
 def main():
     """الدالة الرئيسية لبدء الخادم"""
     try:
+        # تسجيل معالجات الإشارات
+        signal.signal(signal.SIGTERM, handle_shutdown)
+        signal.signal(signal.SIGINT, handle_shutdown)
+
         # تحميل متغيرات البيئة
         load_dotenv()
 
@@ -85,8 +118,8 @@ def main():
         port = int(os.getenv("PORT", "5001"))
 
         # انتظار حتى يصبح المنفذ متاحًا
-        if not wait_for_port(port):
-            logger.error(f"المنفذ {port} مشغول")
+        if not wait_for_port(port, timeout=120):  # زيادة مهلة الانتظار إلى دقيقتين
+            logger.error(f"فشل في انتظار المنفذ {port}")
             sys.exit(1)
 
         # إنشاء التطبيق
@@ -96,6 +129,15 @@ def main():
         metrics_port = port + 1
         prometheus_client.start_http_server(metrics_port)
         logger.info(f"تم بدء خادم المقاييس على المنفذ {metrics_port}")
+
+        # تأكد من عمل قاعدة البيانات
+        try:
+            conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+            conn.close()
+            logger.info("تم التحقق من الاتصال بقاعدة البيانات بنجاح")
+        except Exception as e:
+            logger.error(f"فشل الاتصال بقاعدة البيانات: {e}")
+            sys.exit(1)
 
         logger.info(f"بدء تشغيل الخادم على المنفذ {port}")
 
@@ -108,7 +150,7 @@ def main():
             threads=4,
             connection_limit=1000,
             channel_timeout=30,
-            _quiet=True
+            _quiet=False
         )
 
         return True
