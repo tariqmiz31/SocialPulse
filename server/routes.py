@@ -1,20 +1,26 @@
-from flask import Flask, send_from_directory, jsonify, request
+from flask import Flask, send_from_directory, jsonify, request, current_app
 import os
 from auth import login_required, admin_required
 import psycopg2
 from datetime import datetime
 from werkzeug.security import generate_password_hash
+import logging
 
 def setup_routes(app: Flask):
     """إعداد مسارات التطبيق"""
+    logger = logging.getLogger('silvarium_routes')
 
     @app.route('/', defaults={'path': ''})
     @app.route('/<path:path>')
     def serve_static(path):
         """خدمة الملفات الثابتة للتطبيق"""
-        if path and os.path.exists(os.path.join(app.static_folder, path)):
-            return send_from_directory(app.static_folder, path)
-        return send_from_directory(app.static_folder, 'index.html')
+        try:
+            if path and os.path.exists(os.path.join(app.static_folder, path)):
+                return send_from_directory(app.static_folder, path)
+            return send_from_directory(app.static_folder, 'index.html')
+        except Exception as e:
+            logger.error(f"خطأ في خدمة الملفات الثابتة: {str(e)}")
+            return jsonify({'error': 'خطأ في خدمة الملفات'}), 500
 
     @app.route('/api/admin/users', methods=['GET', 'POST'])
     @admin_required
@@ -42,7 +48,10 @@ def setup_routes(app: Flask):
                 } for user in users])
 
             elif request.method == 'POST':
-                data = request.json
+                data = request.get_json()
+                if not data:
+                    return jsonify({'error': 'البيانات غير صالحة'}), 400
+
                 username = data.get('username')
                 password = data.get('password')
                 role = data.get('role', 'user')
@@ -72,236 +81,44 @@ def setup_routes(app: Flask):
                 })
 
         except Exception as e:
-            app.logger.error(f"خطأ في إدارة المستخدمين: {e}")
+            current_app.logger.error(f"خطأ في إدارة المستخدمين: {str(e)}")
             return jsonify({'error': 'حدث خطأ في إدارة المستخدمين'}), 500
         finally:
-            cur.close()
-            conn.close()
+            if 'cur' in locals():
+                cur.close()
+            if 'conn' in locals():
+                conn.close()
 
-    @app.route('/api/admin/users/<int:user_id>/approve', methods=['POST'])
-    @admin_required
-    def approve_user(user_id):
-        """الموافقة على المستخدم"""
-        try:
-            conn = psycopg2.connect(os.getenv('DATABASE_URL'))
-            cur = conn.cursor()
-
-            cur.execute("""
-                UPDATE users 
-                SET is_approved = true, status = 'active', updated_at = NOW()
-                WHERE id = %s AND username != 'Tariq'
-                RETURNING id
-            """, (user_id,))
-
-            updated = cur.fetchone()
-            conn.commit()
-
-            if updated:
-                return jsonify({'message': 'تمت الموافقة على المستخدم بنجاح'})
-            return jsonify({'error': 'لا يمكن تعديل حساب المشرف الرئيسي'}), 403
-
-        except Exception as e:
-            app.logger.error(f"خطأ في الموافقة على المستخدم: {e}")
-            return jsonify({'error': 'حدث خطأ في تحديث حالة المستخدم'}), 500
-        finally:
-            cur.close()
-            conn.close()
-
-    @app.route('/api/admin/users/<int:user_id>/block', methods=['POST'])
-    @admin_required
-    def block_user(user_id):
-        """حظر المستخدم"""
-        try:
-            conn = psycopg2.connect(os.getenv('DATABASE_URL'))
-            cur = conn.cursor()
-
-            cur.execute("""
-                UPDATE users 
-                SET status = 'blocked', updated_at = NOW()
-                WHERE id = %s AND username != 'Tariq'
-                RETURNING id
-            """, (user_id,))
-
-            updated = cur.fetchone()
-            conn.commit()
-
-            if updated:
-                return jsonify({'message': 'تم حظر المستخدم بنجاح'})
-            return jsonify({'error': 'لا يمكن حظر حساب المشرف الرئيسي'}), 403
-
-        except Exception as e:
-            app.logger.error(f"خطأ في حظر المستخدم: {e}")
-            return jsonify({'error': 'حدث خطأ في تحديث حالة المستخدم'}), 500
-        finally:
-            cur.close()
-            conn.close()
-
-    @app.route('/api/admin/users/<int:user_id>/unblock', methods=['POST'])
-    @admin_required
-    def unblock_user(user_id):
-        """إلغاء حظر المستخدم"""
-        try:
-            conn = psycopg2.connect(os.getenv('DATABASE_URL'))
-            cur = conn.cursor()
-
-            cur.execute("""
-                UPDATE users 
-                SET status = 'active', updated_at = NOW()
-                WHERE id = %s AND username != 'Tariq'
-                RETURNING id
-            """, (user_id,))
-
-            updated = cur.fetchone()
-            conn.commit()
-
-            if updated:
-                return jsonify({'message': 'تم إلغاء حظر المستخدم بنجاح'})
-            return jsonify({'error': 'لا يمكن تعديل حساب المشرف الرئيسي'}), 403
-
-        except Exception as e:
-            app.logger.error(f"خطأ في إلغاء حظر المستخدم: {e}")
-            return jsonify({'error': 'حدث خطأ في تحديث حالة المستخدم'}), 500
-        finally:
-            cur.close()
-            conn.close()
-
-    @app.route('/api/admin/users/<int:user_id>/promote', methods=['POST'])
-    @admin_required
-    def promote_user(user_id):
-        """ترقية المستخدم إلى مشرف"""
-        try:
-            conn = psycopg2.connect(os.getenv('DATABASE_URL'))
-            cur = conn.cursor()
-
-            cur.execute("""
-                UPDATE users 
-                SET role = 'admin', updated_at = NOW()
-                WHERE id = %s AND username != 'Tariq'
-                RETURNING id
-            """, (user_id,))
-
-            updated = cur.fetchone()
-            conn.commit()
-
-            if updated:
-                return jsonify({'message': 'تمت ترقية المستخدم إلى مشرف بنجاح'})
-            return jsonify({'error': 'لا يمكن تعديل حساب المشرف الرئيسي'}), 403
-
-        except Exception as e:
-            app.logger.error(f"خطأ في ترقية المستخدم: {e}")
-            return jsonify({'error': 'حدث خطأ في تحديث صلاحيات المستخدم'}), 500
-        finally:
-            cur.close()
-            conn.close()
-
-    @app.route('/api/admin/users/<int:user_id>/demote', methods=['POST'])
-    @admin_required
-    def demote_user(user_id):
-        """إلغاء صلاحيات الإشراف"""
-        try:
-            conn = psycopg2.connect(os.getenv('DATABASE_URL'))
-            cur = conn.cursor()
-
-            cur.execute("""
-                UPDATE users 
-                SET role = 'user', updated_at = NOW()
-                WHERE id = %s AND username != 'Tariq'
-                RETURNING id
-            """, (user_id,))
-
-            updated = cur.fetchone()
-            conn.commit()
-
-            if updated:
-                return jsonify({'message': 'تم إلغاء صلاحيات الإشراف بنجاح'})
-            return jsonify({'error': 'لا يمكن تعديل حساب المشرف الرئيسي'}), 403
-
-        except Exception as e:
-            app.logger.error(f"خطأ في إلغاء صلاحيات الإشراف: {e}")
-            return jsonify({'error': 'حدث خطأ في تحديث صلاحيات المستخدم'}), 500
-        finally:
-            cur.close()
-            conn.close()
-
-    @app.route('/api/admin/users/<int:user_id>/delete', methods=['POST'])
-    @admin_required
-    def delete_user(user_id):
-        """حذف المستخدم"""
-        try:
-            conn = psycopg2.connect(os.getenv('DATABASE_URL'))
-            cur = conn.cursor()
-
-            cur.execute("""
-                DELETE FROM users
-                WHERE id = %s AND username != 'Tariq'
-                RETURNING id
-            """, (user_id,))
-
-            deleted = cur.fetchone()
-            conn.commit()
-
-            if deleted:
-                return jsonify({'message': 'تم حذف المستخدم بنجاح'})
-            return jsonify({'error': 'لا يمكن حذف حساب المشرف الرئيسي'}), 403
-
-        except Exception as e:
-            app.logger.error(f"خطأ في حذف المستخدم: {e}")
-            return jsonify({'error': 'حدث خطأ في حذف المستخدم'}), 500
-        finally:
-            cur.close()
-            conn.close()
-
-    @app.route('/api/platforms', methods=['GET', 'POST'])
+    @app.route('/api/platforms', methods=['GET'])
     @login_required
-    def manage_platforms():
-        """إدارة منصات التواصل الاجتماعي"""
+    def get_platforms():
+        """الحصول على قائمة المنصات المتاحة"""
         try:
             conn = psycopg2.connect(os.getenv('DATABASE_URL'))
             cur = conn.cursor()
 
-            if request.method == 'GET':
-                cur.execute("""
-                    SELECT id, name, active
-                    FROM social_platforms
-                    ORDER BY name ASC
-                """)
-                platforms = cur.fetchall()
+            cur.execute("""
+                SELECT id, name, active
+                FROM social_platforms
+                WHERE active = true
+                ORDER BY name ASC
+            """)
+            platforms = cur.fetchall()
 
-                return jsonify([{
-                    'id': platform[0],
-                    'name': platform[1],
-                    'active': platform[2],
-                } for platform in platforms])
-
-            elif request.method == 'POST':
-                data = request.json
-                name = data.get('name')
-                api_key = data.get('apiKey')
-                api_secret = data.get('apiSecret')
-
-                if not name:
-                    return jsonify({'error': 'اسم المنصة مطلوب'}), 400
-
-                cur.execute("""
-                    INSERT INTO social_platforms (name, api_key, api_secret)
-                    VALUES (%s, %s, %s)
-                    RETURNING id
-                """, (name, api_key, api_secret))
-
-                platform_id = cur.fetchone()[0]
-                conn.commit()
-
-                return jsonify({
-                    'message': 'تمت إضافة المنصة بنجاح',
-                    'platformId': platform_id
-                })
+            return jsonify([{
+                'id': platform[0],
+                'name': platform[1],
+                'active': platform[2],
+            } for platform in platforms])
 
         except Exception as e:
-            app.logger.error(f"خطأ في إدارة المنصات: {e}")
-            return jsonify({'error': 'حدث خطأ في إدارة المنصات'}), 500
+            current_app.logger.error(f"خطأ في جلب المنصات: {str(e)}")
+            return jsonify({'error': 'حدث خطأ في جلب المنصات'}), 500
         finally:
-            cur.close()
-            conn.close()
+            if 'cur' in locals():
+                cur.close()
+            if 'conn' in locals():
+                conn.close()
 
     @app.route('/api/tasks', methods=['GET', 'POST'])
     @login_required
@@ -317,7 +134,7 @@ def setup_routes(app: Flask):
                            scheduled_time, status, created_at
                     FROM tasks
                     WHERE user_id = %s
-                    ORDER BY scheduled_time DESC
+                    ORDER BY scheduled_time DESC NULLS LAST
                 """, (request.user.id,))
                 tasks = cur.fetchall()
 
@@ -333,7 +150,10 @@ def setup_routes(app: Flask):
                 } for task in tasks])
 
             elif request.method == 'POST':
-                data = request.json
+                data = request.get_json()
+                if not data:
+                    return jsonify({'error': 'البيانات غير صالحة'}), 400
+
                 title = data.get('title')
                 description = data.get('description', '')
                 content = data.get('content')
@@ -366,11 +186,210 @@ def setup_routes(app: Flask):
                 })
 
         except Exception as e:
-            app.logger.error(f"خطأ في إدارة المهام: {e}")
+            current_app.logger.error(f"خطأ في إدارة المهام: {str(e)}")
             return jsonify({'error': 'حدث خطأ في إدارة المهام'}), 500
         finally:
-            cur.close()
-            conn.close()
+            if 'cur' in locals():
+                cur.close()
+            if 'conn' in locals():
+                conn.close()
+
+    @app.errorhandler(404)
+    def not_found_error(error):
+        """معالجة أخطاء 404"""
+        if request.path.startswith('/api/'):
+            return jsonify({'error': 'المسار غير موجود'}), 404
+        return send_from_directory(app.static_folder, 'index.html')
+
+    @app.errorhandler(500)
+    def internal_error(error):
+        """معالجة أخطاء 500"""
+        return jsonify({'error': 'خطأ داخلي في الخادم'}), 500
+
+    @app.route('/api/admin/users/<int:user_id>/approve', methods=['POST'])
+    @admin_required
+    def approve_user(user_id):
+        """الموافقة على المستخدم"""
+        try:
+            conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+            cur = conn.cursor()
+
+            cur.execute("""
+                UPDATE users 
+                SET is_approved = true, status = 'active', updated_at = NOW()
+                WHERE id = %s AND username != 'Tariq'
+                RETURNING id
+            """, (user_id,))
+
+            updated = cur.fetchone()
+            conn.commit()
+
+            if updated:
+                return jsonify({'message': 'تمت الموافقة على المستخدم بنجاح'})
+            return jsonify({'error': 'لا يمكن تعديل حساب المشرف الرئيسي'}), 403
+
+        except Exception as e:
+            current_app.logger.error(f"خطأ في الموافقة على المستخدم: {str(e)}")
+            return jsonify({'error': 'حدث خطأ في تحديث حالة المستخدم'}), 500
+        finally:
+            if 'cur' in locals():
+                cur.close()
+            if 'conn' in locals():
+                conn.close()
+
+    @app.route('/api/admin/users/<int:user_id>/block', methods=['POST'])
+    @admin_required
+    def block_user(user_id):
+        """حظر المستخدم"""
+        try:
+            conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+            cur = conn.cursor()
+
+            cur.execute("""
+                UPDATE users 
+                SET status = 'blocked', updated_at = NOW()
+                WHERE id = %s AND username != 'Tariq'
+                RETURNING id
+            """, (user_id,))
+
+            updated = cur.fetchone()
+            conn.commit()
+
+            if updated:
+                return jsonify({'message': 'تم حظر المستخدم بنجاح'})
+            return jsonify({'error': 'لا يمكن حظر حساب المشرف الرئيسي'}), 403
+
+        except Exception as e:
+            current_app.logger.error(f"خطأ في حظر المستخدم: {str(e)}")
+            return jsonify({'error': 'حدث خطأ في تحديث حالة المستخدم'}), 500
+        finally:
+            if 'cur' in locals():
+                cur.close()
+            if 'conn' in locals():
+                conn.close()
+
+    @app.route('/api/admin/users/<int:user_id>/unblock', methods=['POST'])
+    @admin_required
+    def unblock_user(user_id):
+        """إلغاء حظر المستخدم"""
+        try:
+            conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+            cur = conn.cursor()
+
+            cur.execute("""
+                UPDATE users 
+                SET status = 'active', updated_at = NOW()
+                WHERE id = %s AND username != 'Tariq'
+                RETURNING id
+            """, (user_id,))
+
+            updated = cur.fetchone()
+            conn.commit()
+
+            if updated:
+                return jsonify({'message': 'تم إلغاء حظر المستخدم بنجاح'})
+            return jsonify({'error': 'لا يمكن تعديل حساب المشرف الرئيسي'}), 403
+
+        except Exception as e:
+            current_app.logger.error(f"خطأ في إلغاء حظر المستخدم: {str(e)}")
+            return jsonify({'error': 'حدث خطأ في تحديث حالة المستخدم'}), 500
+        finally:
+            if 'cur' in locals():
+                cur.close()
+            if 'conn' in locals():
+                conn.close()
+
+    @app.route('/api/admin/users/<int:user_id>/promote', methods=['POST'])
+    @admin_required
+    def promote_user(user_id):
+        """ترقية المستخدم إلى مشرف"""
+        try:
+            conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+            cur = conn.cursor()
+
+            cur.execute("""
+                UPDATE users 
+                SET role = 'admin', updated_at = NOW()
+                WHERE id = %s AND username != 'Tariq'
+                RETURNING id
+            """, (user_id,))
+
+            updated = cur.fetchone()
+            conn.commit()
+
+            if updated:
+                return jsonify({'message': 'تمت ترقية المستخدم إلى مشرف بنجاح'})
+            return jsonify({'error': 'لا يمكن تعديل حساب المشرف الرئيسي'}), 403
+
+        except Exception as e:
+            current_app.logger.error(f"خطأ في ترقية المستخدم: {str(e)}")
+            return jsonify({'error': 'حدث خطأ في تحديث صلاحيات المستخدم'}), 500
+        finally:
+            if 'cur' in locals():
+                cur.close()
+            if 'conn' in locals():
+                conn.close()
+
+    @app.route('/api/admin/users/<int:user_id>/demote', methods=['POST'])
+    @admin_required
+    def demote_user(user_id):
+        """إلغاء صلاحيات الإشراف"""
+        try:
+            conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+            cur = conn.cursor()
+
+            cur.execute("""
+                UPDATE users 
+                SET role = 'user', updated_at = NOW()
+                WHERE id = %s AND username != 'Tariq'
+                RETURNING id
+            """, (user_id,))
+
+            updated = cur.fetchone()
+            conn.commit()
+
+            if updated:
+                return jsonify({'message': 'تم إلغاء صلاحيات الإشراف بنجاح'})
+            return jsonify({'error': 'لا يمكن تعديل حساب المشرف الرئيسي'}), 403
+
+        except Exception as e:
+            current_app.logger.error(f"خطأ في إلغاء صلاحيات الإشراف: {str(e)}")
+            return jsonify({'error': 'حدث خطأ في تحديث صلاحيات المستخدم'}), 500
+        finally:
+            if 'cur' in locals():
+                cur.close()
+            if 'conn' in locals():
+                conn.close()
+
+    @app.route('/api/admin/users/<int:user_id>/delete', methods=['POST'])
+    @admin_required
+    def delete_user(user_id):
+        """حذف المستخدم"""
+        try:
+            conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+            cur = conn.cursor()
+
+            cur.execute("""
+                DELETE FROM users
+                WHERE id = %s AND username != 'Tariq'
+                RETURNING id
+            """, (user_id,))
+
+            deleted = cur.fetchone()
+            conn.commit()
+
+            if deleted:
+                return jsonify({'message': 'تم حذف المستخدم بنجاح'})
+            return jsonify({'error': 'لا يمكن حذف حساب المشرف الرئيسي'}), 403
+
+        except Exception as e:
+            current_app.logger.error(f"خطأ في حذف المستخدم: {str(e)}")
+            return jsonify({'error': 'حدث خطأ في حذف المستخدم'}), 500
+        finally:
+            if 'cur' in locals():
+                cur.close()
+            if 'conn' in locals():
+                conn.close()
 
     @app.route('/api/tasks/<int:task_id>', methods=['PUT', 'DELETE'])
     @login_required
@@ -390,7 +409,10 @@ def setup_routes(app: Flask):
                 return jsonify({'error': 'غير مصرح بالوصول إلى هذه المهمة'}), 403
 
             if request.method == 'PUT':
-                data = request.json
+                data = request.get_json()
+                if not data:
+                    return jsonify({'error': 'البيانات غير صالحة'}), 400
+
                 cur.execute("""
                     UPDATE tasks
                     SET title = %s,
@@ -433,10 +455,12 @@ def setup_routes(app: Flask):
                 return jsonify({'error': 'فشل حذف المهمة'}), 400
 
         except Exception as e:
-            app.logger.error(f"خطأ في إدارة المهمة: {e}")
+            current_app.logger.error(f"خطأ في إدارة المهمة: {str(e)}")
             return jsonify({'error': 'حدث خطأ في إدارة المهمة'}), 500
         finally:
-            cur.close()
-            conn.close()
+            if 'cur' in locals():
+                cur.close()
+            if 'conn' in locals():
+                conn.close()
 
     return app

@@ -19,52 +19,53 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from server.auth import setup_auth
 from server.routes import setup_routes
 
-# تكوين التسجيل
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger('silvarium')
+def setup_logging():
+    """إعداد التسجيل"""
+    logger = logging.getLogger('silvarium_production')
+    logger.setLevel(logging.INFO)
 
-def cleanup_port(port: int):
-    """محاولة تحرير المنفذ إذا كان مشغولاً"""
-    try:
-        # Try to create a socket with SO_REUSEADDR
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind(('0.0.0.0', port))
-        sock.close()
-        logger.info(f"تم تحرير المنفذ {port} بنجاح")
-        return True
-    except Exception as e:
-        logger.error(f"فشل في تحرير المنفذ {port}: {str(e)}")
-        return False
+    formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
 
-def is_port_in_use(port: int) -> bool:
-    """التحقق مما إذا كان المنفذ قيد الاستخدام"""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        try:
-            s.bind(('0.0.0.0', port))
-            return False
-        except socket.error as e:
-            logger.error(f"خطأ في فحص المنفذ {port}: {str(e)}")
-            return True
+    # إعداد تسجيل الملف
+    log_dir = '/tmp/logs'
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
 
-def wait_for_port(port: int, timeout=60):
+    file_handler = RotatingFileHandler(
+        f'{log_dir}/silvarium_production.log',
+        maxBytes=1024 * 1024,  # 1MB
+        backupCount=3
+    )
+    file_handler.setFormatter(formatter)
+
+    # إعداد تسجيل وحدة التحكم
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+
+    return logger
+
+def wait_for_port(port: int, logger, timeout=120):
     """انتظار حتى يصبح المنفذ متاحًا"""
+    logger.info(f"بدء انتظار المنفذ {port}...")
     start_time = time.time()
-    logger.info(f"انتظار المنفذ {port}...")
 
     while time.time() - start_time < timeout:
-        if not is_port_in_use(port):
-            logger.info(f"المنفذ {port} متاح الآن")
-            return True
-        # محاولة تحرير المنفذ
-        if cleanup_port(port):
-            return True
-        time.sleep(1)
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(('0.0.0.0', port))
+                logger.info(f"المنفذ {port} متاح")
+                return True
+        except socket.error:
+            logger.debug(f"المنفذ {port} مشغول، انتظار...")
+            time.sleep(1)
 
     logger.error(f"انتهت مهلة انتظار المنفذ {port}")
     return False
 
-def create_app():
+def create_app(logger):
     """إنشاء وإعداد تطبيق Flask"""
     app = Flask(__name__, static_folder='../client/dist', static_url_path='/')
     app.config['PROPAGATE_EXCEPTIONS'] = True
@@ -97,17 +98,12 @@ def create_app():
 
     return app
 
-def handle_shutdown(signum, frame):
-    """معالجة إشارات إيقاف التشغيل"""
-    logger.info("تم استلام إشارة إيقاف التشغيل، جاري إغلاق التطبيق...")
-    sys.exit(0)
-
 def main():
-    """الدالة الرئيسية لبدء الخادم"""
+    """النقطة الرئيسية لبدء الخادم"""
     try:
-        # تسجيل معالجات الإشارات
-        signal.signal(signal.SIGTERM, handle_shutdown)
-        signal.signal(signal.SIGINT, handle_shutdown)
+        # إعداد التسجيل
+        logger = setup_logging()
+        logger.info("بدء تشغيل خادم Silvarium Social...")
 
         # تحميل متغيرات البيئة
         load_dotenv()
@@ -115,31 +111,30 @@ def main():
         # تحديد المنفذ
         port = int(os.getenv("PORT", "5001"))
 
-        # انتظار حتى يصبح المنفذ متاحًا
-        if not wait_for_port(port, timeout=120):  # زيادة مهلة الانتظار إلى دقيقتين
-            logger.error(f"فشل في انتظار المنفذ {port}")
-            sys.exit(1)
-
-        # إنشاء التطبيق
-        app = create_app()
+        # انتظار المنفذ
+        if not wait_for_port(port, logger):
+            logger.error("فشل في انتظار المنفذ")
+            return 1
 
         # بدء خادم المقاييس
         metrics_port = port + 1
         prometheus_client.start_http_server(metrics_port)
         logger.info(f"تم بدء خادم المقاييس على المنفذ {metrics_port}")
 
-        # تأكد من عمل قاعدة البيانات
+        # إنشاء التطبيق
+        app = create_app(logger)
+
+        # التحقق من الاتصال بقاعدة البيانات
         try:
             conn = psycopg2.connect(os.getenv('DATABASE_URL'))
             conn.close()
             logger.info("تم التحقق من الاتصال بقاعدة البيانات بنجاح")
         except Exception as e:
-            logger.error(f"فشل الاتصال بقاعدة البيانات: {e}")
-            sys.exit(1)
+            logger.error(f"فشل الاتصال بقاعدة البيانات: {str(e)}")
+            return 1
 
+        # بدء الخادم
         logger.info(f"بدء تشغيل الخادم على المنفذ {port}")
-
-        # بدء خادم الإنتاج مع waitress
         serve(
             app,
             host="0.0.0.0",
@@ -147,14 +142,14 @@ def main():
             url_scheme='https',
             threads=4,
             connection_limit=1000,
-            channel_timeout=30,
-            _quiet=False
+            channel_timeout=30
         )
 
-        return True
+        return 0
+
     except Exception as e:
-        logger.error(f"خطأ في بدء الخادم: {e}")
-        raise
+        logger.error(f"خطأ غير متوقع: {str(e)}")
+        return 1
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

@@ -1,4 +1,5 @@
 """Initialize server package"""
+import os
 from flask import Flask
 from flask_cors import CORS
 from flask_session import Session
@@ -17,7 +18,14 @@ CORS(app,
      })
 
 # تكوين الجلسة
-app.config['SESSION_TYPE'] = 'filesystem'
+app.config.update(
+    SESSION_TYPE='filesystem',
+    SESSION_COOKIE_SECURE=True,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+    PERMANENT_SESSION_LIFETIME=1800,  # 30 minutes
+    SECRET_KEY=os.getenv('SECRET_KEY', os.urandom(24).hex())
+)
 Session(app)
 
 from server.config import Config, ProductionConfig, DevelopmentConfig
@@ -26,4 +34,4 @@ from server.auth import setup_auth
 
 # إعداد المصادقة والمسارات
 app = setup_auth(app)
-setup_routes(app)
+app = setup_routes(app)
