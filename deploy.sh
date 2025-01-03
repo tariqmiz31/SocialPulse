@@ -46,7 +46,7 @@ fi
 echo "تثبيت الاعتماديات..."
 pip install -r requirements.txt
 
-# التأكد من إيقاف أي عمليات سابقة على المنفذ 3000
+# التأكد من إيقاف أي عمليات سابقة على المنفذ 8080
 echo "إيقاف العمليات السابقة..."
 pkill -f "python server/start_production.py" || true
 
@@ -66,8 +66,8 @@ wait_for_port() {
     return 1
 }
 
-if ! wait_for_port 3000; then
-    echo "خطأ: المنفذ 3000 لا يزال مشغولاً"
+if ! wait_for_port 8080; then
+    echo "خطأ: المنفذ 8080 لا يزال مشغولاً"
     exit 1
 fi
 
@@ -80,7 +80,7 @@ echo "انتظار بدء التطبيق..."
 sleep 5
 
 # التحقق من حالة التطبيق
-if curl -s http://localhost:3000/api/monitoring/health > /dev/null; then
+if curl -s http://localhost:8080/api/monitoring/health > /dev/null; then
     echo "تم بدء التطبيق بنجاح!"
     exit 0
 else

@@ -46,17 +46,37 @@ def setup_logging():
 
     return logger
 
+def kill_process_on_port(port, logger):
+    """قتل العملية التي تستخدم المنفذ المحدد"""
+    try:
+        # في نظام يونكس، يمكننا استخدام lsof للعثور على العملية
+        command = f"lsof -i :{port} -t"
+        pid = os.popen(command).read().strip()
+
+        if pid:
+            logger.info(f"وجدت عملية (PID: {pid}) تستخدم المنفذ {port}")
+            os.system(f"kill -9 {pid}")
+            time.sleep(1)  # انتظار لإغلاق العملية
+            return True
+    except Exception as e:
+        logger.error(f"خطأ في قتل العملية: {str(e)}")
+    return False
+
 def cleanup_port(port: int, logger):
     """تنظيف المنفذ إذا كان مشغولاً"""
-    for proc in psutil.process_iter(['pid', 'name', 'connections']):
-        try:
-            for conn in proc.connections():
-                if conn.laddr.port == port:
-                    logger.info(f"إيقاف العملية {proc.pid} التي تستخدم المنفذ {port}")
-                    psutil.Process(proc.pid).terminate()
-                    time.sleep(1)  # انتظار لإغلاق العملية
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            continue
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        result = sock.connect_ex(('127.0.0.1', port))
+        sock.close()
+
+        if result == 0:  # المنفذ مشغول
+            logger.info(f"المنفذ {port} مشغول، محاولة تحريره")
+            if kill_process_on_port(port, logger):
+                logger.info(f"تم تحرير المنفذ {port} بنجاح")
+            else:
+                logger.warning(f"فشل في تحرير المنفذ {port}")
+    except Exception as e:
+        logger.error(f"خطأ في تنظيف المنفذ: {str(e)}")
 
 def wait_for_port(port: int, host: str, logger, timeout=30):
     """انتظار حتى يصبح المنفذ متاحاً"""
@@ -67,6 +87,7 @@ def wait_for_port(port: int, host: str, logger, timeout=30):
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.bind((host, port))
+                s.close()  # إغلاق السوكيت بعد التحقق
                 logger.info(f"المنفذ {port} متاح للاستخدام")
                 return True
         except socket.error:
@@ -84,10 +105,10 @@ def signal_handler(signum, frame):
 
 def main():
     """النقطة الرئيسية لبدء الخادم"""
-    try:
-        logger = setup_logging()
-        logger.info("بدء تشغيل خادم Silvarium Social...")
+    logger = setup_logging()
+    logger.info("بدء تشغيل خادم Silvarium Social...")
 
+    try:
         # تسجيل معالجات الإشارات
         signal.signal(signal.SIGTERM, signal_handler)
         signal.signal(signal.SIGINT, signal_handler)
@@ -95,7 +116,7 @@ def main():
         load_dotenv()
 
         host = "0.0.0.0"
-        port = int(os.getenv("PORT", "3000"))
+        port = int(os.getenv("PORT", "8080"))
 
         if not wait_for_port(port, host, logger):
             logger.error(f"فشل في انتظار المنفذ {port}")
@@ -117,8 +138,7 @@ def main():
         return 0
 
     except Exception as e:
-        if 'logger' in locals():
-            logger.error(f"خطأ غير متوقع: {str(e)}")
+        logger.error(f"خطأ غير متوقع: {str(e)}")
         return 1
 
 if __name__ == "__main__":
