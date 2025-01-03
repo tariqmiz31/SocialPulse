@@ -7,6 +7,8 @@ from datetime import timedelta
 import logging
 from logging.handlers import RotatingFileHandler
 
+from server.auth import setup_auth
+from server.routes import setup_routes
 from server.monitoring import setup_monitoring
 
 def create_app():
@@ -63,9 +65,6 @@ def create_app():
     )
     Session(app)
 
-    from server.auth import setup_auth
-    from server.routes import setup_routes
-
     # إعداد المصادقة والمسارات
     app = setup_auth(app)
     app = setup_routes(app)
@@ -82,7 +81,5 @@ def create_app():
 
 if __name__ == '__main__':
     app = create_app()
-    # تكوين سجلات Flask
-    logging.getLogger('werkzeug').setLevel(logging.INFO)
     port = int(os.getenv('PORT', '8080'))
-    app.run(host='0.0.0.0', port=port, debug=True)
+    app.run(host='0.0.0.0', port=port)

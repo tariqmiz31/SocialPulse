@@ -5,11 +5,8 @@ from waitress import serve
 from dotenv import load_dotenv
 import logging
 from logging.handlers import RotatingFileHandler
-import time
 import socket
-import signal
-import psutil
-import traceback
+import time
 
 # إضافة مسار المشروع إلى PYTHONPATH
 sys.path.insert(0, os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
@@ -29,7 +26,6 @@ def setup_logging():
         '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
 
-    # إعداد تسجيل الملف
     file_handler = RotatingFileHandler(
         f'{log_dir}/silvarium.log',
         maxBytes=10*1024*1024,  # 10MB
@@ -47,70 +43,19 @@ def setup_logging():
 
     return logger
 
-def kill_process_on_port(port, logger):
-    """قتل العملية التي تستخدم المنفذ المحدد"""
-    try:
-        for proc in psutil.process_iter(['pid', 'name', 'connections']):
-            try:
-                for conn in proc.connections():
-                    if conn.laddr.port == port:
-                        logger.info(f"وجدت عملية (PID: {proc.pid}) تستخدم المنفذ {port}")
-                        proc.terminate()
-                        time.sleep(1)
-                        if proc.is_running():
-                            proc.kill()
-                        return True
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                continue
-    except Exception as e:
-        logger.error(f"خطأ في قتل العملية: {str(e)}")
-    return False
-
-def cleanup_port(port: int, logger):
-    """تنظيف المنفذ إذا كان مشغولاً"""
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        result = sock.connect_ex(('127.0.0.1', port))
-        sock.close()
-
-        if result == 0:  # المنفذ مشغول
-            logger.info(f"المنفذ {port} مشغول، محاولة تحريره")
-            if kill_process_on_port(port, logger):
-                logger.info(f"تم تحرير المنفذ {port} بنجاح")
-            else:
-                logger.warning(f"فشل في تحرير المنفذ {port}")
-    except Exception as e:
-        logger.error(f"خطأ في تنظيف المنفذ: {str(e)}")
-
-def wait_for_port(port: int, host: str, logger, timeout=30):
+def wait_for_port_available(port: int, retries: int = 5, delay: int = 2) -> bool:
     """انتظار حتى يصبح المنفذ متاحاً"""
-    cleanup_port(port, logger)  # تنظيف المنفذ أولاً
-
-    start_time = time.time()
-    while True:
+    for i in range(retries):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            try:
-                sock.bind((host, port))
-                logger.info(f"المنفذ {port} متاح للاستخدام")
-                sock.close()
-                return True
-            except socket.error:
-                sock.close()
-                if time.time() - start_time > timeout:
-                    logger.error(f"انتهت مهلة انتظار المنفذ {port}")
-                    return False
-                time.sleep(1)
-                continue
-        except Exception as e:
-            logger.error(f"خطأ في انتظار المنفذ: {str(e)}")
-            return False
-
-def signal_handler(signum, frame):
-    """معالج إشارات النظام"""
-    logger = logging.getLogger('silvarium_production')
-    logger.info(f"تم استلام الإشارة {signum}")
-    sys.exit(0)
+            sock.bind(('0.0.0.0', port))
+            sock.close()
+            return True
+        except socket.error:
+            if i < retries - 1:
+                time.sleep(delay)
+            sock.close()
+    return False
 
 def main():
     """النقطة الرئيسية لبدء الخادم"""
@@ -118,10 +63,6 @@ def main():
     logger.info("بدء تشغيل خادم Silvarium Social...")
 
     try:
-        # تسجيل معالجات الإشارات
-        signal.signal(signal.SIGTERM, signal_handler)
-        signal.signal(signal.SIGINT, signal_handler)
-
         load_dotenv()
 
         host = "0.0.0.0"
@@ -129,32 +70,29 @@ def main():
 
         logger.info(f"محاولة بدء الخادم على {host}:{port}")
 
-        # تنظيف وانتظار المنفذ
-        if not wait_for_port(port, host, logger):
-            logger.error(f"فشل في تحرير المنفذ {port}")
+        # انتظار حتى يصبح المنفذ متاحاً
+        if not wait_for_port_available(port):
+            logger.error(f"المنفذ {port} غير متاح بعد عدة محاولات")
             return 1
 
-        # إنشاء التطبيق
         app = create_app()
 
-        logger.info(f"تم إنشاء التطبيق بنجاح، بدء الخادم على {host}:{port}")
+        # بدء الخادم باستخدام waitress
+        logger.info(f"بدء الخادم على {host}:{port}")
         serve(
             app,
             host=host,
             port=port,
             threads=4,
-            connection_limit=1000,
             channel_timeout=30,
             cleanup_interval=30,
-            url_scheme='http',
-            _quiet=False  # إضافة هذا لطباعة السجلات
+            ident='Silvarium Social'
         )
 
         return 0
 
     except Exception as e:
         logger.error(f"خطأ غير متوقع: {str(e)}")
-        logger.error(traceback.format_exc())
         return 1
 
 if __name__ == "__main__":
