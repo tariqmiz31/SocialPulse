@@ -249,19 +249,32 @@ def setup_auth(app: Flask):
             new_password = data.get('password')
 
             if not username or not new_password:
-                return jsonify({"error": "يجب توفير اسم المستخدم وكلمة المرور"}), 400
+                logger.warning("محاولة إعادة تعيين كلمة المرور بدون اسم مستخدم أو كلمة مرور")
+                return jsonify({"error": "يجب توفير اسم المستخدم وكلمة المرور الجديدة"}), 400
 
             conn = psycopg2.connect(os.getenv('DATABASE_URL'))
             cur = conn.cursor()
 
             # التحقق من وجود المستخدم
-            cur.execute("SELECT id FROM users WHERE username = %s", (username,))
+            cur.execute("SELECT id, username, status, is_approved FROM users WHERE username = %s", (username,))
             user = cur.fetchone()
 
             if not user:
+                logger.warning(f"محاولة إعادة تعيين كلمة المرور لمستخدم غير موجود: {username}")
                 cur.close()
                 conn.close()
                 return jsonify({"error": "المستخدم غير موجود"}), 404
+
+            # التحقق من حالة المستخدم
+            user_id, user_username, user_status, is_approved = user
+
+            if not is_approved:
+                logger.warning(f"محاولة إعادة تعيين كلمة المرور لحساب غير معتمد: {username}")
+                return jsonify({"error": "الحساب غير معتمد، يرجى الاتصال بالمسؤول"}), 403
+
+            if user_status != 'active':
+                logger.warning(f"محاولة إعادة تعيين كلمة المرور لحساب غير نشط: {username}")
+                return jsonify({"error": "الحساب غير نشط، يرجى الاتصال بالمسؤول"}), 403
 
             # تحديث كلمة المرور
             hashed_password = generate_password_hash(new_password)
@@ -270,14 +283,21 @@ def setup_auth(app: Flask):
                 (hashed_password, username)
             )
 
+            # تسجيل نجاح العملية
+            logger.info(f"تم إعادة تعيين كلمة المرور بنجاح للمستخدم: {username}")
+
             conn.commit()
             cur.close()
             conn.close()
 
-            return jsonify({"message": "تم إعادة تعيين كلمة المرور بنجاح"})
+            return jsonify({
+                "message": "تم إعادة تعيين كلمة المرور بنجاح",
+                "username": username
+            })
 
         except Exception as e:
             logger.error(f"خطأ في إعادة تعيين كلمة المرور: {str(e)}")
+            logger.error(traceback.format_exc())
             return jsonify({"error": "حدث خطأ في إعادة تعيين كلمة المرور"}), 500
 
     return app

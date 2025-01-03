@@ -7,6 +7,7 @@ from datetime import timedelta
 import logging
 from logging.handlers import RotatingFileHandler
 from server.routes import setup_routes
+from server.auth import setup_auth
 
 def create_app():
     app = Flask(__name__, static_folder='../client/dist', static_url_path='/')
@@ -71,10 +72,11 @@ def create_app():
     if not os.path.exists(session_dir):
         os.makedirs(session_dir)
 
-    # إعداد الجلسة
+    # إعداد المصادقة والجلسة
     Session(app)
+    app = setup_auth(app)
 
-    # إعداد المسارات والمكونات
+    # إعداد المسارات
     app = setup_routes(app)
 
     # تسجيل بدء تشغيل التطبيق

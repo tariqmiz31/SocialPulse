@@ -26,7 +26,7 @@ function App() {
 
   return (
     <div className="flex flex-col min-h-screen bg-background" dir="rtl">
-      <Navbar />
+      {user && <Navbar />}
       <main className="flex-1 container mx-auto py-8">
         <Suspense fallback={
           <div className="flex items-center justify-center min-h-[60vh]">
