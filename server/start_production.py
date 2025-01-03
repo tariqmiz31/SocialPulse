@@ -87,7 +87,7 @@ def main():
 
         # تكوين الخادم
         host = "0.0.0.0"
-        port = int(os.getenv("PORT", "8080"))
+        port = int(os.getenv("PORT", "5000"))  # Changed default port to 5000
 
         logger.info(f"محاولة بدء الخادم على {host}:{port}")
 
@@ -99,13 +99,10 @@ def main():
         # إنشاء تطبيق Flask
         app = create_app()
 
-        # بدء الخادم باستخدام waitress
+        # إرسال إشارة جاهزية
         logger.info(f"بدء الخادم على {host}:{port}")
-
-        # إرسال إشارة جاهزية للـ PM2
-        if os.environ.get('PM2_INTERACTOR_PROCESSING'):
-            print('ready')
-            sys.stdout.flush()
+        print('ready')
+        sys.stdout.flush()
 
         serve(
             app,

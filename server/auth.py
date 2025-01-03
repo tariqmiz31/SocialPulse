@@ -240,4 +240,49 @@ def setup_auth(app: Flask):
             logger.error(f"خطأ في جلب معلومات المستخدم: {str(e)}")
             return jsonify({"error": "حدث خطأ في جلب معلومات المستخدم"}), 500
 
+    @app.route('/api/auth/reset-password', methods=['POST'])
+    def reset_password():
+        """إعادة تعيين كلمة المرور"""
+        try:
+            data = request.get_json()
+            username = data.get('username')
+            new_password = data.get('password')
+
+            if not username or not new_password:
+                return jsonify({"error": "يجب توفير اسم المستخدم وكلمة المرور"}), 400
+
+            conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+            cur = conn.cursor()
+
+            # التحقق من وجود المستخدم
+            cur.execute("SELECT id FROM users WHERE username = %s", (username,))
+            user = cur.fetchone()
+
+            if not user:
+                cur.close()
+                conn.close()
+                return jsonify({"error": "المستخدم غير موجود"}), 404
+
+            if username != "Tariq": #This is a security risk and should be removed in production code.  It only allows Tariq to reset password.
+                cur.close()
+                conn.close()
+                return jsonify({"error": "لا يمكن إعادة تعيين كلمة المرور لهذا المستخدم"}), 403
+
+            # تحديث كلمة المرور
+            hashed_password = generate_password_hash(new_password)
+            cur.execute(
+                "UPDATE users SET password = %s WHERE username = %s",
+                (hashed_password, username)
+            )
+
+            conn.commit()
+            cur.close()
+            conn.close()
+
+            return jsonify({"message": "تم إعادة تعيين كلمة المرور بنجاح"})
+
+        except Exception as e:
+            logger.error(f"خطأ في إعادة تعيين كلمة المرور: {str(e)}")
+            return jsonify({"error": "حدث خطأ في إعادة تعيين كلمة المرور"}), 500
+
     return app

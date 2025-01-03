@@ -5,6 +5,7 @@ import { AlertCircle, Loader2 } from "lucide-react";
 import AuthPage from "@/pages/AuthPage";
 import { useUser } from "@/hooks/use-user";
 import { Navbar } from "@/components/ui/navbar";
+import ResetPassword from "@/pages/ResetPassword";
 
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
 const Calendar = lazy(() => import("@/pages/Calendar"));
@@ -23,10 +24,6 @@ function App() {
     );
   }
 
-  if (!user) {
-    return <AuthPage />;
-  }
-
   return (
     <div className="flex flex-col min-h-screen bg-background" dir="rtl">
       <Navbar />
@@ -37,14 +34,21 @@ function App() {
           </div>
         }>
           <Switch>
-            <Route path="/" component={Dashboard} />
-            <Route path="/calendar" component={Calendar} />
-            <Route path="/analytics" component={Analytics} />
-            <Route path="/social" component={SocialMediaManager} />
-            {user.role === "admin" && (
-              <Route path="/admin" component={AdminPanel} />
+            <Route path="/reset-password" component={ResetPassword} />
+            {!user ? (
+              <Route path="*" component={AuthPage} />
+            ) : (
+              <>
+                <Route path="/" component={Dashboard} />
+                <Route path="/calendar" component={Calendar} />
+                <Route path="/analytics" component={Analytics} />
+                <Route path="/social" component={SocialMediaManager} />
+                {user.role === "admin" && (
+                  <Route path="/admin" component={AdminPanel} />
+                )}
+                <Route component={NotFound} />
+              </>
             )}
-            <Route component={NotFound} />
           </Switch>
         </Suspense>
       </main>
