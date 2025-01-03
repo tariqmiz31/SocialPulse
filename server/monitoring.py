@@ -7,6 +7,7 @@ from functools import wraps
 from typing import Callable
 from flask import request, Response
 import psycopg2
+import socket
 
 # تكوين التسجيل
 logging.basicConfig(level=logging.INFO)
@@ -52,11 +53,34 @@ DB_QUERY_LATENCY = Histogram(
     ['query_type']
 )
 
+def is_port_in_use(port: int) -> bool:
+    """التحقق مما إذا كان المنفذ مشغولاً"""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.bind(('0.0.0.0', port))
+            return False
+        except socket.error:
+            return True
+
+def find_available_port(start_port: int, max_attempts: int = 5) -> int:
+    """البحث عن منفذ متاح"""
+    current_port = start_port
+    for _ in range(max_attempts):
+        if not is_port_in_use(current_port):
+            return current_port
+        current_port += 1
+    raise RuntimeError(f"لم يتم العثور على منفذ متاح بعد {max_attempts} محاولات")
+
 def setup_monitoring(app, metrics_port=9090):
     """إعداد المراقبة للتطبيق"""
-    # بدء خادم مقاييس Prometheus
-    start_http_server(metrics_port)
-    logger.info(f'تم بدء خادم المقاييس على المنفذ {metrics_port}')
+    try:
+        # البحث عن منفذ متاح للمقاييس
+        available_port = find_available_port(metrics_port)
+        start_http_server(available_port)
+        logger.info(f'تم بدء خادم المقاييس على المنفذ {available_port}')
+    except Exception as e:
+        logger.error(f'فشل في بدء خادم المقاييس: {str(e)}')
+        # نستمر في تشغيل التطبيق حتى لو فشل خادم المقاييس
 
     # إضافة التسجيل لكل الطلبات
     @app.before_request

@@ -11,7 +11,7 @@ module.exports = {
       max_memory_restart: "1G",
       env_production: {
         NODE_ENV: "production",
-        PORT: 3000,
+        PORT: 8080,
         APP_URL: process.env.APP_URL || "https://silvariumsocial.com",
         CUSTOM_DOMAIN: process.env.CUSTOM_DOMAIN,
         DATABASE_URL: process.env.DATABASE_URL,
@@ -23,7 +23,7 @@ module.exports = {
       },
       env_development: {
         NODE_ENV: "development",
-        PORT: 3000
+        PORT: 8080
       },
       error_file: "/tmp/silvarium-err.log",
       out_file: "/tmp/silvarium-out.log",
@@ -34,7 +34,9 @@ module.exports = {
       wait_ready: true,
       max_restarts: 10,
       restart_delay: 4000,
-      exp_backoff_restart_delay: 100
+      exp_backoff_restart_delay: 100,
+      wait_for_port: true,
+      port: 8080
     }
   ]
 };

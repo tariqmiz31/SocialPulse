@@ -9,6 +9,7 @@ import time
 import socket
 import signal
 import psutil
+import traceback
 
 # إضافة مسار المشروع إلى PYTHONPATH
 sys.path.insert(0, os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
@@ -49,15 +50,18 @@ def setup_logging():
 def kill_process_on_port(port, logger):
     """قتل العملية التي تستخدم المنفذ المحدد"""
     try:
-        # في نظام يونكس، يمكننا استخدام lsof للعثور على العملية
-        command = f"lsof -i :{port} -t"
-        pid = os.popen(command).read().strip()
-
-        if pid:
-            logger.info(f"وجدت عملية (PID: {pid}) تستخدم المنفذ {port}")
-            os.system(f"kill -9 {pid}")
-            time.sleep(1)  # انتظار لإغلاق العملية
-            return True
+        for proc in psutil.process_iter(['pid', 'name', 'connections']):
+            try:
+                for conn in proc.connections():
+                    if conn.laddr.port == port:
+                        logger.info(f"وجدت عملية (PID: {proc.pid}) تستخدم المنفذ {port}")
+                        proc.terminate()
+                        time.sleep(1)
+                        if proc.is_running():
+                            proc.kill()
+                        return True
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
     except Exception as e:
         logger.error(f"خطأ في قتل العملية: {str(e)}")
     return False
@@ -85,17 +89,22 @@ def wait_for_port(port: int, host: str, logger, timeout=30):
     start_time = time.time()
     while True:
         try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.bind((host, port))
-                s.close()  # إغلاق السوكيت بعد التحقق
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                sock.bind((host, port))
                 logger.info(f"المنفذ {port} متاح للاستخدام")
+                sock.close()
                 return True
-        except socket.error:
-            if time.time() - start_time > timeout:
-                logger.error(f"انتهت مهلة انتظار المنفذ {port}")
-                return False
-            time.sleep(1)
-            continue
+            except socket.error:
+                sock.close()
+                if time.time() - start_time > timeout:
+                    logger.error(f"انتهت مهلة انتظار المنفذ {port}")
+                    return False
+                time.sleep(1)
+                continue
+        except Exception as e:
+            logger.error(f"خطأ في انتظار المنفذ: {str(e)}")
+            return False
 
 def signal_handler(signum, frame):
     """معالج إشارات النظام"""
@@ -118,13 +127,17 @@ def main():
         host = "0.0.0.0"
         port = int(os.getenv("PORT", "8080"))
 
+        logger.info(f"محاولة بدء الخادم على {host}:{port}")
+
+        # تنظيف وانتظار المنفذ
         if not wait_for_port(port, host, logger):
-            logger.error(f"فشل في انتظار المنفذ {port}")
+            logger.error(f"فشل في تحرير المنفذ {port}")
             return 1
 
+        # إنشاء التطبيق
         app = create_app()
 
-        logger.info(f"بدء تشغيل الخادم على {host}:{port}")
+        logger.info(f"تم إنشاء التطبيق بنجاح، بدء الخادم على {host}:{port}")
         serve(
             app,
             host=host,
@@ -133,12 +146,15 @@ def main():
             connection_limit=1000,
             channel_timeout=30,
             cleanup_interval=30,
-            url_scheme='http'
+            url_scheme='http',
+            _quiet=False  # إضافة هذا لطباعة السجلات
         )
+
         return 0
 
     except Exception as e:
         logger.error(f"خطأ غير متوقع: {str(e)}")
+        logger.error(traceback.format_exc())
         return 1
 
 if __name__ == "__main__":

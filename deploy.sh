@@ -12,6 +12,7 @@ hidden = [".config", "package-lock.json"]
 
 [env]
 XDG_CONFIG_HOME = "/home/runner/.config"
+PORT = "8080"
 
 [nix]
 channel = "stable-21_11"
@@ -46,9 +47,17 @@ fi
 echo "تثبيت الاعتماديات..."
 pip install -r requirements.txt
 
-# التأكد من إيقاف أي عمليات سابقة على المنفذ 8080
+# إيقاف جميع العمليات السابقة على المنفذ 8080
 echo "إيقاف العمليات السابقة..."
-pkill -f "python server/start_production.py" || true
+kill $(lsof -t -i:8080) 2>/dev/null || true
+sleep 2
+
+# التحقق من حالة المنفذ
+if lsof -i:8080 > /dev/null 2>&1; then
+    echo "تعذر تحرير المنفذ 8080، محاولة القتل القسري..."
+    kill -9 $(lsof -t -i:8080) 2>/dev/null || true
+    sleep 2
+fi
 
 # انتظار حتى يصبح المنفذ متاحاً
 wait_for_port() {
@@ -71,9 +80,11 @@ if ! wait_for_port 8080; then
     exit 1
 fi
 
+echo "تم تحرير المنفذ 8080 بنجاح"
+
 # بدء التطبيق
 echo "بدء التطبيق..."
-python server/start_production.py &
+PORT=8080 python server/start_production.py &
 
 # انتظار بدء التطبيق
 echo "انتظار بدء التطبيق..."
@@ -81,7 +92,7 @@ sleep 5
 
 # التحقق من حالة التطبيق
 if curl -s http://localhost:8080/api/monitoring/health > /dev/null; then
-    echo "تم بدء التطبيق بنجاح!"
+    echo "تم بدء التطبيق بنجاح على المنفذ 8080!"
     exit 0
 else
     echo "فشل بدء التطبيق"

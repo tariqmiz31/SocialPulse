@@ -6,6 +6,7 @@ from flask_session import Session
 from datetime import timedelta
 import logging
 from logging.handlers import RotatingFileHandler
+
 from server.monitoring import setup_monitoring
 
 def create_app():
@@ -56,7 +57,9 @@ def create_app():
         SESSION_COOKIE_SAMESITE='Lax',
         PERMANENT_SESSION_LIFETIME=timedelta(days=1),
         SECRET_KEY=os.getenv('SECRET_KEY', os.urandom(24).hex()),
-        DEBUG=os.getenv('FLASK_ENV') != 'production'
+        DEBUG=os.getenv('FLASK_ENV') != 'production',
+        PORT=int(os.getenv('PORT', '8080')),
+        HOST='0.0.0.0'
     )
     Session(app)
 
@@ -72,13 +75,14 @@ def create_app():
     app = setup_monitoring(app, metrics_port=metrics_port)
 
     # تسجيل بدء تشغيل التطبيق
-    logger.info('تم بدء تشغيل التطبيق بنجاح')
+    logger.info('تم تهيئة التطبيق بنجاح')
+    logger.info(f'التطبيق مكون للعمل على {app.config["HOST"]}:{app.config["PORT"]}')
 
     return app
 
-app = create_app()
-
 if __name__ == '__main__':
+    app = create_app()
     # تكوين سجلات Flask
     logging.getLogger('werkzeug').setLevel(logging.INFO)
-    app.run(host='0.0.0.0', port=3000, debug=True)
+    port = int(os.getenv('PORT', '8080'))
+    app.run(host='0.0.0.0', port=port, debug=True)
