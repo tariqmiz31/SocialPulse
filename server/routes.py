@@ -3,7 +3,7 @@ import os
 from auth import login_required, admin_required
 import psycopg2
 from datetime import datetime
-from werkzeug.security import generate_password_hash
+from werkzeug.security import generate_password_hash, check_password_hash
 import logging
 
 def setup_routes(app: Flask):
@@ -21,6 +21,147 @@ def setup_routes(app: Flask):
         except Exception as e:
             logger.error(f"خطأ في خدمة الملفات الثابتة: {str(e)}")
             return jsonify({'error': 'خطأ في خدمة الملفات'}), 500
+
+    @app.route('/api/login', methods=['POST'])
+    def login():
+        """تسجيل الدخول"""
+        try:
+            data = request.get_json()
+            if not data:
+                return jsonify({"error": "البيانات غير صالحة"}), 400
+
+            username = data.get('username')
+            password = data.get('password')
+
+            if not username or not password:
+                return jsonify({"error": "يجب توفير اسم المستخدم وكلمة المرور"}), 400
+
+            conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+            cur = conn.cursor()
+
+            # التحقق من وجود المستخدم
+            cur.execute("""
+                SELECT id, username, password, role, is_approved, status 
+                FROM users 
+                WHERE username = %s
+            """, (username,))
+
+            user = cur.fetchone()
+
+            if not user:
+                return jsonify({"error": "اسم المستخدم أو كلمة المرور غير صحيحة"}), 401
+
+            if not user[4]:  # is_approved
+                return jsonify({"error": "الحساب في انتظار الموافقة"}), 401
+
+            if user[5] == 'blocked':  # status
+                return jsonify({"error": "تم حظر الحساب"}), 401
+
+            if not check_password_hash(user[2], password):
+                return jsonify({"error": "اسم المستخدم أو كلمة المرور غير صحيحة"}), 401
+
+            return jsonify({
+                "message": "تم تسجيل الدخول بنجاح",
+                "user": {
+                    "id": user[0],
+                    "username": user[1],
+                    "role": user[3]
+                }
+            })
+
+        except Exception as e:
+            logger.error(f"خطأ في تسجيل الدخول: {str(e)}")
+            return jsonify({"error": "حدث خطأ في تسجيل الدخول"}), 500
+        finally:
+            if 'cur' in locals():
+                cur.close()
+            if 'conn' in locals():
+                conn.close()
+
+    @app.route('/api/register', methods=['POST'])
+    def register():
+        """تسجيل مستخدم جديد"""
+        try:
+            data = request.get_json()
+            if not data:
+                return jsonify({"error": "البيانات غير صالحة"}), 400
+
+            username = data.get('username')
+            password = data.get('password')
+
+            if not username or not password:
+                return jsonify({"error": "يجب توفير اسم المستخدم وكلمة المرور"}), 400
+
+            conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+            cur = conn.cursor()
+
+            # التحقق من وجود المستخدم
+            cur.execute("SELECT id FROM users WHERE username = %s", (username,))
+            if cur.fetchone():
+                return jsonify({"error": "اسم المستخدم موجود بالفعل"}), 400
+
+            # تشفير كلمة المرور وإنشاء المستخدم
+            hashed_password = generate_password_hash(password)
+            cur.execute("""
+                INSERT INTO users (username, password, role, is_approved, status)
+                VALUES (%s, %s, 'user', false, 'pending')
+                RETURNING id
+            """, (username, hashed_password))
+
+            user_id = cur.fetchone()[0]
+            conn.commit()
+
+            return jsonify({
+                "message": "تم التسجيل بنجاح. في انتظار موافقة المشرف",
+                "userId": user_id
+            })
+
+        except Exception as e:
+            logger.error(f"خطأ في التسجيل: {str(e)}")
+            return jsonify({"error": "حدث خطأ في التسجيل"}), 500
+        finally:
+            if 'cur' in locals():
+                cur.close()
+            if 'conn' in locals():
+                conn.close()
+
+    @app.route('/api/user', methods=['GET'])
+    def get_current_user():
+        """الحصول على معلومات المستخدم الحالي"""
+        try:
+            if not request.headers.get('Authorization'):
+                return jsonify({"error": "لم يتم تسجيل الدخول"}), 401
+
+            user_id = request.headers.get('Authorization').split()[1]
+            conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+            cur = conn.cursor()
+
+            cur.execute("""
+                SELECT id, username, role, is_approved, status
+                FROM users
+                WHERE id = %s
+            """, (user_id,))
+
+            user = cur.fetchone()
+            if not user:
+                return jsonify({"error": "لم يتم العثور على المستخدم"}), 404
+
+            return jsonify({
+                "id": user[0],
+                "username": user[1],
+                "role": user[2],
+                "isApproved": user[3],
+                "status": user[4]
+            })
+
+        except Exception as e:
+            logger.error(f"خطأ في جلب معلومات المستخدم: {str(e)}")
+            return jsonify({"error": "حدث خطأ في جلب معلومات المستخدم"}), 500
+        finally:
+            if 'cur' in locals():
+                cur.close()
+            if 'conn' in locals():
+                conn.close()
 
     @app.route('/api/admin/users', methods=['GET', 'POST'])
     @admin_required
