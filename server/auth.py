@@ -12,7 +12,7 @@ logger = logging.getLogger('silvarium_auth')
 logger.setLevel(logging.DEBUG)
 
 class User:
-    def __init__(self, id, username, role, is_approved, status):
+    def __init__(self, id, username, role='user', is_approved=False, status='pending'):
         self.id = id
         self.username = username
         self.role = role
@@ -29,7 +29,6 @@ class User:
     def get_by_username(username):
         """البحث عن مستخدم باستخدام اسم المستخدم"""
         try:
-            logger.debug(f"جاري البحث عن المستخدم: {username}")
             conn = psycopg2.connect(os.getenv('DATABASE_URL'))
             cur = conn.cursor()
 
@@ -44,23 +43,26 @@ class User:
             conn.close()
 
             if user_data:
-                logger.debug(f"تم العثور على المستخدم: {username}")
-                return user_data
+                return User(
+                    id=user_data[0],
+                    username=user_data[1],
+                    role=user_data[3],
+                    is_approved=user_data[4],
+                    status=user_data[5]
+                ), user_data[2]  # Return user object and hashed password
 
-            logger.warning(f"لم يتم العثور على المستخدم: {username}")
-            return None
+            return None, None
 
         except Exception as e:
             logger.error(f"خطأ في البحث عن المستخدم: {str(e)}")
             logger.error(traceback.format_exc())
-            return None
+            return None, None
 
 def setup_auth(app):
     """إعداد المصادقة"""
     login_manager = LoginManager()
     login_manager.init_app(app)
     login_manager.login_view = 'login'
-    login_manager.session_protection = 'strong'
 
     @login_manager.user_loader
     def load_user(user_id):
@@ -79,21 +81,19 @@ def setup_auth(app):
             conn.close()
 
             if user_data:
-                return User(user_data[0], user_data[1], user_data[2], user_data[3], user_data[4])
+                return User(
+                    id=user_data[0],
+                    username=user_data[1],
+                    role=user_data[2],
+                    is_approved=user_data[3],
+                    status=user_data[4]
+                )
 
             return None
 
         except Exception as e:
             logger.error(f"خطأ في تحميل المستخدم: {str(e)}")
             return None
-
-    def admin_required(f):
-        @wraps(f)
-        def decorated_function(*args, **kwargs):
-            if not current_user.is_authenticated or current_user.role != 'admin':
-                return jsonify({"error": "غير مصرح بالوصول"}), 403
-            return f(*args, **kwargs)
-        return decorated_function
 
     @app.route('/api/login', methods=['POST'])
     def login():
@@ -105,22 +105,20 @@ def setup_auth(app):
             if not username or not password:
                 return jsonify({"error": "يجب توفير اسم المستخدم وكلمة المرور"}), 400
 
-            user_data = User.get_by_username(username)
-            if not user_data:
+            user, hashed_password = User.get_by_username(username)
+            if not user or not hashed_password:
                 return jsonify({"error": "اسم المستخدم أو كلمة المرور غير صحيحة"}), 401
 
-            if not check_password_hash(user_data[2], password):
+            if not check_password_hash(hashed_password, password):
                 return jsonify({"error": "اسم المستخدم أو كلمة المرور غير صحيحة"}), 401
 
-            if not user_data[4]:  # is_approved
+            if not user.is_approved:
                 return jsonify({"error": "الحساب في انتظار الموافقة"}), 401
 
-            if user_data[5] == 'blocked':  # status
+            if user.status == 'blocked':
                 return jsonify({"error": "تم حظر الحساب"}), 401
 
-            user = User(user_data[0], user_data[1], user_data[3], user_data[4], user_data[5])
             login_user(user)
-
             return jsonify({
                 "message": "تم تسجيل الدخول بنجاح",
                 "user": {
@@ -132,13 +130,12 @@ def setup_auth(app):
 
         except Exception as e:
             logger.error(f"خطأ في تسجيل الدخول: {str(e)}")
-            return jsonify({"error": str(e)}), 500
+            return jsonify({"error": "حدث خطأ في تسجيل الدخول"}), 500
 
     @app.route('/api/logout', methods=['POST'])
     @login_required
     def logout():
         try:
-            username = current_user.username
             logout_user()
             return jsonify({"message": "تم تسجيل الخروج بنجاح"})
         except Exception as e:

@@ -7,9 +7,9 @@ from datetime import timedelta
 import logging
 from logging.handlers import RotatingFileHandler
 
+from server.monitoring import setup_monitoring
 from server.auth import setup_auth
 from server.routes import setup_routes
-from server.monitoring import setup_monitoring
 
 def create_app():
     app = Flask(__name__, static_folder='../client/dist', static_url_path='/')
@@ -38,20 +38,7 @@ def create_app():
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
 
-    # تكوين CORS
-    CORS(app, 
-         supports_credentials=True, 
-         resources={
-             r"/api/*": {
-                 "origins": ["*"],
-                 "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-                 "allow_headers": ["Content-Type", "Authorization"],
-                 "expose_headers": ["Content-Range", "X-Content-Range"],
-                 "supports_credentials": True
-             }
-         })
-
-    # تكوين الجلسة
+    # تكوين التطبيق
     app.config.update(
         SESSION_TYPE='filesystem',
         SESSION_COOKIE_SECURE=True if os.getenv('FLASK_ENV') == 'production' else False,
@@ -63,15 +50,31 @@ def create_app():
         PORT=int(os.getenv('PORT', '8080')),
         HOST='0.0.0.0'
     )
+
+    # إعداد CORS
+    CORS(app, 
+         supports_credentials=True,
+         resources={
+             r"/api/*": {
+                 "origins": [
+                     "http://localhost:8080",
+                     "https://localhost:8080",
+                     os.getenv('APP_URL', 'https://silvariumsocial.com')
+                 ],
+                 "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+                 "allow_headers": ["Content-Type", "Authorization"],
+                 "expose_headers": ["Content-Range", "X-Content-Range"],
+                 "supports_credentials": True
+             }
+         })
+
+    # إعداد الجلسة
     Session(app)
 
-    # إعداد المصادقة والمسارات
-    app = setup_auth(app)
-    app = setup_routes(app)
-
-    # إعداد المراقبة
-    metrics_port = int(os.getenv('METRICS_PORT', '9090'))
-    app = setup_monitoring(app, metrics_port=metrics_port)
+    # إعداد المكونات بالترتيب الصحيح
+    app = setup_routes(app)   # أولاً: إعداد المسارات العامة
+    app = setup_auth(app)     # ثانياً: إعداد المصادقة
+    app = setup_monitoring(app)  # ثالثاً: إعداد المراقبة
 
     # تسجيل بدء تشغيل التطبيق
     logger.info('تم تهيئة التطبيق بنجاح')

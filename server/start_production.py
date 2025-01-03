@@ -2,11 +2,11 @@
 import os
 import sys
 from waitress import serve
-from dotenv import load_dotenv
 import logging
 from logging.handlers import RotatingFileHandler
 import socket
 import time
+from dotenv import load_dotenv
 
 # إضافة مسار المشروع إلى PYTHONPATH
 sys.path.insert(0, os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
@@ -43,28 +43,35 @@ def setup_logging():
 
     return logger
 
-def wait_for_port_available(port: int, retries: int = 5, delay: int = 2) -> bool:
+def wait_for_port_available(port: int, max_retries: int = 10, delay: int = 2) -> bool:
     """انتظار حتى يصبح المنفذ متاحاً"""
-    for i in range(retries):
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        try:
-            sock.bind(('0.0.0.0', port))
-            sock.close()
-            return True
-        except socket.error:
-            if i < retries - 1:
-                time.sleep(delay)
-            sock.close()
+    logger = logging.getLogger('silvarium_production')
+    for i in range(max_retries):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            try:
+                # محاولة ربط المنفذ
+                sock.bind(('0.0.0.0', port))
+                logger.info(f"المنفذ {port} متاح للاستخدام")
+                return True
+            except socket.error as e:
+                if i < max_retries - 1:
+                    logger.warning(f"المنفذ {port} مشغول، محاولة {i+1}/{max_retries}. انتظار {delay} ثوانٍ...")
+                    time.sleep(delay)
+                else:
+                    logger.error(f"فشل في الوصول إلى المنفذ {port} بعد {max_retries} محاولات")
     return False
 
 def main():
     """النقطة الرئيسية لبدء الخادم"""
-    logger = setup_logging()
-    logger.info("بدء تشغيل خادم Silvarium Social...")
-
     try:
+        # إعداد التسجيل
+        logger = setup_logging()
+        logger.info("بدء تشغيل خادم Silvarium Social...")
+
+        # تحميل المتغيرات البيئية
         load_dotenv()
 
+        # تكوين الخادم
         host = "0.0.0.0"
         port = int(os.getenv("PORT", "8080"))
 
@@ -73,8 +80,9 @@ def main():
         # انتظار حتى يصبح المنفذ متاحاً
         if not wait_for_port_available(port):
             logger.error(f"المنفذ {port} غير متاح بعد عدة محاولات")
-            return 1
+            sys.exit(1)
 
+        # إنشاء تطبيق Flask
         app = create_app()
 
         # بدء الخادم باستخدام waitress
@@ -86,13 +94,14 @@ def main():
             threads=4,
             channel_timeout=30,
             cleanup_interval=30,
-            ident='Silvarium Social'
+            ident='Silvarium Social',
+            clear_untrusted_proxy_headers=True
         )
 
         return 0
 
     except Exception as e:
-        logger.error(f"خطأ غير متوقع: {str(e)}")
+        logger.error(f"خطأ غير متوقع: {str(e)}", exc_info=True)
         return 1
 
 if __name__ == "__main__":
