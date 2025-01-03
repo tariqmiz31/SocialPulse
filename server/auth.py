@@ -263,11 +263,6 @@ def setup_auth(app: Flask):
                 conn.close()
                 return jsonify({"error": "المستخدم غير موجود"}), 404
 
-            if username != "Tariq": #This is a security risk and should be removed in production code.  It only allows Tariq to reset password.
-                cur.close()
-                conn.close()
-                return jsonify({"error": "لا يمكن إعادة تعيين كلمة المرور لهذا المستخدم"}), 403
-
             # تحديث كلمة المرور
             hashed_password = generate_password_hash(new_password)
             cur.execute(
