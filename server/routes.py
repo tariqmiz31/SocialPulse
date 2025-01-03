@@ -1,7 +1,5 @@
 from flask import Flask, send_from_directory, jsonify, request
 import os
-from server.auth import setup_auth
-from server.monitoring import setup_monitoring
 
 def setup_routes(app: Flask):
     """إعداد مسارات التطبيق"""
@@ -27,11 +25,5 @@ def setup_routes(app: Flask):
     def internal_error(error):
         """معالجة أخطاء 500"""
         return jsonify({'error': 'خطأ داخلي في الخادم'}), 500
-
-    # إعداد المصادقة أولاً
-    app = setup_auth(app)
-
-    # ثم إعداد المراقبة
-    app = setup_monitoring(app)
 
     return app

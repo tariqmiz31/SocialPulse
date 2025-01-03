@@ -15,6 +15,7 @@ sys.path.append(project_root)
 
 # Import after adding project root to path
 from server import create_app
+from server.config import config
 
 def setup_logging():
     """إعداد التسجيل"""
@@ -95,12 +96,14 @@ def main():
         # إعداد معالجة الإشارات
         handle_signals()
 
-        # تحميل المتغيرات البيئية
+        # تحميل المتغيرات البيئية والتكوين
         load_dotenv()
+        env = os.getenv('FLASK_ENV', 'production')
+        app_config = config[env]
 
         # تكوين الخادم
-        host = "0.0.0.0"
-        port = int(os.getenv("PORT", "5000"))
+        host = app_config.HOST
+        port = app_config.PORT
 
         logger.info(f"محاولة بدء الخادم على {host}:{port}")
 

@@ -7,10 +7,16 @@ from datetime import timedelta
 import logging
 from logging.handlers import RotatingFileHandler
 from server.routes import setup_routes
-from server.auth import setup_auth
+from server.blueprints.auth import auth_bp, init_auth
+from server.config import config
 
 def create_app():
+    """إنشاء وتكوين تطبيق Flask"""
     app = Flask(__name__, static_folder='../client/dist', static_url_path='/')
+
+    # تحديد بيئة التشغيل
+    env = os.getenv('FLASK_ENV', 'production')
+    app_config = config[env]
 
     # إعداد التسجيل
     logger = logging.getLogger('silvarium')
@@ -38,16 +44,16 @@ def create_app():
 
     # تكوين التطبيق
     app.config.update(
-        SESSION_TYPE='filesystem',
-        SESSION_FILE_DIR='/tmp/flask_session',
-        SESSION_COOKIE_SECURE=True if os.getenv('FLASK_ENV') == 'production' else False,
-        SESSION_COOKIE_HTTPONLY=True,
-        SESSION_COOKIE_SAMESITE='Lax',
-        PERMANENT_SESSION_LIFETIME=timedelta(days=1),
-        SECRET_KEY=os.getenv('SECRET_KEY', os.urandom(24).hex()),
-        DEBUG=os.getenv('FLASK_ENV') != 'production',
-        PORT=int(os.getenv('PORT', '8080')),
-        HOST='0.0.0.0'
+        SESSION_TYPE=app_config.SESSION_TYPE,
+        SESSION_FILE_DIR=app_config.SESSION_FILE_DIR,
+        SESSION_COOKIE_SECURE=app_config.SESSION_COOKIE_SECURE,
+        SESSION_COOKIE_HTTPONLY=app_config.SESSION_COOKIE_HTTPONLY,
+        SESSION_COOKIE_SAMESITE=app_config.SESSION_COOKIE_SAMESITE,
+        PERMANENT_SESSION_LIFETIME=timedelta(seconds=app_config.PERMANENT_SESSION_LIFETIME),
+        SECRET_KEY=app_config.SECRET_KEY,
+        DEBUG=app_config.DEBUG,
+        PORT=app_config.PORT,
+        HOST=app_config.HOST
     )
 
     # إعداد CORS
@@ -67,14 +73,17 @@ def create_app():
              }
          })
 
+    # إعداد المصادقة
+    app = init_auth(app)
+    app.register_blueprint(auth_bp)
+
     # إنشاء مجلد الجلسات إذا لم يكن موجوداً
-    session_dir = '/tmp/flask_session'
+    session_dir = app_config.SESSION_FILE_DIR
     if not os.path.exists(session_dir):
         os.makedirs(session_dir)
 
-    # إعداد المصادقة والجلسة
+    # إعداد الجلسة
     Session(app)
-    app = setup_auth(app)
 
     # إعداد المسارات
     app = setup_routes(app)
