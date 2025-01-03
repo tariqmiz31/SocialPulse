@@ -7,6 +7,7 @@ from logging.handlers import RotatingFileHandler
 import socket
 import time
 from dotenv import load_dotenv
+import signal
 
 # إضافة مسار المشروع إلى PYTHONPATH
 sys.path.insert(0, os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
@@ -61,12 +62,25 @@ def wait_for_port_available(port: int, max_retries: int = 10, delay: int = 2) ->
                     logger.error(f"فشل في الوصول إلى المنفذ {port} بعد {max_retries} محاولات")
     return False
 
+def handle_signals():
+    """إعداد معالجة الإشارات"""
+    def handle_term(signum, frame):
+        logger = logging.getLogger('silvarium_production')
+        logger.info("تم استلام إشارة إيقاف، إغلاق التطبيق...")
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, handle_term)
+    signal.signal(signal.SIGINT, handle_term)
+
 def main():
     """النقطة الرئيسية لبدء الخادم"""
     try:
         # إعداد التسجيل
         logger = setup_logging()
         logger.info("بدء تشغيل خادم Silvarium Social...")
+
+        # إعداد معالجة الإشارات
+        handle_signals()
 
         # تحميل المتغيرات البيئية
         load_dotenv()
@@ -87,6 +101,12 @@ def main():
 
         # بدء الخادم باستخدام waitress
         logger.info(f"بدء الخادم على {host}:{port}")
+
+        # إرسال إشارة جاهزية للـ PM2
+        if os.environ.get('PM2_INTERACTOR_PROCESSING'):
+            print('ready')
+            sys.stdout.flush()
+
         serve(
             app,
             host=host,

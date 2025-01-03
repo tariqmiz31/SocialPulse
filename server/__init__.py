@@ -6,9 +6,6 @@ from flask_session import Session
 from datetime import timedelta
 import logging
 from logging.handlers import RotatingFileHandler
-
-from server.monitoring import setup_monitoring
-from server.auth import setup_auth
 from server.routes import setup_routes
 
 def create_app():
@@ -41,6 +38,7 @@ def create_app():
     # تكوين التطبيق
     app.config.update(
         SESSION_TYPE='filesystem',
+        SESSION_FILE_DIR='/tmp/flask_session',
         SESSION_COOKIE_SECURE=True if os.getenv('FLASK_ENV') == 'production' else False,
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE='Lax',
@@ -68,13 +66,16 @@ def create_app():
              }
          })
 
+    # إنشاء مجلد الجلسات إذا لم يكن موجوداً
+    session_dir = '/tmp/flask_session'
+    if not os.path.exists(session_dir):
+        os.makedirs(session_dir)
+
     # إعداد الجلسة
     Session(app)
 
-    # إعداد المكونات بالترتيب الصحيح
-    app = setup_routes(app)   # أولاً: إعداد المسارات العامة
-    app = setup_auth(app)     # ثانياً: إعداد المصادقة
-    app = setup_monitoring(app)  # ثالثاً: إعداد المراقبة
+    # إعداد المسارات والمكونات
+    app = setup_routes(app)
 
     # تسجيل بدء تشغيل التطبيق
     logger.info('تم تهيئة التطبيق بنجاح')

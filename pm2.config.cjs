@@ -36,7 +36,11 @@ module.exports = {
       restart_delay: 4000,
       exp_backoff_restart_delay: 100,
       wait_for_port: true,
-      port: 8080
+      port: 8080,
+      args: [
+        "--wait-for-port",
+        "--port=8080"
+      ]
     }
   ]
 };

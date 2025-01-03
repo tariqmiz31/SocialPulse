@@ -1,12 +1,12 @@
 from flask import Flask, send_from_directory, jsonify, request
 import os
 from server.auth import setup_auth
+from server.monitoring import setup_monitoring
 
 def setup_routes(app: Flask):
     """إعداد مسارات التطبيق"""
-    # إعداد نظام المصادقة
-    app = setup_auth(app)
 
+    # المسار الرئيسي وخدمة الملفات الثابتة
     @app.route('/', defaults={'path': ''})
     @app.route('/<path:path>')
     def serve_static(path):
@@ -15,6 +15,7 @@ def setup_routes(app: Flask):
             return send_from_directory(app.static_folder, path)
         return send_from_directory(app.static_folder, 'index.html')
 
+    # معالجة الأخطاء
     @app.errorhandler(404)
     def not_found_error(error):
         """معالجة أخطاء 404"""
@@ -26,5 +27,11 @@ def setup_routes(app: Flask):
     def internal_error(error):
         """معالجة أخطاء 500"""
         return jsonify({'error': 'خطأ داخلي في الخادم'}), 500
+
+    # إعداد المصادقة أولاً
+    app = setup_auth(app)
+
+    # ثم إعداد المراقبة
+    app = setup_monitoring(app)
 
     return app
