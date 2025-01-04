@@ -8,7 +8,7 @@ class Config:
     SECRET_KEY = os.getenv('SECRET_KEY', 'silvarium-social-default-key')
     DATABASE_URL = os.getenv('DATABASE_URL')
     DEBUG = False
-    PORT = int(os.getenv('PORT', 5001))  # تغيير المنفذ الافتراضي إلى 5001
+    PORT = int(os.getenv('PORT', 5001))  # تعيين المنفذ الافتراضي إلى 5001
     HOST = '0.0.0.0'
 
     # إعدادات الجلسة
@@ -23,12 +23,21 @@ class ProductionConfig(Config):
     ENV = 'production'
     DEBUG = False
     SESSION_COOKIE_SECURE = True
+    CORS_ORIGINS = [
+        'https://*.repl.co',
+        'https://*.repl.dev',
+        os.getenv('APP_URL', 'https://silvariumsocial.com')
+    ]
 
 class DevelopmentConfig(Config):
     """تكوين بيئة التطوير"""
     ENV = 'development'
     DEBUG = True
     SESSION_COOKIE_SECURE = False
+    CORS_ORIGINS = [
+        'http://localhost:5001',
+        'https://localhost:5001'
+    ]
 
 config = {
     'development': DevelopmentConfig,

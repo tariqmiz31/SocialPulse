@@ -6,6 +6,7 @@ export const users = pgTable("users", {
   id: serial("id").primaryKey(),
   username: text("username").unique().notNull(),
   password: text("password").notNull(),
+  phoneNumber: text("phone_number"),
   role: text("role", { enum: ["admin", "user"] }).notNull().default("user"),
   isApproved: boolean("is_approved").notNull().default(false),
   status: text("status", { enum: ["active", "pending", "blocked"] }).notNull().default("pending"),
@@ -13,14 +14,33 @@ export const users = pgTable("users", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+export const verificationCodes = pgTable("verification_codes", {
+  id: serial("id").primaryKey(),
+  userId: serial("user_id").references(() => users.id),
+  code: text("code").notNull(),
+  type: text("type", { enum: ["reset_password", "phone_verification"] }).notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  verified: boolean("verified").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 export const insertUserSchema = createInsertSchema(users, {
   role: z.enum(["admin", "user"]),
   status: z.enum(["active", "pending", "blocked"]),
+  phoneNumber: z.string().optional(),
 });
 
 export const selectUserSchema = createSelectSchema(users);
 export type InsertUser = typeof users.$inferInsert;
 export type SelectUser = typeof users.$inferSelect;
+
+export const insertVerificationCodeSchema = createInsertSchema(verificationCodes, {
+  type: z.enum(["reset_password", "phone_verification"]),
+});
+
+export const selectVerificationCodeSchema = createSelectSchema(verificationCodes);
+export type InsertVerificationCode = typeof verificationCodes.$inferInsert;
+export type SelectVerificationCode = typeof verificationCodes.$inferSelect;
 
 export const socialPlatforms = pgTable("social_platforms", {
   id: serial("id").primaryKey(),

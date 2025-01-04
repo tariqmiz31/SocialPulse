@@ -7,6 +7,7 @@ import socket
 import time
 from dotenv import load_dotenv
 import signal
+import prometheus_client
 
 # Add project root to Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -51,16 +52,6 @@ def wait_for_port_available(port: int, max_retries: int = 30, delay: int = 1) ->
     """انتظار حتى يصبح المنفذ متاحاً"""
     logger = logging.getLogger('silvarium_production')
 
-    # محاولة إغلاق أي عملية تستخدم المنفذ
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.bind(('0.0.0.0', port))
-            sock.close()
-            logger.info(f"المنفذ {port} متاح للاستخدام")
-            return True
-    except socket.error:
-        logger.warning(f"المنفذ {port} مشغول، محاولة تحريره...")
-
     for i in range(max_retries):
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
@@ -72,15 +63,19 @@ def wait_for_port_available(port: int, max_retries: int = 30, delay: int = 1) ->
             if i < max_retries - 1:
                 logger.warning(f"المنفذ {port} مشغول، محاولة {i+1}/{max_retries}. انتظار {delay} ثوانٍ...")
                 time.sleep(delay)
+            else:
+                logger.error(f"فشل في الوصول إلى المنفذ {port} بعد {max_retries} محاولات")
+                return False
 
-    logger.error(f"فشل في الوصول إلى المنفذ {port} بعد {max_retries} محاولات")
     return False
 
-def handle_signals():
+def handle_signals(server=None):
     """إعداد معالجة الإشارات"""
     def handle_term(signum, frame):
         logger = logging.getLogger('silvarium_production')
         logger.info("تم استلام إشارة إيقاف، إغلاق التطبيق...")
+        if server:
+            server.close()
         sys.exit(0)
 
     signal.signal(signal.SIGTERM, handle_term)
@@ -92,9 +87,6 @@ def main():
         # إعداد التسجيل
         logger = setup_logging()
         logger.info("بدء تشغيل خادم Silvarium Social...")
-
-        # إعداد معالجة الإشارات
-        handle_signals()
 
         # تحميل المتغيرات البيئية والتكوين
         load_dotenv()
@@ -110,17 +102,21 @@ def main():
         # انتظار حتى يصبح المنفذ متاحاً
         if not wait_for_port_available(port):
             logger.error(f"المنفذ {port} غير متاح")
-            sys.exit(1)
+            return 1
 
         # إنشاء تطبيق Flask
         app = create_app()
 
-        # إرسال إشارة جاهزية للـ workflow
-        print('ready')
-        sys.stdout.flush()
+        # بدء خادم المقاييس على منفذ مختلف
+        metrics_port = port + 1
+        prometheus_client.start_http_server(metrics_port)
+        logger.info(f"تم بدء خادم المقاييس على المنفذ {metrics_port}")
+
+        # إعداد معالجة الإشارات
+        handle_signals()
 
         # تشغيل الخادم
-        serve(
+        server = serve(
             app,
             host=host,
             port=port,
@@ -130,6 +126,10 @@ def main():
             cleanup_interval=30,
             ident='Silvarium Social'
         )
+
+        # إرسال إشارة جاهزية
+        print('ready')
+        sys.stdout.flush()
 
         return 0
 
