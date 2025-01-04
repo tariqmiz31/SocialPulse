@@ -74,7 +74,10 @@ class User:
 
 def init_auth(app):
     """تهيئة المصادقة"""
-    login_manager.init_app(app)
+    if not hasattr(app, '_login_manager'):
+        login_manager.init_app(app)
+        app._login_manager = login_manager
+
     login_manager.login_view = 'auth.login'
 
     @login_manager.user_loader
@@ -131,6 +134,10 @@ def init_auth(app):
         logger.info("تم التأكد من وجود جدول المستخدمين")
     except Exception as e:
         logger.error(f"خطأ في إنشاء جدول المستخدمين: {str(e)}")
+
+    # Only register the blueprint if it hasn't been registered yet
+    if 'auth' not in app.blueprints:
+        app.register_blueprint(auth_bp)
 
     return app
 
@@ -292,7 +299,7 @@ def verify_phone():
 
 @auth_bp.route('/reset-password', methods=['POST'])
 def reset_password():
-    """إعادة تعيين كلمة المرور"""
+    """إعادة تعيين كلمة المرور | Reset Password"""
     try:
         data = request.get_json()
         username = data.get('username')
@@ -306,18 +313,10 @@ def reset_password():
                 "All required data must be provided"
             )), 400
 
-        # التحقق من أن المستخدم هو Tariq
-        if username.lower() != 'tariq':
-            logger.warning(f"محاولة إعادة تعيين كلمة المرور لمستخدم غير مصرح له: {username}")
-            return jsonify(get_bilingual_message(
-                "عذراً، هذه الوظيفة متاحة فقط للمستخدم Tariq",
-                "Sorry, this function is only available for user Tariq"
-            )), 403
-
         conn = psycopg2.connect(os.getenv('DATABASE_URL'))
         cur = conn.cursor()
 
-        # التحقق من وجود المستخدم
+        # التحقق من وجود المستخدم | Check if user exists
         cur.execute("""
             SELECT id, username, status, is_approved 
             FROM users 
@@ -334,7 +333,7 @@ def reset_password():
                 "User not found"
             )), 404
 
-        # التحقق من حالة المستخدم
+        # التحقق من حالة المستخدم | Check user status
         user_id, user_username, user_status, is_approved = user
 
         if not is_approved:
@@ -351,7 +350,7 @@ def reset_password():
                 "Account not active, please contact administrator"
             )), 403
 
-        # تحديث كلمة المرور
+        # تحديث كلمة المرور | Update password
         hashed_password = generate_password_hash(new_password)
         cur.execute(
             "UPDATE users SET password = %s WHERE username = %s",

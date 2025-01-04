@@ -78,7 +78,8 @@ def create_app(testing=False):
             PORT=int(os.getenv('PORT', str(app_config.PORT))),
             HOST='0.0.0.0',
             TESTING=testing,
-            WAIT_FOR_PORT=True  # Always enable port waiting
+            WAIT_FOR_PORT=True,  # Always enable port waiting | تمكين انتظار المنفذ دائماً
+            DEFAULT_LANGUAGE='ar'  # Set Arabic as default language | تعيين العربية كلغة افتراضية
         )
 
         # Set default language | تعيين اللغة الافتراضية
@@ -99,6 +100,9 @@ def create_app(testing=False):
                      "supports_credentials": True
                  }
              })
+
+        # Register authentication blueprint | تسجيل مخطط المصادقة
+        app.register_blueprint(auth_bp)
 
         # Wait for port if not testing | انتظار المنفذ إذا لم يكن في وضع الاختبار
         if not testing and app_config.WAIT_FOR_PORT:

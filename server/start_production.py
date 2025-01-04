@@ -41,6 +41,7 @@ def main():
     try:
         # Set production mode | تعيين وضع الإنتاج
         os.environ['FLASK_ENV'] = 'production'
+        os.environ['WAIT_FOR_PORT'] = 'true'  # Enable port waiting | تمكين انتظار المنفذ
 
         # Load environment variables | تحميل المتغيرات البيئية
         load_dotenv()
@@ -59,7 +60,7 @@ def main():
             print(f"Port {port} is not available | المنفذ {port} غير متاح", file=sys.stderr)
             return 1
 
-        # Signal ready before starting server | إشارة الجاهزية قبل بدء الخادم
+        # Signal ready | إشارة الجاهزية
         print('ready')
         sys.stdout.flush()
 
@@ -78,7 +79,7 @@ def main():
         return 0
 
     except Exception as e:
-        print(f"Unexpected error: {str(e)} | خطأ غير متوقع: {str(e)}", file=sys.stderr)
+        print(f"Error starting server: {str(e)} | خطأ في بدء تشغيل الخادم: {str(e)}", file=sys.stderr)
         return 1
 
 if __name__ == "__main__":
