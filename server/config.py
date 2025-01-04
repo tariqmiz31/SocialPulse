@@ -18,6 +18,15 @@ class Config:
     SESSION_COOKIE_SAMESITE = 'Lax'
     PERMANENT_SESSION_LIFETIME = 1800  # 30 minutes | 30 دقيقة
 
+    # إعدادات Firebase | Firebase Settings
+    FIREBASE_PROJECT_ID = os.getenv('FIREBASE_PROJECT_ID')
+    FIREBASE_PRIVATE_KEY = os.getenv('FIREBASE_PRIVATE_KEY')
+    FIREBASE_CLIENT_EMAIL = os.getenv('FIREBASE_CLIENT_EMAIL')
+
+    # إعدادات انتظار المنفذ | Port Waiting Settings
+    WAIT_FOR_PORT = True
+    WAIT_FOR_PORT_TIMEOUT = 30
+
 class ProductionConfig(Config):
     """تكوين بيئة الإنتاج | Production Environment Configuration"""
     ENV = 'production'

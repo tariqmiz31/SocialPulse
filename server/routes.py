@@ -1,8 +1,12 @@
 from flask import Flask, send_from_directory, jsonify, request
 import os
+from server.blueprints.auth import auth_bp
 
 def setup_routes(app: Flask):
     """إعداد مسارات التطبيق"""
+
+    # تسجيل مسارات المصادقة
+    app.register_blueprint(auth_bp)
 
     # المسار الرئيسي وخدمة الملفات الثابتة
     @app.route('/', defaults={'path': ''})

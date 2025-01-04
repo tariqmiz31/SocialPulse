@@ -51,70 +51,30 @@ def setup_logging():
 
     return logger
 
-def wait_for_port_available(port: int, max_retries: int = 30, delay: int = 1) -> bool:
+def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 30) -> bool:
     """انتظار حتى يصبح المنفذ متاحاً"""
     logger = logging.getLogger('silvarium_production')
-
-    for i in range(max_retries):
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        try:
-            sock.bind(('0.0.0.0', port))
-            sock.close()
-            logger.info(f"المنفذ {port} متاح للاستخدام | Port {port} is available")
-            return True
-        except socket.error:
-            sock.close()
-            if i < max_retries - 1:
-                logger.warning(f"المنفذ {port} مشغول، محاولة {i+1}/{max_retries}. انتظار {delay} ثوانٍ... | Port {port} is busy, attempt {i+1}/{max_retries}. Waiting {delay} seconds...")
-                time.sleep(delay)
-            else:
-                logger.error(f"فشل في الوصول إلى المنفذ {port} بعد {max_retries} محاولات | Failed to access port {port} after {max_retries} attempts")
-                return False
-
-    return False
-
-def wait_for_server_ready(host: str, port: int, timeout: int = 30) -> bool:
-    """انتظار حتى يصبح الخادم جاهزاً"""
-    logger = logging.getLogger('silvarium_production')
     start_time = time.time()
-
-    while time.time() - start_time < timeout:
+    while True:
         try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(1)
-            result = sock.connect_ex((host, port))
-            sock.close()
-
-            if result == 0:
-                logger.info(f"الخادم جاهز على {host}:{port} | Server is ready on {host}:{port}")
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.bind((host, port))
+                logger.info(f"المنفذ {port} متاح للاستخدام | Port {port} is available")
                 return True
-
+        except socket.error:
+            if time.time() - start_time >= timeout:
+                logger.error(f"المنفذ {port} غير متاح | Port {port} is not available")
+                return False
+            logger.info(f"انتظار المنفذ {port}... | Waiting for port {port}...")
             time.sleep(1)
-        except Exception:
-            time.sleep(1)
-
-    logger.error(f"الخادم لم يصبح جاهزاً خلال {timeout} ثانية | Server did not become ready within {timeout} seconds")
-    return False
-
-def handle_signals(server=None):
-    """إعداد معالجة الإشارات"""
-    def handle_term(signum, frame):
-        logger = logging.getLogger('silvarium_production')
-        logger.info("تم استلام إشارة إيقاف، إغلاق التطبيق... | Received termination signal, shutting down...")
-        if server:
-            server.close()
-        sys.exit(0)
-
-    signal.signal(signal.SIGTERM, handle_term)
-    signal.signal(signal.SIGINT, handle_term)
 
 def main():
     """النقطة الرئيسية لبدء الخادم"""
-    try:
-        # إعداد التسجيل
-        logger = setup_logging()
-        logger.info("بدء تشغيل خادم Silvarium Social... | Starting Silvarium Social server...")
+    # إعداد التسجيل
+    logger = setup_logging()
+    logger.info("بدء تشغيل خادم Silvarium Social... | Starting Silvarium Social server...")
 
+    try:
         # تحميل المتغيرات البيئية والتكوين
         load_dotenv()
         env = os.getenv('FLASK_ENV', 'production')
@@ -127,18 +87,17 @@ def main():
         logger.info(f"محاولة بدء الخادم على {host}:{port} | Attempting to start server on {host}:{port}")
 
         # انتظار حتى يصبح المنفذ متاحاً
-        if not wait_for_port_available(port):
-            logger.error(f"المنفذ {port} غير متاح | Port {port} is not available")
+        if not wait_for_port(port):
             return 1
 
         # إنشاء تطبيق Flask
         app = create_app()
-
-        # إعداد معالجة الإشارات
-        handle_signals()
+        if not app:
+            logger.error("فشل في إنشاء تطبيق Flask | Failed to create Flask application")
+            return 1
 
         # تشغيل الخادم
-        server = serve(
+        serve(
             app,
             host=host,
             port=port,
@@ -149,21 +108,16 @@ def main():
             ident='Silvarium Social'
         )
 
-        # انتظار حتى يصبح الخادم جاهزاً
-        if wait_for_server_ready(host, port):
-            # إرسال إشارة جاهزية
-            print('ready')
-            sys.stdout.flush()
+        # إرسال إشارة جاهزية
+        print('ready')
+        sys.stdout.flush()
 
-            # استمرار تشغيل الخادم
-            try:
-                while True:
-                    time.sleep(1)
-            except KeyboardInterrupt:
-                logger.info("تم استلام إشارة إيقاف، إغلاق التطبيق... | Received shutdown signal, closing application...")
-        else:
-            logger.error("فشل في بدء الخادم | Failed to start server")
-            return 1
+        # استمرار تشغيل الخادم
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            logger.info("تم استلام إشارة إيقاف، إغلاق التطبيق... | Received shutdown signal, closing application...")
 
         return 0
 
