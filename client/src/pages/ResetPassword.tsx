@@ -2,12 +2,12 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useLocation } from "wouter";
-import {
-  Card,
+import { 
+  Card, 
   CardContent,
   CardDescription,
-  CardHeader,
-  CardTitle
+  CardHeader, 
+  CardTitle 
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,7 @@ import { auth } from "@/lib/firebase";
 import { RecaptchaVerifier, signInWithPhoneNumber } from "firebase/auth";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
+// الترجمات | Translations
 const translations = {
   ar: {
     title: "إعادة تعيين كلمة المرور",
@@ -57,7 +58,9 @@ const translations = {
       confirmRequired: "تأكيد كلمة المرور مطلوب",
       passwordMismatch: "كلمات المرور غير متطابقة",
       invalidPhone: "رقم الهاتف غير صالح",
-      userNotFound: "المستخدم غير موجود"
+      userNotFound: "المستخدم غير موجود",
+      recaptchaError: "خطأ في تهيئة reCAPTCHA",
+      unknownError: "حدث خطأ غير معروف"
     },
     success: {
       title: "تم إعادة تعيين كلمة المرور بنجاح",
@@ -104,7 +107,9 @@ const translations = {
       confirmRequired: "Password confirmation is required",
       passwordMismatch: "Passwords do not match",
       invalidPhone: "Invalid phone number",
-      userNotFound: "User not found"
+      userNotFound: "User not found",
+      recaptchaError: "Error initializing reCAPTCHA",
+      unknownError: "An unknown error occurred"
     },
     success: {
       title: "Password Reset Successful",
@@ -130,13 +135,15 @@ export default function ResetPassword() {
   const { toast } = useToast();
   const [step, setStep] = useState<ResetStep>('phone');
   const [verificationId, setVerificationId] = useState<string>("");
-  const [language, setLanguage] = useState<'ar' | 'en'>('ar');
+  const [language, setLanguage] = useState<'ar' | 'en'>('ar'); // Set Arabic as default
   const t = translations[language];
 
-  // Reset Password form schemas
+  // Form schemas with translations
   const phoneSchema = z.object({
     username: z.string().min(1, t.errors.usernameRequired),
-    phoneNumber: z.string().min(1, t.errors.phoneRequired),
+    phoneNumber: z.string()
+      .min(1, t.errors.phoneRequired)
+      .regex(/^\+[1-9]\d{1,14}$/, t.errors.invalidPhone),
   });
 
   const verifySchema = z.object({
@@ -180,21 +187,47 @@ export default function ResetPassword() {
     if (step === 'phone') {
       const setupRecaptcha = async () => {
         try {
+          if (window.recaptchaVerifier) {
+            window.recaptchaVerifier.clear();
+          }
           window.recaptchaVerifier = new RecaptchaVerifier(auth, 'send-code-button', {
-            'size': 'invisible'
+            'size': 'invisible',
+            'callback': () => {
+              console.log('reCAPTCHA verified');
+            },
+            'expired-callback': () => {
+              toast({
+                variant: "destructive",
+                title: t.error.title,
+                description: t.errors.recaptchaError,
+              });
+              window.recaptchaVerifier = null;
+            }
           });
         } catch (error) {
           console.error('Error setting up reCAPTCHA:', error);
+          toast({
+            variant: "destructive",
+            title: t.error.title,
+            description: t.errors.recaptchaError,
+          });
         }
       };
       setupRecaptcha();
     }
-  }, [step]);
+  }, [step, language, toast, t]);
+
+  // Handle bilingual messages from the server
+  const handleBilingualMessage = (response: any) => {
+    if (response.message && typeof response.message === 'object') {
+      return language === 'ar' ? response.message.ar : response.message.en;
+    }
+    return response.message || t.errors.unknownError;
+  };
 
   // Form submission handlers
   const onSendCode = async (data: { username: string; phoneNumber: string }) => {
     try {
-      // Check if user is Tariq
       if (data.username.toLowerCase() !== 'tariq') {
         toast({
           variant: "destructive",
@@ -207,6 +240,10 @@ export default function ResetPassword() {
       const phoneNumber = data.phoneNumber;
       const appVerifier = window.recaptchaVerifier;
 
+      if (!appVerifier) {
+        throw new Error(t.errors.recaptchaError);
+      }
+
       const confirmationResult = await signInWithPhoneNumber(auth, phoneNumber, appVerifier);
       setVerificationId(confirmationResult.verificationId);
       setStep('verify');
@@ -215,12 +252,12 @@ export default function ResetPassword() {
         title: t.verification.codeSent,
         description: t.verification.codeSentDesc,
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error sending code:', error);
       toast({
         variant: "destructive",
         title: t.error.title,
-        description: (error as Error).message,
+        description: error.message || t.errors.unknownError,
       });
 
       // Reset reCAPTCHA on error
@@ -229,13 +266,6 @@ export default function ResetPassword() {
         window.recaptchaVerifier = null;
       }
     }
-  };
-
-  const handleBilingualMessage = (response: any) => {
-    if (response.message && typeof response.message === 'object') {
-      return `${response.message.ar}\n${response.message.en}`;
-    }
-    return response.message || 'Unknown error | خطأ غير معروف';
   };
 
   const onVerifyCode = async (data: { code: string }) => {
@@ -263,11 +293,11 @@ export default function ResetPassword() {
         title: t.verification.success,
         description: handleBilingualMessage(result),
       });
-    } catch (error) {
+    } catch (error: any) {
       toast({
         variant: "destructive",
         title: t.error.title,
-        description: (error as Error).message,
+        description: error.message || t.errors.unknownError,
       });
     }
   };
@@ -298,11 +328,11 @@ export default function ResetPassword() {
       });
 
       setLocation("/");
-    } catch (error) {
+    } catch (error: any) {
       toast({
         variant: "destructive",
         title: t.error.title,
-        description: (error as Error).message,
+        description: error.message || t.errors.unknownError,
       });
     }
   };

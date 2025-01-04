@@ -47,15 +47,20 @@ def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 60) -> bool:
     while True:
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                sock.bind((host, port))
-                logger.info(f"Port {port} is available")
-                return True
-        except socket.error:
-            if time.time() - start_time >= timeout:
-                logger.error(f"Port {port} is not available after {timeout} seconds")
-                return False
-            logger.info(f"Waiting for port {port} to become available...")
-            time.sleep(1)
+                # Instead of binding, try to connect to check if port is in use
+                result = sock.connect_ex((host, port))
+                if result != 0:  # Port is available
+                    logger.info(f"Port {port} is available")
+                    return True
+                else:  # Port is in use
+                    if time.time() - start_time >= timeout:
+                        logger.error(f"Port {port} is not available after {timeout} seconds")
+                        return False
+                    logger.info(f"Waiting for port {port} to become available...")
+                    time.sleep(1)
+        except Exception as e:
+            logger.error(f"Error checking port {port}: {str(e)}")
+            return False
 
 def init_firebase() -> bool:
     """تهيئة Firebase | Initialize Firebase"""
@@ -83,6 +88,9 @@ def init_firebase() -> bool:
 def main() -> bool:
     """Main entry point"""
     try:
+        # Set FLASK_ENV to production
+        os.environ['FLASK_ENV'] = 'production'
+
         load_dotenv()
         logger.info("Starting Silvarium Social server")
 

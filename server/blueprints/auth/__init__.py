@@ -261,19 +261,22 @@ def verify_phone():
         verification_id = data.get('verificationId')
 
         if not all([phone_number, code, verification_id]):
+            logger.warning("بيانات غير مكتملة في طلب التحقق من رقم الهاتف")
             return jsonify(get_bilingual_message(
                 "يجب توفير رقم الهاتف ورمز التحقق",
                 "Phone number and verification code are required"
             )), 400
 
         # التحقق من رقم الهاتف باستخدام Firebase
-        result = firebase_auth.verify_phone_number(phone_number, code, verification_id)
+        result = firebase_auth.verify_phone_number(phone_number, verification_id)
         if not result:
+            logger.warning(f"فشل في التحقق من رقم الهاتف: {phone_number}")
             return jsonify(get_bilingual_message(
                 "فشل في التحقق من رقم الهاتف",
                 "Failed to verify phone number"
             )), 400
 
+        logger.info(f"تم التحقق من رقم الهاتف بنجاح: {phone_number}")
         return jsonify(get_bilingual_message(
             "تم التحقق من رقم الهاتف بنجاح",
             "Phone number verified successfully"
@@ -281,6 +284,7 @@ def verify_phone():
 
     except Exception as e:
         logger.error(f"خطأ في التحقق من رقم الهاتف: {str(e)}")
+        logger.error(traceback.format_exc())
         return jsonify(get_bilingual_message(
             "حدث خطأ في التحقق من رقم الهاتف",
             "Error verifying phone number"

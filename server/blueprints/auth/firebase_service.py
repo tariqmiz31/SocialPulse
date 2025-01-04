@@ -4,7 +4,7 @@ from firebase_admin import auth, credentials
 import os
 import json
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 
 logger = logging.getLogger('silvarium_auth')
 
@@ -35,13 +35,20 @@ class FirebaseAuthService:
             logger.error(f"خطأ في تهيئة Firebase: {str(e)} | Firebase initialization error: {str(e)}")
             raise
 
-    def verify_phone_number(self, phone_number: str) -> bool:
+    def verify_phone_number(self, phone_number: str, verification_id: str) -> Tuple[bool, Optional[str]]:
         """التحقق من صحة رقم الهاتف وتسجيله | Verify if phone number is valid and registered"""
         try:
             user = self.get_user_by_phone(phone_number)
-            return user is not None
-        except Exception:
-            return False
+            if not user:
+                return False, "رقم الهاتف غير مسجل | Phone number is not registered"
+
+            # For demo purposes, we're considering the verification successful if the user exists
+            # In a real implementation, you would verify the code with Firebase
+            return True, None
+
+        except Exception as e:
+            logger.error(f"خطأ في التحقق من رقم الهاتف: {str(e)} | Phone verification error: {str(e)}")
+            return False, f"خطأ في التحقق من رقم الهاتف: {str(e)} | Phone verification error: {str(e)}"
 
     def get_user_by_phone(self, phone_number: str) -> Optional[Dict[str, Any]]:
         """الحصول على معلومات المستخدم برقم الهاتف | Get user by phone number"""

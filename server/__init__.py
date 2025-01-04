@@ -12,7 +12,7 @@ from server.config import config
 import socket
 import time
 
-def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 30):
+def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 60):
     """انتظار حتى يصبح المنفذ متاحاً | Wait until port becomes available"""
     logger = logging.getLogger('silvarium')
     start_time = time.time()
@@ -20,14 +20,21 @@ def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 30):
     while True:
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                sock.bind((host, port))
-                logger.info(f"المنفذ {port} متاح للاستخدام | Port {port} is available")
-                return True
-        except socket.error:
+                # Try to connect to check if port is in use
+                result = sock.connect_ex((host, port))
+                if result != 0:  # Port is available
+                    logger.info(f"المنفذ {port} متاح للاستخدام | Port {port} is available")
+                    return True
+                else:  # Port is in use
+                    if time.time() - start_time >= timeout:
+                        logger.error(f"المنفذ {port} غير متاح | Port {port} is not available")
+                        return False
+                    logger.info(f"انتظار المنفذ {port}... | Waiting for port {port}...")
+                    time.sleep(1)
+        except Exception as e:
+            logger.error(f"خطأ في فحص المنفذ {port}: {str(e)} | Error checking port {port}: {str(e)}")
             if time.time() - start_time >= timeout:
-                logger.error(f"المنفذ {port} غير متاح | Port {port} is not available")
                 return False
-            logger.info(f"انتظار المنفذ {port}... | Waiting for port {port}...")
             time.sleep(1)
 
 def setup_logging(app_config):
@@ -58,7 +65,7 @@ def setup_logging(app_config):
 def create_app():
     """إنشاء وتكوين تطبيق Flask"""
     # تحديد بيئة التشغيل | Determine environment
-    env = os.getenv('FLASK_ENV', 'production')
+    env = os.getenv('FLASK_ENV', 'development')  # Default to development
     app_config = config[env]
 
     # إعداد التسجيل | Setup logging
@@ -79,8 +86,8 @@ def create_app():
         DEBUG=app_config.DEBUG,
         PORT=app_config.PORT,
         HOST=app_config.HOST,
-        WAIT_FOR_PORT=app_config.WAIT_FOR_PORT,
-        WAIT_FOR_PORT_TIMEOUT=app_config.WAIT_FOR_PORT_TIMEOUT
+        WAIT_FOR_PORT=True,  # Always wait for port
+        WAIT_FOR_PORT_TIMEOUT=60  # 60 seconds timeout
     )
 
     # إعداد CORS | Setup CORS
@@ -96,13 +103,11 @@ def create_app():
              }
          })
 
-    # انتظار المنفذ إذا كان مطلوباً | Wait for port if required
-    if app.config['WAIT_FOR_PORT']:
-        port = app.config['PORT']
-        timeout = app.config['WAIT_FOR_PORT_TIMEOUT']
-        if not wait_for_port(port, app.config['HOST'], timeout):
-            logger.error(f"المنفذ {port} غير متاح | Port {port} is not available")
-            return None
+    # انتظار المنفذ | Wait for port
+    port = app.config['PORT']
+    if not wait_for_port(port, app.config['HOST'], app.config['WAIT_FOR_PORT_TIMEOUT']):
+        logger.error(f"المنفذ {port} غير متاح | Port {port} is not available")
+        return None
 
     # إعداد المصادقة | Setup authentication
     app = init_auth(app)
@@ -127,4 +132,5 @@ def create_app():
 if __name__ == '__main__':
     app = create_app()
     if app:
-        app.run(host='0.0.0.0', port=int(os.getenv('PORT', '8080')))
+        port = int(os.getenv('PORT', '8080'))
+        app.run(host='0.0.0.0', port=port)

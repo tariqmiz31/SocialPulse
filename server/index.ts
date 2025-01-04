@@ -20,17 +20,17 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
-// Security Headers
+// Security Headers with configuration for Firebase and development
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
-      defaultSrc: ["'self'"],
-      connectSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'"],
+      defaultSrc: ["'self'", "https://*.firebaseapp.com"],
+      connectSrc: ["'self'", "https://*.firebaseapp.com", "https://*.firebase.com"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "https://*.firebaseapp.com", "https://*.gstatic.com"],
       styleSrc: ["'self'", "'unsafe-inline'"],
-      fontSrc: ["'self'"],
-      imgSrc: ["'self'", "data:", "blob:"],
-      frameSrc: ["'self'"],
+      fontSrc: ["'self'", "https://*.gstatic.com"],
+      imgSrc: ["'self'", "data:", "blob:", "https://*.google.com"],
+      frameSrc: ["'self'", "https://*.firebaseapp.com"],
       objectSrc: ["'none'"],
       upgradeInsecureRequests: []
     }
@@ -40,11 +40,14 @@ app.use(helmet({
 // Enable compression
 app.use(compression());
 
-// Configure CORS
-app.use(cors({
-  origin: process.env.APP_URL,
+// Configure CORS for development
+const corsOptions = {
+  origin: process.env.NODE_ENV === 'production' 
+    ? [process.env.APP_URL].filter(Boolean)
+    : ['http://localhost:5000', 'http://0.0.0.0:5000'],
   credentials: true
-}));
+};
+app.use(cors(corsOptions));
 
 // Add performance monitoring
 app.use(performanceMonitor);
@@ -52,16 +55,14 @@ app.use(performanceMonitor);
 // Basic status endpoint for health checks
 app.get("/api/monitoring/status", async (_req, res) => {
   try {
-    // Test database connection
     await db.execute(sql`SELECT 1`);
-
     res.json({
       server: "running",
       database: "connected",
       timestamp: new Date().toISOString(),
       environment: process.env.NODE_ENV
     });
-  } catch (error) {
+  } catch (error: any) {
     logger.error('Error in status endpoint:', error);
     res.status(500).json({ 
       server: "running",
@@ -110,18 +111,19 @@ app.get("/api/monitoring/status", async (_req, res) => {
       });
     });
 
-    // Setup Vite in development, static files in production
-    if (app.get("env") === "development") {
+    // importantly only setup vite in development and after
+    // setting up all the other routes so the catch-all route
+    // doesn't interfere with the other routes
+    if (process.env.NODE_ENV !== 'production') {
       await setupVite(app, server);
     } else {
       serveStatic(app);
     }
 
-    // Start server
+    // Start server on port 5000
     const PORT = parseInt(process.env.PORT || "5000", 10);
     server.listen(PORT, "0.0.0.0", () => {
-      logger.info(`Server running on port ${PORT}`);
-      logger.info(`Environment: ${process.env.NODE_ENV}`);
+      logger.info(`Server running on port ${PORT} in ${process.env.NODE_ENV || 'development'} mode`);
       logger.info(`Database connected successfully`);
     });
 
