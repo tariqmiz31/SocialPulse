@@ -77,7 +77,8 @@ def create_app(testing=False):
             DEBUG=app_config.DEBUG,
             PORT=int(os.getenv('PORT', str(app_config.PORT))),
             HOST='0.0.0.0',
-            TESTING=testing
+            TESTING=testing,
+            WAIT_FOR_PORT=True  # Always enable port waiting
         )
 
         # Set default language | تعيين اللغة الافتراضية

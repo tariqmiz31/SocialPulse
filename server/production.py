@@ -13,7 +13,7 @@ from firebase_admin import credentials
 from dotenv import load_dotenv
 
 def setup_logging():
-    """Sets up logging with rotation"""
+    """Sets up logging with rotation | إعداد التسجيل مع التدوير"""
     log_dir = '/tmp/logs'
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
@@ -42,28 +42,30 @@ def setup_logging():
 logger = setup_logging()
 
 def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 60) -> bool:
-    """انتظار حتى يصبح المنفذ متاحاً | Wait until port becomes available"""
+    """Wait until port becomes available | انتظار حتى يصبح المنفذ متاحاً"""
     start_time = time.time()
-    while True:
+
+    # Keep checking until timeout
+    while time.time() - start_time < timeout:
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                # Instead of binding, try to connect to check if port is in use
+                sock.settimeout(1)
                 result = sock.connect_ex((host, port))
                 if result != 0:  # Port is available
-                    logger.info(f"Port {port} is available")
+                    logger.info(f"Port {port} is available | المنفذ {port} متاح")
                     return True
                 else:  # Port is in use
-                    if time.time() - start_time >= timeout:
-                        logger.error(f"Port {port} is not available after {timeout} seconds")
-                        return False
-                    logger.info(f"Waiting for port {port} to become available...")
+                    logger.info(f"Waiting for port {port}... | انتظار المنفذ {port}...")
                     time.sleep(1)
         except Exception as e:
-            logger.error(f"Error checking port {port}: {str(e)}")
+            logger.error(f"Error checking port {port}: {str(e)} | خطأ في فحص المنفذ {port}: {str(e)}")
             return False
 
+    logger.error(f"Port {port} is not available after timeout | المنفذ {port} غير متاح بعد انتهاء المهلة")
+    return False
+
 def init_firebase() -> bool:
-    """تهيئة Firebase | Initialize Firebase"""
+    """Initialize Firebase | تهيئة Firebase"""
     try:
         service_account_path = os.path.join(
             os.path.dirname(os.path.dirname(__file__)),
@@ -72,57 +74,58 @@ def init_firebase() -> bool:
         )
 
         if not os.path.exists(service_account_path):
-            logger.error("Firebase service account file not found")
+            logger.error("Firebase service account file not found | ملف حساب خدمة Firebase غير موجود")
             return False
 
         if not firebase_admin._apps:
             cred = credentials.Certificate(service_account_path)
             firebase_admin.initialize_app(cred)
-            logger.info("Firebase initialized successfully")
+            logger.info("Firebase initialized successfully | تم تهيئة Firebase بنجاح")
 
         return True
     except Exception as e:
-        logger.error(f"Firebase initialization error: {str(e)}")
+        logger.error(f"Firebase initialization error: {str(e)} | خطأ في تهيئة Firebase: {str(e)}")
         return False
 
 def main() -> bool:
-    """Main entry point"""
+    """Main entry point | النقطة الرئيسية لبدء التشغيل"""
     try:
-        # Set FLASK_ENV to production
+        # Set production mode
         os.environ['FLASK_ENV'] = 'production'
+        os.environ['WAIT_FOR_PORT'] = 'true'  # Enable port waiting
 
         load_dotenv()
-        logger.info("Starting Silvarium Social server")
+        logger.info("Starting Silvarium Social server | بدء تشغيل خادم Silvarium Social")
 
         # Check for required environment variables
         if not os.getenv('DATABASE_URL'):
-            logger.error("DATABASE_URL not found")
+            logger.error("DATABASE_URL not found | لم يتم العثور على DATABASE_URL")
             return False
 
         # Initialize Firebase for SMS verification
         if not init_firebase():
-            logger.error("Failed to initialize Firebase")
+            logger.error("Failed to initialize Firebase | فشل في تهيئة Firebase")
             return False
 
         # Create Flask app with production config
         from server import create_app
         app = create_app()
         if not app:
-            logger.error("Failed to create Flask application")
+            logger.error("Failed to create Flask application | فشل في إنشاء تطبيق Flask")
             return False
 
         port = int(os.getenv("PORT", "8080"))
 
         # Always wait for port in production
         if not wait_for_port(port, timeout=60):
-            logger.error(f"Port {port} is not available after timeout")
+            logger.error(f"Port {port} is not available after timeout | المنفذ {port} غير متاح بعد انتهاء المهلة")
             return False
 
         # Signal that we're ready to accept connections
         print("ready")
         sys.stdout.flush()
 
-        logger.info(f"Starting server on port {port}")
+        logger.info(f"Starting server on port {port} | بدء تشغيل الخادم على المنفذ {port}")
 
         # Start the production server with waitress
         serve(
@@ -139,7 +142,7 @@ def main() -> bool:
         return True
 
     except Exception as e:
-        logger.error(f"Error starting server: {str(e)}")
+        logger.error(f"Error starting server: {str(e)} | خطأ في بدء تشغيل الخادم: {str(e)}")
         return False
 
 if __name__ == "__main__":
