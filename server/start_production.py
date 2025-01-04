@@ -1,10 +1,11 @@
+"""Main production server startup script"""
 import os
 import sys
+import time
+import socket
 from waitress import serve
 import logging
 from logging.handlers import RotatingFileHandler
-import socket
-import time
 from dotenv import load_dotenv
 import signal
 import prometheus_client
@@ -14,9 +15,9 @@ from flask_cors import CORS
 # Add project root to Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(current_dir)
-sys.path.append(project_root)
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
-# Import after adding project root to path
 from server import create_app
 from server.config import config
 
@@ -57,7 +58,6 @@ def wait_for_port_available(port: int, max_retries: int = 30, delay: int = 1) ->
     for i in range(max_retries):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
-            # Try to bind to the port
             sock.bind(('0.0.0.0', port))
             sock.close()
             logger.info(f"المنفذ {port} متاح للاستخدام | Port {port} is available")
@@ -134,24 +134,6 @@ def main():
         # إنشاء تطبيق Flask
         app = create_app()
 
-        # تكوين CORS
-        CORS(app, 
-             resources={
-                 r"/api/*": {
-                     "origins": ["*"],
-                     "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-                     "allow_headers": ["Content-Type", "Authorization"]
-                 }
-             })
-
-        # بدء خادم المقاييس على منفذ مختلف
-        metrics_port = port + 1
-        try:
-            prometheus_client.start_http_server(metrics_port)
-            logger.info(f"تم بدء خادم المقاييس على المنفذ {metrics_port} | Metrics server started on port {metrics_port}")
-        except Exception as e:
-            logger.warning(f"فشل في بدء خادم المقاييس: {str(e)} | Failed to start metrics server: {str(e)}")
-
         # إعداد معالجة الإشارات
         handle_signals()
 
@@ -186,7 +168,6 @@ def main():
         return 0
 
     except Exception as e:
-        logger = logging.getLogger('silvarium_production')
         logger.error(f"خطأ غير متوقع: {str(e)} | Unexpected error: {str(e)}", exc_info=True)
         return 1
 

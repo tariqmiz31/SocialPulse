@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
 import { useUser } from "@/hooks/use-user";
+import { useLocation } from "wouter";
 
 const schema = z.object({
   username: z.string().min(3, "اسم المستخدم يجب أن يكون 3 أحرف على الأقل"),
@@ -20,6 +21,7 @@ export default function AuthPage() {
   const [isLogin, setIsLogin] = useState(true);
   const { toast } = useToast();
   const { login, register } = useUser();
+  const [_, setLocation] = useLocation();
 
   const form = useForm<FormData>({
     resolver: zodResolver(schema),
@@ -32,7 +34,7 @@ export default function AuthPage() {
   const onSubmit = async (data: FormData) => {
     try {
       const result = await (isLogin ? login(data) : register(data));
-      
+
       if (!result.ok) {
         toast({
           variant: "destructive",
@@ -53,6 +55,10 @@ export default function AuthPage() {
         description: error.message,
       });
     }
+  };
+
+  const handleResetPassword = () => {
+    setLocation("/reset-password");
   };
 
   return (
@@ -95,6 +101,16 @@ export default function AuthPage() {
               <Button type="submit" className="w-full">
                 {isLogin ? "دخول" : "تسجيل"}
               </Button>
+              {isLogin && (
+                <Button
+                  type="button"
+                  variant="link"
+                  className="w-full"
+                  onClick={handleResetPassword}
+                >
+                  نسيت كلمة المرور؟
+                </Button>
+              )}
               <Button
                 type="button"
                 variant="link"

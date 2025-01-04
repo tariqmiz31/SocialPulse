@@ -1,5 +1,11 @@
 import { initializeApp } from "firebase/app";
-import { getAuth, RecaptchaVerifier } from "firebase/auth";
+import { getAuth, RecaptchaVerifier, type Persistence } from "firebase/auth";
+
+declare global {
+  interface Window {
+    recaptchaVerifier: RecaptchaVerifier | null;
+  }
+}
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -12,21 +18,33 @@ const firebaseConfig = {
 export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 
-// Setup reCAPTCHA with size: 'invisible'
-export function setupRecaptcha(buttonId: string) {
+// Enable local persistence
+auth.setPersistence('browser');
+
+// Default language to Arabic
+auth.languageCode = 'ar';
+
+export async function setupRecaptcha(buttonId: string) {
   try {
+    // Clear any existing reCAPTCHA instances
+    if (window.recaptchaVerifier) {
+      window.recaptchaVerifier.clear();
+      window.recaptchaVerifier = null;
+    }
+
+    // Create new reCAPTCHA verifier
     const recaptchaVerifier = new RecaptchaVerifier(auth, buttonId, {
       'size': 'invisible',
       'callback': () => {
-        // Callback after reCAPTCHA verification
         console.log('reCAPTCHA verified');
       },
       'expired-callback': () => {
-        // Response expired. Ask user to solve reCAPTCHA again.
         console.log('reCAPTCHA expired');
+        window.recaptchaVerifier = null;
       }
     });
 
+    window.recaptchaVerifier = recaptchaVerifier;
     return recaptchaVerifier;
   } catch (error) {
     console.error('Error setting up reCAPTCHA:', error);

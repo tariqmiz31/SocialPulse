@@ -20,10 +20,11 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Languages } from "lucide-react";
 import { auth } from "@/lib/firebase";
 import { RecaptchaVerifier, signInWithPhoneNumber } from "firebase/auth";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 const translations = {
   ar: {
@@ -32,9 +33,9 @@ const translations = {
     username: "اسم المستخدم",
     usernamePlaceholder: "أدخل اسم المستخدم",
     phoneNumber: "رقم الهاتف",
-    phoneNumberPlaceholder: "أدخل رقم الهاتف",
+    phoneNumberPlaceholder: "أدخل رقم الهاتف (مثال: +966123456789)",
     verificationCode: "رمز التحقق",
-    verificationCodePlaceholder: "أدخل رمز التحقق",
+    verificationCodePlaceholder: "أدخل رمز التحقق المرسل",
     password: "كلمة المرور الجديدة",
     passwordPlaceholder: "أدخل كلمة المرور الجديدة",
     confirmPassword: "تأكيد كلمة المرور",
@@ -42,9 +43,11 @@ const translations = {
     sendCode: "إرسال رمز التحقق",
     verify: "تحقق من الرمز",
     resetButton: "إعادة تعيين كلمة المرور",
+    backToLogin: "العودة لتسجيل الدخول",
     resetting: "جاري إعادة التعيين...",
     sending: "جاري إرسال الرمز...",
     verifying: "جاري التحقق...",
+    restrictedUser: "عذراً، هذه الوظيفة متاحة فقط للمستخدم Tariq",
     errors: {
       usernameRequired: "اسم المستخدم مطلوب",
       phoneRequired: "رقم الهاتف مطلوب",
@@ -52,53 +55,23 @@ const translations = {
       passwordRequired: "كلمة المرور يجب أن تكون 8 أحرف على الأقل",
       confirmRequired: "تأكيد كلمة المرور مطلوب",
       passwordMismatch: "كلمات المرور غير متطابقة",
-      invalidPhone: "رقم الهاتف غير صالح"
+      invalidPhone: "رقم الهاتف غير صالح",
+      userNotFound: "المستخدم غير موجود"
     },
-    success: "تم إعادة تعيين كلمة المرور بنجاح",
-    successDesc: "يمكنك الآن تسجيل الدخول باستخدام كلمة المرور الجديدة",
-    error: "خطأ في إعادة تعيين كلمة المرور",
-    errorDesc: "يرجى التحقق من البيانات والمحاولة مرة أخرى",
-    codeSent: "تم إرسال رمز التحقق",
-    codeSentDesc: "يرجى إدخال الرمز المرسل إلى هاتفك",
-    verificationSuccess: "تم التحقق بنجاح",
-    verificationError: "خطأ في التحقق من الرمز"
-  },
-  en: {
-    title: "Reset Password",
-    description: "Enter your phone number to verify then enter your new password",
-    username: "Username",
-    usernamePlaceholder: "Enter username",
-    phoneNumber: "Phone Number",
-    phoneNumberPlaceholder: "Enter phone number",
-    verificationCode: "Verification Code",
-    verificationCodePlaceholder: "Enter verification code",
-    password: "New Password",
-    passwordPlaceholder: "Enter new password",
-    confirmPassword: "Confirm Password",
-    confirmPasswordPlaceholder: "Enter password again",
-    sendCode: "Send Code",
-    verify: "Verify Code",
-    resetButton: "Reset Password",
-    resetting: "Resetting...",
-    sending: "Sending code...",
-    verifying: "Verifying...",
-    errors: {
-      usernameRequired: "Username is required",
-      phoneRequired: "Phone number is required",
-      codeRequired: "Verification code is required",
-      passwordRequired: "Password must be at least 8 characters",
-      confirmRequired: "Password confirmation is required",
-      passwordMismatch: "Passwords do not match",
-      invalidPhone: "Invalid phone number"
+    success: {
+      title: "تم إعادة تعيين كلمة المرور بنجاح",
+      description: "يمكنك الآن تسجيل الدخول باستخدام كلمة المرور الجديدة"
     },
-    success: "Password Reset Successful",
-    successDesc: "You can now login with your new password",
-    error: "Password Reset Failed",
-    errorDesc: "Please check your information and try again",
-    codeSent: "Verification Code Sent",
-    codeSentDesc: "Please enter the code sent to your phone",
-    verificationSuccess: "Verification Successful",
-    verificationError: "Verification Failed"
+    error: {
+      title: "حدث خطأ",
+      description: "يرجى التحقق من البيانات والمحاولة مرة أخرى"
+    },
+    verification: {
+      codeSent: "تم إرسال رمز التحقق",
+      codeSentDesc: "يرجى إدخال الرمز المرسل إلى هاتفك",
+      success: "تم التحقق بنجاح",
+      error: "خطأ في التحقق من الرمز"
+    }
   }
 };
 
@@ -107,11 +80,11 @@ type ResetStep = 'phone' | 'verify' | 'reset';
 export default function ResetPassword() {
   const [_, setLocation] = useLocation();
   const { toast } = useToast();
-  const [lang, setLang] = useState<'ar' | 'en'>('ar');
   const [step, setStep] = useState<ResetStep>('phone');
   const [verificationId, setVerificationId] = useState<string>("");
-  const t = translations[lang];
+  const t = translations.ar;
 
+  // Reset Password form schemas
   const phoneSchema = z.object({
     username: z.string().min(1, t.errors.usernameRequired),
     phoneNumber: z.string().min(1, t.errors.phoneRequired),
@@ -123,12 +96,13 @@ export default function ResetPassword() {
 
   const resetSchema = z.object({
     password: z.string().min(8, t.errors.passwordRequired),
-    confirmPassword: z.string().min(8, t.errors.confirmRequired),
+    confirmPassword: z.string().min(1, t.errors.confirmRequired),
   }).refine((data) => data.password === data.confirmPassword, {
     message: t.errors.passwordMismatch,
     path: ["confirmPassword"],
   });
 
+  // Form instances
   const phoneForm = useForm({
     resolver: zodResolver(phoneSchema),
     defaultValues: {
@@ -152,33 +126,59 @@ export default function ResetPassword() {
     },
   });
 
-  async function setupRecaptcha() {
-    const recaptchaVerifier = new RecaptchaVerifier(auth, 'send-code-button', {
-      'size': 'invisible'
-    });
-    return recaptchaVerifier;
-  }
+  // Firebase reCAPTCHA setup
+  useEffect(() => {
+    if (step === 'phone') {
+      const setupRecaptcha = async () => {
+        try {
+          window.recaptchaVerifier = new RecaptchaVerifier(auth, 'send-code-button', {
+            'size': 'invisible'
+          });
+        } catch (error) {
+          console.error('Error setting up reCAPTCHA:', error);
+        }
+      };
+      setupRecaptcha();
+    }
+  }, [step]);
 
-  const onSendCode = async (data: { username: string, phoneNumber: string }) => {
+  // Form submission handlers
+  const onSendCode = async (data: { username: string; phoneNumber: string }) => {
     try {
-      const recaptchaVerifier = await setupRecaptcha();
-      const confirmationResult = await signInWithPhoneNumber(
-        auth,
-        data.phoneNumber,
-        recaptchaVerifier
-      );
+      // Check if user is Tariq
+      if (data.username.toLowerCase() !== 'tariq') {
+        toast({
+          variant: "destructive",
+          title: t.error.title,
+          description: t.restrictedUser,
+        });
+        return;
+      }
+
+      const phoneNumber = data.phoneNumber;
+      const appVerifier = window.recaptchaVerifier;
+
+      const confirmationResult = await signInWithPhoneNumber(auth, phoneNumber, appVerifier);
       setVerificationId(confirmationResult.verificationId);
       setStep('verify');
+
       toast({
-        title: t.codeSent,
-        description: t.codeSentDesc,
+        title: t.verification.codeSent,
+        description: t.verification.codeSentDesc,
       });
     } catch (error) {
+      console.error('Error sending code:', error);
       toast({
         variant: "destructive",
-        title: t.errors.invalidPhone,
+        title: t.error.title,
         description: (error as Error).message,
       });
+
+      // Reset reCAPTCHA on error
+      if (window.recaptchaVerifier) {
+        window.recaptchaVerifier.clear();
+        window.recaptchaVerifier = null;
+      }
     }
   };
 
@@ -202,19 +202,19 @@ export default function ResetPassword() {
 
       setStep('reset');
       toast({
-        title: t.verificationSuccess,
-        description: t.verificationSuccess,
+        title: t.verification.success,
+        description: t.verification.success,
       });
     } catch (error) {
       toast({
         variant: "destructive",
-        title: t.verificationError,
+        title: t.error.title,
         description: (error as Error).message,
       });
     }
   };
 
-  const onResetPassword = async (data: { password: string, confirmPassword: string }) => {
+  const onResetPassword = async (data: { password: string; confirmPassword: string }) => {
     try {
       const response = await fetch("/api/auth/reset-password", {
         method: "POST",
@@ -226,7 +226,6 @@ export default function ResetPassword() {
           password: data.password,
           verificationId
         }),
-        credentials: "include",
       });
 
       if (!response.ok) {
@@ -234,34 +233,25 @@ export default function ResetPassword() {
       }
 
       toast({
-        title: t.success,
-        description: t.successDesc,
+        title: t.success.title,
+        description: t.success.description,
       });
-      setLocation("/login");
+
+      setLocation("/");
     } catch (error) {
       toast({
         variant: "destructive",
-        title: t.error,
+        title: t.error.title,
         description: (error as Error).message,
       });
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4" dir={lang === 'ar' ? 'rtl' : 'ltr'}>
+    <div className="min-h-screen flex items-center justify-center bg-background p-4" dir="rtl">
       <Card className="w-full max-w-md">
         <CardHeader>
-          <div className="flex justify-between items-center">
-            <CardTitle className="text-2xl font-bold">{t.title}</CardTitle>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setLang(lang === 'ar' ? 'en' : 'ar')}
-              className="h-8 w-8"
-            >
-              <Languages className="h-4 w-4" />
-            </Button>
-          </div>
+          <CardTitle className="text-2xl font-bold">{t.title}</CardTitle>
           <CardDescription>
             {t.description}
           </CardDescription>
@@ -295,6 +285,7 @@ export default function ResetPassword() {
                       <FormControl>
                         <Input 
                           placeholder={t.phoneNumberPlaceholder}
+                          type="tel"
                           {...field} 
                         />
                       </FormControl>
@@ -302,14 +293,24 @@ export default function ResetPassword() {
                     </FormItem>
                   )}
                 />
-                <Button 
-                  type="submit" 
-                  className="w-full"
-                  id="send-code-button"
-                  disabled={phoneForm.formState.isSubmitting}
-                >
-                  {phoneForm.formState.isSubmitting ? t.sending : t.sendCode}
-                </Button>
+                <div className="space-y-2">
+                  <Button 
+                    type="submit" 
+                    className="w-full"
+                    id="send-code-button"
+                    disabled={phoneForm.formState.isSubmitting}
+                  >
+                    {phoneForm.formState.isSubmitting ? t.sending : t.sendCode}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => setLocation("/")}
+                  >
+                    {t.backToLogin}
+                  </Button>
+                </div>
               </form>
             </Form>
           )}
