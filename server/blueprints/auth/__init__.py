@@ -248,24 +248,19 @@ def verify_phone():
     try:
         data = request.get_json()
         phone_number = data.get('phoneNumber')
-        id_token = data.get('idToken')
+        code = data.get('code')
+        verification_id = data.get('verificationId')
 
-        if not phone_number or not id_token:
+        if not all([phone_number, code, verification_id]):
             return jsonify({
-                "error": "يجب توفير رقم الهاتف ورمز التحقق | Phone number and verification token are required"
+                "error": "يجب توفير رقم الهاتف ورمز التحقق | Phone number and verification code are required"
             }), 400
 
-        # التحقق من رمز Firebase
-        decoded_token = firebase_auth.verify_id_token(id_token)
-        if not decoded_token:
+        # التحقق من رقم الهاتف باستخدام Firebase
+        result = firebase_auth.verify_phone_number(phone_number, code, verification_id)
+        if not result:
             return jsonify({
-                "error": "رمز التحقق غير صالح | Invalid verification token"
-            }), 401
-
-        # التحقق من تطابق رقم الهاتف
-        if decoded_token.get('phone_number') != phone_number:
-            return jsonify({
-                "error": "رقم الهاتف غير متطابق | Phone number mismatch"
+                "error": "فشل في التحقق من رقم الهاتف | Failed to verify phone number"
             }), 400
 
         return jsonify({
@@ -286,20 +281,13 @@ def reset_password():
         data = request.get_json()
         username = data.get('username')
         new_password = data.get('password')
-        id_token = data.get('idToken')
+        verification_id = data.get('verificationId')
 
-        if not all([username, new_password, id_token]):
+        if not all([username, new_password, verification_id]):
             logger.warning("بيانات غير مكتملة في طلب إعادة تعيين كلمة المرور")
             return jsonify({
                 "error": "يجب توفير جميع البيانات المطلوبة | All required data must be provided"
             }), 400
-
-        # التحقق من رمز Firebase
-        decoded_token = firebase_auth.verify_id_token(id_token)
-        if not decoded_token:
-            return jsonify({
-                "error": "رمز التحقق غير صالح | Invalid verification token"
-            }), 401
 
         # التحقق من أن المستخدم هو Tariq
         if username.lower() != 'tariq':

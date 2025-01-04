@@ -43,7 +43,6 @@ def create_app():
     logger.addHandler(console_handler)
 
     # تكوين التطبيق
-    port = int(os.getenv('PORT', '8080'))  # Use PORT environment variable with default 8080
     app.config.update(
         SESSION_TYPE=app_config.SESSION_TYPE,
         SESSION_FILE_DIR=app_config.SESSION_FILE_DIR,
@@ -53,7 +52,7 @@ def create_app():
         PERMANENT_SESSION_LIFETIME=timedelta(seconds=app_config.PERMANENT_SESSION_LIFETIME),
         SECRET_KEY=app_config.SECRET_KEY,
         DEBUG=app_config.DEBUG,
-        PORT=port,
+        PORT=int(os.getenv('PORT', '8080')),
         HOST='0.0.0.0'
     )
 

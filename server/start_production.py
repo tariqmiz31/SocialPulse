@@ -8,6 +8,8 @@ import time
 from dotenv import load_dotenv
 import signal
 import prometheus_client
+from flask import Flask, send_from_directory, request, jsonify
+from flask_cors import CORS
 
 # Add project root to Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -53,13 +55,15 @@ def wait_for_port_available(port: int, max_retries: int = 30, delay: int = 1) ->
     logger = logging.getLogger('silvarium_production')
 
     for i in range(max_retries):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                sock.bind(('0.0.0.0', port))
-                sock.close()
-                logger.info(f"المنفذ {port} متاح للاستخدام | Port {port} is available")
-                return True
+            # Try to bind to the port
+            sock.bind(('0.0.0.0', port))
+            sock.close()
+            logger.info(f"المنفذ {port} متاح للاستخدام | Port {port} is available")
+            return True
         except socket.error:
+            sock.close()
             if i < max_retries - 1:
                 logger.warning(f"المنفذ {port} مشغول، محاولة {i+1}/{max_retries}. انتظار {delay} ثوانٍ... | Port {port} is busy, attempt {i+1}/{max_retries}. Waiting {delay} seconds...")
                 time.sleep(delay)
@@ -67,6 +71,29 @@ def wait_for_port_available(port: int, max_retries: int = 30, delay: int = 1) ->
                 logger.error(f"فشل في الوصول إلى المنفذ {port} بعد {max_retries} محاولات | Failed to access port {port} after {max_retries} attempts")
                 return False
 
+    return False
+
+def wait_for_server_ready(host: str, port: int, timeout: int = 30) -> bool:
+    """انتظار حتى يصبح الخادم جاهزاً"""
+    logger = logging.getLogger('silvarium_production')
+    start_time = time.time()
+
+    while time.time() - start_time < timeout:
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(1)
+            result = sock.connect_ex((host, port))
+            sock.close()
+
+            if result == 0:
+                logger.info(f"الخادم جاهز على {host}:{port} | Server is ready on {host}:{port}")
+                return True
+
+            time.sleep(1)
+        except Exception:
+            time.sleep(1)
+
+    logger.error(f"الخادم لم يصبح جاهزاً خلال {timeout} ثانية | Server did not become ready within {timeout} seconds")
     return False
 
 def handle_signals(server=None):
@@ -107,10 +134,23 @@ def main():
         # إنشاء تطبيق Flask
         app = create_app()
 
+        # تكوين CORS
+        CORS(app, 
+             resources={
+                 r"/api/*": {
+                     "origins": ["*"],
+                     "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+                     "allow_headers": ["Content-Type", "Authorization"]
+                 }
+             })
+
         # بدء خادم المقاييس على منفذ مختلف
         metrics_port = port + 1
-        prometheus_client.start_http_server(metrics_port)
-        logger.info(f"تم بدء خادم المقاييس على المنفذ {metrics_port} | Metrics server started on port {metrics_port}")
+        try:
+            prometheus_client.start_http_server(metrics_port)
+            logger.info(f"تم بدء خادم المقاييس على المنفذ {metrics_port} | Metrics server started on port {metrics_port}")
+        except Exception as e:
+            logger.warning(f"فشل في بدء خادم المقاييس: {str(e)} | Failed to start metrics server: {str(e)}")
 
         # إعداد معالجة الإشارات
         handle_signals()
@@ -127,9 +167,21 @@ def main():
             ident='Silvarium Social'
         )
 
-        # إرسال إشارة جاهزية
-        print('ready')
-        sys.stdout.flush()
+        # انتظار حتى يصبح الخادم جاهزاً
+        if wait_for_server_ready(host, port):
+            # إرسال إشارة جاهزية
+            print('ready')
+            sys.stdout.flush()
+
+            # استمرار تشغيل الخادم
+            try:
+                while True:
+                    time.sleep(1)
+            except KeyboardInterrupt:
+                logger.info("تم استلام إشارة إيقاف، إغلاق التطبيق... | Received shutdown signal, closing application...")
+        else:
+            logger.error("فشل في بدء الخادم | Failed to start server")
+            return 1
 
         return 0
 

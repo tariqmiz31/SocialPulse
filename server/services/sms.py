@@ -30,16 +30,7 @@ class FirebaseAuthService:
 
         except Exception as e:
             logger.error(f"خطأ في تهيئة Firebase: {str(e)}")
-
-    def generate_verification_code(self, length=6):
-        """توليد رمز تحقق عشوائي
-        Generate a random verification code"""
-        return ''.join(random.choices(string.digits, k=length))
-
-    def calculate_expiry(self, minutes=10):
-        """حساب وقت انتهاء صلاحية الرمز
-        Calculate code expiration time"""
-        return datetime.now() + timedelta(minutes=minutes)
+            raise
 
     async def send_verification_code(self, phone_number: str) -> dict:
         """إرسال رابط التحقق عبر Firebase
