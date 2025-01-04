@@ -12,6 +12,34 @@ import { scheduleBackups } from "./backup";
 import logger from "./logConfig";
 import { db } from "@db";
 import { sql } from "drizzle-orm";
+import net from "net";
+
+// Function to check if a port is available
+const waitForPort = (port: number, host: string = '0.0.0.0', timeout: number = 60000): Promise<boolean> => {
+  return new Promise((resolve) => {
+    const startTime = Date.now();
+    const checkPort = () => {
+      const socket = new net.Socket();
+      socket.on('error', () => {
+        socket.destroy();
+        logger.info(`Port ${port} is available | المنفذ ${port} متاح`);
+        resolve(true);
+      });
+
+      socket.connect(port, host, () => {
+        socket.destroy();
+        if (Date.now() - startTime >= timeout) {
+          logger.error(`Port ${port} is not available after timeout | المنفذ ${port} غير متاح بعد انتهاء المهلة`);
+          resolve(false);
+          return;
+        }
+        logger.info(`Waiting for port ${port}... | انتظار المنفذ ${port}...`);
+        setTimeout(checkPort, 1000);
+      });
+    };
+    checkPort();
+  });
+};
 
 // Create Express app
 const app = express();
@@ -120,24 +148,30 @@ app.get("/api/monitoring/status", async (_req, res) => {
       serveStatic(app);
     }
 
-    // Start server on port 5000
+    // Start server on port 5000 after ensuring port is available
     const PORT = parseInt(process.env.PORT || "5000", 10);
+    const isPortAvailable = await waitForPort(PORT);
+
+    if (!isPortAvailable) {
+      throw new Error(`Port ${PORT} is not available after timeout`);
+    }
+
     server.listen(PORT, "0.0.0.0", () => {
-      logger.info(`Server running on port ${PORT} in ${process.env.NODE_ENV || 'development'} mode`);
-      logger.info(`Database connected successfully`);
+      logger.info(`Server running on port ${PORT} in ${process.env.NODE_ENV || 'development'} mode | الخادم يعمل على المنفذ ${PORT}`);
+      logger.info(`Database connected successfully | تم الاتصال بقاعدة البيانات بنجاح`);
     });
 
     // Handle cleanup on shutdown
     process.on('SIGTERM', () => {
-      logger.info('SIGTERM signal received. Closing HTTP server...');
+      logger.info('SIGTERM signal received. Closing HTTP server... | تم استلام إشارة SIGTERM. جاري إغلاق الخادم');
       server.close(() => {
-        logger.info('HTTP server closed');
+        logger.info('HTTP server closed | تم إغلاق الخادم');
         process.exit(0);
       });
     });
 
   } catch (error) {
-    logger.error("Failed to start the server:", error);
+    logger.error("Failed to start the server | فشل في بدء تشغيل الخادم:", error);
     process.exit(1);
   }
 })();

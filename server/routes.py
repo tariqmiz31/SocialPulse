@@ -22,12 +22,22 @@ def setup_routes(app: Flask):
     def not_found_error(error):
         """معالجة أخطاء 404"""
         if request.path.startswith('/api/'):
-            return jsonify({'error': 'المسار غير موجود'}), 404
+            return jsonify({
+                'message': {
+                    'ar': 'المسار غير موجود',
+                    'en': 'Path not found'
+                }
+            }), 404
         return send_from_directory(app.static_folder, 'index.html')
 
     @app.errorhandler(500)
     def internal_error(error):
         """معالجة أخطاء 500"""
-        return jsonify({'error': 'خطأ داخلي في الخادم'}), 500
+        return jsonify({
+            'message': {
+                'ar': 'خطأ داخلي في الخادم',
+                'en': 'Internal server error'
+            }
+        }), 500
 
     return app

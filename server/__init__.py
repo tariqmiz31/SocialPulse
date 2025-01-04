@@ -12,70 +12,60 @@ from server.config import config
 import socket
 import time
 
-def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 60):
-    """انتظار حتى يصبح المنفذ متاحاً | Wait until port becomes available"""
+def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 60) -> bool:
+    """Wait until port becomes available | انتظار حتى يصبح المنفذ متاحاً"""
     logger = logging.getLogger('silvarium')
     start_time = time.time()
 
     while True:
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                # Try to connect to check if port is in use
                 result = sock.connect_ex((host, port))
                 if result != 0:  # Port is available
-                    logger.info(f"المنفذ {port} متاح للاستخدام | Port {port} is available")
+                    logger.info(f"Port {port} is available | المنفذ {port} متاح للاستخدام")
                     return True
-                else:  # Port is in use
-                    if time.time() - start_time >= timeout:
-                        logger.error(f"المنفذ {port} غير متاح | Port {port} is not available")
-                        return False
-                    logger.info(f"انتظار المنفذ {port}... | Waiting for port {port}...")
-                    time.sleep(1)
+                if time.time() - start_time >= timeout:
+                    logger.error(f"Port {port} is not available | المنفذ {port} غير متاح")
+                    return False
+                logger.info(f"Waiting for port {port}... | انتظار المنفذ {port}...")
+                time.sleep(1)
         except Exception as e:
-            logger.error(f"خطأ في فحص المنفذ {port}: {str(e)} | Error checking port {port}: {str(e)}")
-            if time.time() - start_time >= timeout:
-                return False
-            time.sleep(1)
+            logger.error(f"Error checking port {port}: {str(e)} | خطأ في فحص المنفذ {port}: {str(e)}")
+            return False
 
-def setup_logging(app_config):
-    """إعداد التسجيل | Setup logging"""
-    logger = logging.getLogger('silvarium')
-    logger.setLevel(logging.INFO)
-
-    formatter = logging.Formatter('%(asctime)s [%(levelname)s] [%(name)s] %(message)s')
-
-    log_dir = '/tmp/logs'
-    if not os.path.exists(log_dir):
-        os.makedirs(log_dir)
-
-    file_handler = RotatingFileHandler(
-        f'{log_dir}/silvarium.log',
-        maxBytes=1024 * 1024,
-        backupCount=5
-    )
-    file_handler.setFormatter(formatter)
-    logger.addHandler(file_handler)
-
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
-    logger.addHandler(console_handler)
-
-    return logger
-
-def create_app():
-    """إنشاء وتكوين تطبيق Flask"""
-    # تحديد بيئة التشغيل | Determine environment
-    env = os.getenv('FLASK_ENV', 'development')
-    app_config = config[env]
-
-    # إعداد التسجيل | Setup logging
-    logger = setup_logging(app_config)
-
+def create_app(testing=False):
+    """Create and configure Flask application | إنشاء وتكوين تطبيق Flask"""
+    logger = None
     try:
-        # إنشاء التطبيق | Create application
+        # Determine environment | تحديد بيئة التشغيل
+        env = os.getenv('FLASK_ENV', 'development')
+        app_config = config[env]
+
+        # Setup logging | إعداد التسجيل
+        if not testing:
+            logger = logging.getLogger('silvarium')
+            logger.setLevel(logging.INFO)
+            formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
+
+            if not os.path.exists('/tmp/logs'):
+                os.makedirs('/tmp/logs')
+
+            file_handler = RotatingFileHandler(
+                '/tmp/logs/silvarium.log',
+                maxBytes=1024 * 1024,
+                backupCount=5
+            )
+            file_handler.setFormatter(formatter)
+            logger.addHandler(file_handler)
+
+            console_handler = logging.StreamHandler()
+            console_handler.setFormatter(formatter)
+            logger.addHandler(console_handler)
+
+        # Create application | إنشاء التطبيق
         app = Flask(__name__, static_folder='../client/dist', static_url_path='/')
 
-        # تكوين التطبيق | Configure application
+        # Configure application | تكوين التطبيق
         app.config.update(
             SESSION_TYPE=app_config.SESSION_TYPE,
             SESSION_FILE_DIR=app_config.SESSION_FILE_DIR,
@@ -85,19 +75,18 @@ def create_app():
             PERMANENT_SESSION_LIFETIME=timedelta(seconds=app_config.PERMANENT_SESSION_LIFETIME),
             SECRET_KEY=app_config.SECRET_KEY,
             DEBUG=app_config.DEBUG,
-            PORT=app_config.PORT,
-            HOST=app_config.HOST,
-            WAIT_FOR_PORT=True,  # Always wait for port
-            WAIT_FOR_PORT_TIMEOUT=60  # 60 seconds timeout
+            PORT=int(os.getenv('PORT', str(app_config.PORT))),
+            HOST='0.0.0.0',
+            TESTING=testing
         )
 
-        # Set default language
+        # Set default language | تعيين اللغة الافتراضية
         @app.before_request
         def set_default_language():
             if 'language' not in session:
-                session['language'] = 'ar'  # Set Arabic as default
+                session['language'] = app_config.DEFAULT_LANGUAGE
 
-        # إعداد CORS | Setup CORS
+        # Setup CORS | إعداد CORS
         CORS(app, 
              supports_credentials=True,
              resources={
@@ -110,38 +99,41 @@ def create_app():
                  }
              })
 
-        # انتظار المنفذ | Wait for port
-        port = app.config['PORT']
-        if not wait_for_port(port, app.config['HOST'], app.config['WAIT_FOR_PORT_TIMEOUT']):
-            logger.error(f"المنفذ {port} غير متاح | Port {port} is not available")
-            return None
+        # Wait for port if not testing | انتظار المنفذ إذا لم يكن في وضع الاختبار
+        if not testing and app_config.WAIT_FOR_PORT:
+            port = app.config['PORT']
+            if not wait_for_port(port, app.config['HOST'], app_config.WAIT_FOR_PORT_TIMEOUT):
+                if logger:
+                    logger.error(f"Port {port} is not available | المنفذ {port} غير متاح")
+                return None
 
-        # إعداد المصادقة | Setup authentication
+        # Setup authentication | إعداد المصادقة
         app = init_auth(app)
 
-        # إنشاء مجلد الجلسات | Create session directory
-        session_dir = app_config.SESSION_FILE_DIR
-        if not os.path.exists(session_dir):
-            os.makedirs(session_dir)
+        # Create session directory | إنشاء مجلد الجلسات
+        if not testing and not os.path.exists(app_config.SESSION_FILE_DIR):
+            os.makedirs(app_config.SESSION_FILE_DIR)
 
-        # إعداد الجلسة | Setup session
+        # Setup session | إعداد الجلسة
         Session(app)
 
-        # إعداد المسارات | Setup routes
+        # Setup routes | إعداد المسارات
         app = setup_routes(app)
 
-        # تسجيل نجاح التهيئة | Log successful initialization
-        logger.info('تم تهيئة التطبيق بنجاح | Application initialized successfully')
-        logger.info(f'التطبيق مكون للعمل على {app.config["HOST"]}:{app.config["PORT"]} | Application configured to run on {app.config["HOST"]}:{app.config["PORT"]}')
+        # Log successful initialization | تسجيل نجاح التهيئة
+        if logger:
+            logger.info('Application initialized successfully | تم تهيئة التطبيق بنجاح')
+            logger.info(f'Application configured to run on {app.config["HOST"]}:{app.config["PORT"]} | التطبيق مكون للعمل على {app.config["HOST"]}:{app.config["PORT"]}')
 
         return app
 
     except Exception as e:
-        logger.error(f'خطأ في تهيئة التطبيق: {str(e)} | Application initialization error: {str(e)}')
+        if logger:
+            logger.error(f'Application initialization error: {str(e)} | خطأ في تهيئة التطبيق: {str(e)}')
         return None
 
 if __name__ == '__main__':
     app = create_app()
     if app:
-        port = int(os.getenv('PORT', '8080'))
+        port = app.config['PORT']
         app.run(host='0.0.0.0', port=port)

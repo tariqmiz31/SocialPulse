@@ -1,16 +1,10 @@
 """Main production server startup script"""
 import os
 import sys
-import time
-import socket
-from waitress import serve
 import logging
 from logging.handlers import RotatingFileHandler
 from dotenv import load_dotenv
-import signal
-import prometheus_client
-from flask import Flask, send_from_directory, request, jsonify
-from flask_cors import CORS
+from waitress import serve
 
 # Add project root to Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -19,103 +13,31 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 from server import create_app
-from server.config import config
-
-def setup_logging():
-    """إعداد التسجيل"""
-    log_dir = '/tmp/logs'
-    if not os.path.exists(log_dir):
-        os.makedirs(log_dir)
-
-    logger = logging.getLogger('silvarium_production')
-    logger.setLevel(logging.INFO)
-
-    formatter = logging.Formatter(
-        '%(asctime)s [%(levelname)s] %(message)s'
-    )
-
-    file_handler = RotatingFileHandler(
-        f'{log_dir}/silvarium.log',
-        maxBytes=10*1024*1024,  # 10MB
-        backupCount=5
-    )
-    file_handler.setLevel(logging.INFO)
-    file_handler.setFormatter(formatter)
-
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)
-    console_handler.setFormatter(formatter)
-
-    logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
-
-    return logger
-
-def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 60) -> bool:
-    """انتظار حتى يصبح المنفذ متاحاً"""
-    logger = logging.getLogger('silvarium_production')
-    start_time = time.time()
-
-    while True:
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                # Try to connect to check if port is in use
-                result = sock.connect_ex((host, port))
-                if result != 0:  # Port is available
-                    logger.info(f"المنفذ {port} متاح للاستخدام | Port {port} is available")
-                    return True
-                else:  # Port is in use
-                    if time.time() - start_time >= timeout:
-                        logger.error(f"المنفذ {port} غير متاح | Port {port} is not available")
-                        return False
-                    logger.info(f"انتظار المنفذ {port}... | Waiting for port {port}...")
-                    time.sleep(1)
-        except Exception as e:
-            logger.error(f"خطأ في فحص المنفذ {port}: {str(e)} | Error checking port {port}: {str(e)}")
-            if time.time() - start_time >= timeout:
-                return False
-            time.sleep(1)
 
 def main():
-    """النقطة الرئيسية لبدء الخادم"""
-    # Ensure we're in production mode
-    os.environ['FLASK_ENV'] = 'production'
-
-    # إعداد التسجيل
-    logger = setup_logging()
-    logger.info("بدء تشغيل خادم Silvarium Social... | Starting Silvarium Social server...")
-
+    """Main entry point | النقطة الرئيسية لبدء الخادم"""
     try:
-        # تحميل المتغيرات البيئية والتكوين
+        # Set production mode | تعيين وضع الإنتاج
+        os.environ['FLASK_ENV'] = 'production'
+
+        # Load environment variables | تحميل المتغيرات البيئية
         load_dotenv()
-        app_config = config['production']
 
-        # تكوين الخادم
-        host = app_config.HOST
-        port = int(os.getenv('PORT', str(app_config.PORT)))
-        timeout = app_config.WAIT_FOR_PORT_TIMEOUT
-
-        logger.info(f"محاولة بدء الخادم على {host}:{port} | Attempting to start server on {host}:{port}")
-
-        # انتظار حتى يصبح المنفذ متاحاً
-        if not wait_for_port(port, host, timeout):
-            logger.error(f"فشل في انتظار المنفذ {port} | Failed to wait for port {port}")
-            return 1
-
-        # إنشاء تطبيق Flask
+        # Create Flask app | إنشاء تطبيق Flask
         app = create_app()
         if not app:
-            logger.error("فشل في إنشاء تطبيق Flask | Failed to create Flask application")
+            print("Failed to create Flask application | فشل في إنشاء تطبيق Flask", file=sys.stderr)
             return 1
 
-        # إرسال إشارة جاهزية قبل بدء تشغيل الخادم
+        # Signal ready before starting server | إشارة الجاهزية قبل بدء الخادم
         print('ready')
         sys.stdout.flush()
 
-        # تشغيل الخادم
+        # Start server with waitress | بدء الخادم باستخدام waitress
+        port = app.config['PORT']
         serve(
             app,
-            host=host,
+            host='0.0.0.0',
             port=port,
             url_scheme='https',
             threads=4,
@@ -127,7 +49,7 @@ def main():
         return 0
 
     except Exception as e:
-        logger.error(f"خطأ غير متوقع: {str(e)} | Unexpected error: {str(e)}", exc_info=True)
+        print(f"Unexpected error: {str(e)} | خطأ غير متوقع: {str(e)}", file=sys.stderr)
         return 1
 
 if __name__ == "__main__":

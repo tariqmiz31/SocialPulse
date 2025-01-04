@@ -1,3 +1,4 @@
+"""Application Configuration Module"""
 import os
 from dotenv import load_dotenv
 
@@ -24,8 +25,12 @@ class Config:
     FIREBASE_CLIENT_EMAIL = os.getenv('FIREBASE_CLIENT_EMAIL')
 
     # إعدادات انتظار المنفذ | Port Waiting Settings
-    WAIT_FOR_PORT = True
-    WAIT_FOR_PORT_TIMEOUT = 60  # زيادة وقت الانتظار للتأكد من جاهزية الخادم
+    WAIT_FOR_PORT = True  # Always wait for port in all environments
+    WAIT_FOR_PORT_TIMEOUT = 60  # Increased timeout to ensure server readiness
+
+    # إعدادات اللغة | Language Settings
+    DEFAULT_LANGUAGE = 'ar'  # Arabic as default language
+    SUPPORTED_LANGUAGES = ['ar', 'en']
 
 class ProductionConfig(Config):
     """تكوين بيئة الإنتاج | Production Environment Configuration"""
@@ -37,7 +42,6 @@ class ProductionConfig(Config):
         'https://*.repl.dev',
         os.getenv('APP_URL', 'https://silvariumsocial.com')
     ]
-    WAIT_FOR_PORT = True  # تأكيد تفعيل انتظار المنفذ في بيئة الإنتاج
 
 class DevelopmentConfig(Config):
     """تكوين بيئة التطوير | Development Environment Configuration"""
