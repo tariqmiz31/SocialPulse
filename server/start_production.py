@@ -31,7 +31,7 @@ def setup_logging():
     logger.setLevel(logging.INFO)
 
     formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        '%(asctime)s [%(levelname)s] %(message)s'
     )
 
     file_handler = RotatingFileHandler(
@@ -55,17 +55,25 @@ def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 60) -> bool:
     """انتظار حتى يصبح المنفذ متاحاً"""
     logger = logging.getLogger('silvarium_production')
     start_time = time.time()
+
     while True:
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                sock.bind((host, port))
-                logger.info(f"المنفذ {port} متاح للاستخدام | Port {port} is available")
-                return True
-        except socket.error:
+                # Try to connect to check if port is in use
+                result = sock.connect_ex((host, port))
+                if result != 0:  # Port is available
+                    logger.info(f"المنفذ {port} متاح للاستخدام | Port {port} is available")
+                    return True
+                else:  # Port is in use
+                    if time.time() - start_time >= timeout:
+                        logger.error(f"المنفذ {port} غير متاح | Port {port} is not available")
+                        return False
+                    logger.info(f"انتظار المنفذ {port}... | Waiting for port {port}...")
+                    time.sleep(1)
+        except Exception as e:
+            logger.error(f"خطأ في فحص المنفذ {port}: {str(e)} | Error checking port {port}: {str(e)}")
             if time.time() - start_time >= timeout:
-                logger.error(f"المنفذ {port} غير متاح | Port {port} is not available")
                 return False
-            logger.info(f"انتظار المنفذ {port}... | Waiting for port {port}...")
             time.sleep(1)
 
 def main():

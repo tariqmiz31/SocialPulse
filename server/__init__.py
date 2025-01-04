@@ -1,6 +1,6 @@
 """Initialize server package"""
 import os
-from flask import Flask
+from flask import Flask, session
 from flask_cors import CORS
 from flask_session import Session
 from datetime import timedelta
@@ -65,69 +65,80 @@ def setup_logging(app_config):
 def create_app():
     """إنشاء وتكوين تطبيق Flask"""
     # تحديد بيئة التشغيل | Determine environment
-    env = os.getenv('FLASK_ENV', 'development')  # Default to development
+    env = os.getenv('FLASK_ENV', 'development')
     app_config = config[env]
 
     # إعداد التسجيل | Setup logging
     logger = setup_logging(app_config)
 
-    # إنشاء التطبيق | Create application
-    app = Flask(__name__, static_folder='../client/dist', static_url_path='/')
+    try:
+        # إنشاء التطبيق | Create application
+        app = Flask(__name__, static_folder='../client/dist', static_url_path='/')
 
-    # تكوين التطبيق | Configure application
-    app.config.update(
-        SESSION_TYPE=app_config.SESSION_TYPE,
-        SESSION_FILE_DIR=app_config.SESSION_FILE_DIR,
-        SESSION_COOKIE_SECURE=app_config.SESSION_COOKIE_SECURE,
-        SESSION_COOKIE_HTTPONLY=app_config.SESSION_COOKIE_HTTPONLY,
-        SESSION_COOKIE_SAMESITE=app_config.SESSION_COOKIE_SAMESITE,
-        PERMANENT_SESSION_LIFETIME=timedelta(seconds=app_config.PERMANENT_SESSION_LIFETIME),
-        SECRET_KEY=app_config.SECRET_KEY,
-        DEBUG=app_config.DEBUG,
-        PORT=app_config.PORT,
-        HOST=app_config.HOST,
-        WAIT_FOR_PORT=True,  # Always wait for port
-        WAIT_FOR_PORT_TIMEOUT=60  # 60 seconds timeout
-    )
+        # تكوين التطبيق | Configure application
+        app.config.update(
+            SESSION_TYPE=app_config.SESSION_TYPE,
+            SESSION_FILE_DIR=app_config.SESSION_FILE_DIR,
+            SESSION_COOKIE_SECURE=app_config.SESSION_COOKIE_SECURE,
+            SESSION_COOKIE_HTTPONLY=app_config.SESSION_COOKIE_HTTPONLY,
+            SESSION_COOKIE_SAMESITE=app_config.SESSION_COOKIE_SAMESITE,
+            PERMANENT_SESSION_LIFETIME=timedelta(seconds=app_config.PERMANENT_SESSION_LIFETIME),
+            SECRET_KEY=app_config.SECRET_KEY,
+            DEBUG=app_config.DEBUG,
+            PORT=app_config.PORT,
+            HOST=app_config.HOST,
+            WAIT_FOR_PORT=True,  # Always wait for port
+            WAIT_FOR_PORT_TIMEOUT=60  # 60 seconds timeout
+        )
 
-    # إعداد CORS | Setup CORS
-    CORS(app, 
-         supports_credentials=True,
-         resources={
-             r"/api/*": {
-                 "origins": app_config.CORS_ORIGINS,
-                 "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-                 "allow_headers": ["Content-Type", "Authorization"],
-                 "expose_headers": ["Content-Range", "X-Content-Range"],
-                 "supports_credentials": True
-             }
-         })
+        # Set default language
+        @app.before_request
+        def set_default_language():
+            if 'language' not in session:
+                session['language'] = 'ar'  # Set Arabic as default
 
-    # انتظار المنفذ | Wait for port
-    port = app.config['PORT']
-    if not wait_for_port(port, app.config['HOST'], app.config['WAIT_FOR_PORT_TIMEOUT']):
-        logger.error(f"المنفذ {port} غير متاح | Port {port} is not available")
+        # إعداد CORS | Setup CORS
+        CORS(app, 
+             supports_credentials=True,
+             resources={
+                 r"/api/*": {
+                     "origins": app_config.CORS_ORIGINS,
+                     "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+                     "allow_headers": ["Content-Type", "Authorization"],
+                     "expose_headers": ["Content-Range", "X-Content-Range"],
+                     "supports_credentials": True
+                 }
+             })
+
+        # انتظار المنفذ | Wait for port
+        port = app.config['PORT']
+        if not wait_for_port(port, app.config['HOST'], app.config['WAIT_FOR_PORT_TIMEOUT']):
+            logger.error(f"المنفذ {port} غير متاح | Port {port} is not available")
+            return None
+
+        # إعداد المصادقة | Setup authentication
+        app = init_auth(app)
+
+        # إنشاء مجلد الجلسات | Create session directory
+        session_dir = app_config.SESSION_FILE_DIR
+        if not os.path.exists(session_dir):
+            os.makedirs(session_dir)
+
+        # إعداد الجلسة | Setup session
+        Session(app)
+
+        # إعداد المسارات | Setup routes
+        app = setup_routes(app)
+
+        # تسجيل نجاح التهيئة | Log successful initialization
+        logger.info('تم تهيئة التطبيق بنجاح | Application initialized successfully')
+        logger.info(f'التطبيق مكون للعمل على {app.config["HOST"]}:{app.config["PORT"]} | Application configured to run on {app.config["HOST"]}:{app.config["PORT"]}')
+
+        return app
+
+    except Exception as e:
+        logger.error(f'خطأ في تهيئة التطبيق: {str(e)} | Application initialization error: {str(e)}')
         return None
-
-    # إعداد المصادقة | Setup authentication
-    app = init_auth(app)
-
-    # إنشاء مجلد الجلسات | Create session directory
-    session_dir = app_config.SESSION_FILE_DIR
-    if not os.path.exists(session_dir):
-        os.makedirs(session_dir)
-
-    # إعداد الجلسة | Setup session
-    Session(app)
-
-    # إعداد المسارات | Setup routes
-    app = setup_routes(app)
-
-    # تسجيل نجاح التهيئة | Log successful initialization
-    logger.info('تم تهيئة التطبيق بنجاح | Application initialized successfully')
-    logger.info(f'التطبيق مكون للعمل على {app.config["HOST"]}:{app.config["PORT"]} | Application configured to run on {app.config["HOST"]}:{app.config["PORT"]}')
-
-    return app
 
 if __name__ == '__main__':
     app = create_app()
