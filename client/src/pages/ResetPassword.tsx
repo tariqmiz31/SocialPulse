@@ -2,6 +2,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useLocation } from "wouter";
+import { useEffect } from "react"; 
 import { 
   Card, 
   CardContent,
@@ -20,13 +21,12 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Languages } from "lucide-react";
 import { auth } from "@/lib/firebase";
 import { RecaptchaVerifier, signInWithPhoneNumber } from "firebase/auth";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 
-// الترجمات | Translations
+// Translations | الترجمات
 const translations = {
   ar: {
     title: "إعادة تعيين كلمة المرور",
@@ -48,7 +48,6 @@ const translations = {
     resetting: "جاري إعادة التعيين...",
     sending: "جاري إرسال الرمز...",
     verifying: "جاري التحقق...",
-    restrictedUser: "عذراً، هذه الوظيفة متاحة فقط للمستخدم Tariq",
     switchLanguage: "Switch to English",
     errors: {
       usernameRequired: "اسم المستخدم مطلوب",
@@ -97,7 +96,6 @@ const translations = {
     resetting: "Resetting...",
     sending: "Sending code...",
     verifying: "Verifying...",
-    restrictedUser: "Sorry, this function is only available for user Tariq",
     switchLanguage: "التحول للعربية",
     errors: {
       usernameRequired: "Username is required",
@@ -228,15 +226,6 @@ export default function ResetPassword() {
   // Form submission handlers
   const onSendCode = async (data: { username: string; phoneNumber: string }) => {
     try {
-      if (data.username.toLowerCase() !== 'tariq') {
-        toast({
-          variant: "destructive",
-          title: t.error.title,
-          description: t.restrictedUser,
-        });
-        return;
-      }
-
       const phoneNumber = data.phoneNumber;
       const appVerifier = window.recaptchaVerifier;
 

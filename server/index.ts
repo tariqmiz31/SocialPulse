@@ -23,6 +23,8 @@ const waitForPort = (port: number, host: string = '0.0.0.0', timeout: number = 6
       socket.on('error', () => {
         socket.destroy();
         logger.info(`Port ${port} is available | المنفذ ${port} متاح`);
+        // After port is available, signal ready
+        console.log('ready');
         resolve(true);
       });
 

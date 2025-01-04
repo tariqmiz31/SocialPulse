@@ -54,9 +54,8 @@ def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 60) -> bool:
                 if result != 0:  # Port is available
                     logger.info(f"Port {port} is available | المنفذ {port} متاح")
                     return True
-                else:  # Port is in use
-                    logger.info(f"Waiting for port {port}... | انتظار المنفذ {port}...")
-                    time.sleep(1)
+                logger.info(f"Waiting for port {port}... | انتظار المنفذ {port}...")
+                time.sleep(1)
         except Exception as e:
             logger.error(f"Error checking port {port}: {str(e)} | خطأ في فحص المنفذ {port}: {str(e)}")
             return False
@@ -67,18 +66,12 @@ def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 60) -> bool:
 def init_firebase() -> bool:
     """Initialize Firebase | تهيئة Firebase"""
     try:
-        service_account_path = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)),
-            'attached_assets',
-            'silva-11e9d-firebase-adminsdk-n8a88-74bc434752.json'
-        )
-
-        if not os.path.exists(service_account_path):
-            logger.error("Firebase service account file not found | ملف حساب خدمة Firebase غير موجود")
-            return False
-
         if not firebase_admin._apps:
-            cred = credentials.Certificate(service_account_path)
+            cred = credentials.Certificate({
+                "project_id": os.getenv('FIREBASE_PROJECT_ID'),
+                "private_key": os.getenv('FIREBASE_PRIVATE_KEY').replace('\\n', '\n'),
+                "client_email": os.getenv('FIREBASE_CLIENT_EMAIL')
+            })
             firebase_admin.initialize_app(cred)
             logger.info("Firebase initialized successfully | تم تهيئة Firebase بنجاح")
 
