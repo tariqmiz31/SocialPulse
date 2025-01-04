@@ -16,6 +16,15 @@ logger.setLevel(logging.INFO)
 auth_bp = Blueprint('auth', __name__, url_prefix='/api/auth')
 login_manager = LoginManager()
 
+def get_bilingual_message(ar_msg: str, en_msg: str) -> dict:
+    """Return bilingual message format"""
+    return {
+        "message": {
+            "ar": ar_msg,
+            "en": en_msg
+        }
+    }
+
 class User:
     def __init__(self, id, username, password=None, role='user', is_approved=True, status='active'):
         self.id = id
@@ -252,27 +261,30 @@ def verify_phone():
         verification_id = data.get('verificationId')
 
         if not all([phone_number, code, verification_id]):
-            return jsonify({
-                "error": "يجب توفير رقم الهاتف ورمز التحقق | Phone number and verification code are required"
-            }), 400
+            return jsonify(get_bilingual_message(
+                "يجب توفير رقم الهاتف ورمز التحقق",
+                "Phone number and verification code are required"
+            )), 400
 
         # التحقق من رقم الهاتف باستخدام Firebase
         result = firebase_auth.verify_phone_number(phone_number, code, verification_id)
         if not result:
-            return jsonify({
-                "error": "فشل في التحقق من رقم الهاتف | Failed to verify phone number"
-            }), 400
+            return jsonify(get_bilingual_message(
+                "فشل في التحقق من رقم الهاتف",
+                "Failed to verify phone number"
+            )), 400
 
-        return jsonify({
-            "message": "تم التحقق من رقم الهاتف بنجاح | Phone number verified successfully",
-            "verified": True
-        })
+        return jsonify(get_bilingual_message(
+            "تم التحقق من رقم الهاتف بنجاح",
+            "Phone number verified successfully"
+        ))
 
     except Exception as e:
         logger.error(f"خطأ في التحقق من رقم الهاتف: {str(e)}")
-        return jsonify({
-            "error": "حدث خطأ في التحقق من رقم الهاتف | Error verifying phone number"
-        }), 500
+        return jsonify(get_bilingual_message(
+            "حدث خطأ في التحقق من رقم الهاتف",
+            "Error verifying phone number"
+        )), 500
 
 @auth_bp.route('/reset-password', methods=['POST'])
 def reset_password():
@@ -285,16 +297,18 @@ def reset_password():
 
         if not all([username, new_password, verification_id]):
             logger.warning("بيانات غير مكتملة في طلب إعادة تعيين كلمة المرور")
-            return jsonify({
-                "error": "يجب توفير جميع البيانات المطلوبة | All required data must be provided"
-            }), 400
+            return jsonify(get_bilingual_message(
+                "يجب توفير جميع البيانات المطلوبة",
+                "All required data must be provided"
+            )), 400
 
         # التحقق من أن المستخدم هو Tariq
         if username.lower() != 'tariq':
             logger.warning(f"محاولة إعادة تعيين كلمة المرور لمستخدم غير مصرح له: {username}")
-            return jsonify({
-                "error": "عذراً، هذه الوظيفة متاحة فقط للمستخدم Tariq | Sorry, this function is only available for user Tariq"
-            }), 403
+            return jsonify(get_bilingual_message(
+                "عذراً، هذه الوظيفة متاحة فقط للمستخدم Tariq",
+                "Sorry, this function is only available for user Tariq"
+            )), 403
 
         conn = psycopg2.connect(os.getenv('DATABASE_URL'))
         cur = conn.cursor()
@@ -311,24 +325,27 @@ def reset_password():
             logger.warning(f"محاولة إعادة تعيين كلمة المرور لمستخدم غير موجود: {username}")
             cur.close()
             conn.close()
-            return jsonify({
-                "error": "المستخدم غير موجود | User not found"
-            }), 404
+            return jsonify(get_bilingual_message(
+                "المستخدم غير موجود",
+                "User not found"
+            )), 404
 
         # التحقق من حالة المستخدم
         user_id, user_username, user_status, is_approved = user
 
         if not is_approved:
             logger.warning(f"محاولة إعادة تعيين كلمة المرور لحساب غير معتمد: {username}")
-            return jsonify({
-                "error": "الحساب غير معتمد، يرجى الاتصال بالمسؤول | Account not approved, please contact administrator"
-            }), 403
+            return jsonify(get_bilingual_message(
+                "الحساب غير معتمد، يرجى الاتصال بالمسؤول",
+                "Account not approved, please contact administrator"
+            )), 403
 
         if user_status != 'active':
             logger.warning(f"محاولة إعادة تعيين كلمة المرور لحساب غير نشط: {username}")
-            return jsonify({
-                "error": "الحساب غير نشط، يرجى الاتصال بالمسؤول | Account not active, please contact administrator"
-            }), 403
+            return jsonify(get_bilingual_message(
+                "الحساب غير نشط، يرجى الاتصال بالمسؤول",
+                "Account not active, please contact administrator"
+            )), 403
 
         # تحديث كلمة المرور
         hashed_password = generate_password_hash(new_password)
@@ -342,14 +359,15 @@ def reset_password():
         conn.close()
 
         logger.info(f"تم إعادة تعيين كلمة المرور بنجاح للمستخدم: {username}")
-        return jsonify({
-            "message": "تم إعادة تعيين كلمة المرور بنجاح | Password reset successfully",
-            "username": username
-        })
+        return jsonify(get_bilingual_message(
+            "تم إعادة تعيين كلمة المرور بنجاح",
+            "Password reset successfully"
+        ))
 
     except Exception as e:
         logger.error(f"خطأ في إعادة تعيين كلمة المرور: {str(e)}")
         logger.error(traceback.format_exc())
-        return jsonify({
-            "error": "حدث خطأ في إعادة تعيين كلمة المرور | Error resetting password"
-        }), 500
+        return jsonify(get_bilingual_message(
+            "حدث خطأ في إعادة تعيين كلمة المرور",
+            "Error resetting password"
+        )), 500

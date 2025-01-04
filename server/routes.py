@@ -1,6 +1,6 @@
 from flask import Flask, send_from_directory, jsonify, request
 import os
-from server.blueprints.auth import auth_bp
+from server.blueprints.auth import auth_bp, init_auth
 
 def setup_routes(app: Flask):
     """إعداد مسارات التطبيق"""

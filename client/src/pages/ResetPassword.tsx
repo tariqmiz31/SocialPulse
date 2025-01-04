@@ -2,12 +2,12 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useLocation } from "wouter";
-import { 
+import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
-  CardTitle 
+  CardTitle
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -48,6 +48,7 @@ const translations = {
     sending: "جاري إرسال الرمز...",
     verifying: "جاري التحقق...",
     restrictedUser: "عذراً، هذه الوظيفة متاحة فقط للمستخدم Tariq",
+    switchLanguage: "Switch to English",
     errors: {
       usernameRequired: "اسم المستخدم مطلوب",
       phoneRequired: "رقم الهاتف مطلوب",
@@ -72,6 +73,53 @@ const translations = {
       success: "تم التحقق بنجاح",
       error: "خطأ في التحقق من الرمز"
     }
+  },
+  en: {
+    title: "Reset Password",
+    description: "Enter your phone number for verification, then set your new password",
+    username: "Username",
+    usernamePlaceholder: "Enter your username",
+    phoneNumber: "Phone Number",
+    phoneNumberPlaceholder: "Enter phone number (e.g. +966123456789)",
+    verificationCode: "Verification Code",
+    verificationCodePlaceholder: "Enter the verification code sent",
+    password: "New Password",
+    passwordPlaceholder: "Enter new password",
+    confirmPassword: "Confirm Password",
+    confirmPasswordPlaceholder: "Enter password again",
+    sendCode: "Send Verification Code",
+    verify: "Verify Code",
+    resetButton: "Reset Password",
+    backToLogin: "Back to Login",
+    resetting: "Resetting...",
+    sending: "Sending code...",
+    verifying: "Verifying...",
+    restrictedUser: "Sorry, this function is only available for user Tariq",
+    switchLanguage: "التحول للعربية",
+    errors: {
+      usernameRequired: "Username is required",
+      phoneRequired: "Phone number is required",
+      codeRequired: "Verification code is required",
+      passwordRequired: "Password must be at least 8 characters",
+      confirmRequired: "Password confirmation is required",
+      passwordMismatch: "Passwords do not match",
+      invalidPhone: "Invalid phone number",
+      userNotFound: "User not found"
+    },
+    success: {
+      title: "Password Reset Successful",
+      description: "You can now login with your new password"
+    },
+    error: {
+      title: "Error Occurred",
+      description: "Please check your information and try again"
+    },
+    verification: {
+      codeSent: "Verification Code Sent",
+      codeSentDesc: "Please enter the code sent to your phone",
+      success: "Verification Successful",
+      error: "Verification Failed"
+    }
   }
 };
 
@@ -82,7 +130,8 @@ export default function ResetPassword() {
   const { toast } = useToast();
   const [step, setStep] = useState<ResetStep>('phone');
   const [verificationId, setVerificationId] = useState<string>("");
-  const t = translations.ar;
+  const [language, setLanguage] = useState<'ar' | 'en'>('ar');
+  const t = translations[language];
 
   // Reset Password form schemas
   const phoneSchema = z.object({
@@ -182,6 +231,13 @@ export default function ResetPassword() {
     }
   };
 
+  const handleBilingualMessage = (response: any) => {
+    if (response.message && typeof response.message === 'object') {
+      return `${response.message.ar}\n${response.message.en}`;
+    }
+    return response.message || 'Unknown error | خطأ غير معروف';
+  };
+
   const onVerifyCode = async (data: { code: string }) => {
     try {
       const response = await fetch('/api/auth/verify-phone', {
@@ -196,14 +252,16 @@ export default function ResetPassword() {
         }),
       });
 
+      const result = await response.json();
+
       if (!response.ok) {
-        throw new Error(await response.text());
+        throw new Error(handleBilingualMessage(result));
       }
 
       setStep('reset');
       toast({
         title: t.verification.success,
-        description: t.verification.success,
+        description: handleBilingualMessage(result),
       });
     } catch (error) {
       toast({
@@ -228,13 +286,15 @@ export default function ResetPassword() {
         }),
       });
 
+      const result = await response.json();
+
       if (!response.ok) {
-        throw new Error(await response.text());
+        throw new Error(handleBilingualMessage(result));
       }
 
       toast({
         title: t.success.title,
-        description: t.success.description,
+        description: handleBilingualMessage(result),
       });
 
       setLocation("/");
@@ -248,10 +308,21 @@ export default function ResetPassword() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4" dir="rtl">
+    <div className="min-h-screen flex items-center justify-center bg-background p-4" dir={language === 'ar' ? 'rtl' : 'ltr'}>
       <Card className="w-full max-w-md">
         <CardHeader>
-          <CardTitle className="text-2xl font-bold">{t.title}</CardTitle>
+          <div className="flex justify-between items-center">
+            <CardTitle className="text-2xl font-bold">{t.title}</CardTitle>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setLanguage(language === 'ar' ? 'en' : 'ar')}
+              className="h-8 w-8"
+              title={t.switchLanguage}
+            >
+              <Languages className="h-4 w-4" />
+            </Button>
+          </div>
           <CardDescription>
             {t.description}
           </CardDescription>
@@ -267,9 +338,9 @@ export default function ResetPassword() {
                     <FormItem>
                       <FormLabel>{t.username}</FormLabel>
                       <FormControl>
-                        <Input 
+                        <Input
                           placeholder={t.usernamePlaceholder}
-                          {...field} 
+                          {...field}
                         />
                       </FormControl>
                       <FormMessage />
@@ -283,10 +354,10 @@ export default function ResetPassword() {
                     <FormItem>
                       <FormLabel>{t.phoneNumber}</FormLabel>
                       <FormControl>
-                        <Input 
+                        <Input
                           placeholder={t.phoneNumberPlaceholder}
                           type="tel"
-                          {...field} 
+                          {...field}
                         />
                       </FormControl>
                       <FormMessage />
@@ -294,8 +365,8 @@ export default function ResetPassword() {
                   )}
                 />
                 <div className="space-y-2">
-                  <Button 
-                    type="submit" 
+                  <Button
+                    type="submit"
                     className="w-full"
                     id="send-code-button"
                     disabled={phoneForm.formState.isSubmitting}
@@ -325,17 +396,17 @@ export default function ResetPassword() {
                     <FormItem>
                       <FormLabel>{t.verificationCode}</FormLabel>
                       <FormControl>
-                        <Input 
+                        <Input
                           placeholder={t.verificationCodePlaceholder}
-                          {...field} 
+                          {...field}
                         />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
-                <Button 
-                  type="submit" 
+                <Button
+                  type="submit"
                   className="w-full"
                   disabled={verifyForm.formState.isSubmitting}
                 >
@@ -382,8 +453,8 @@ export default function ResetPassword() {
                     </FormItem>
                   )}
                 />
-                <Button 
-                  type="submit" 
+                <Button
+                  type="submit"
                   className="w-full"
                   disabled={resetForm.formState.isSubmitting}
                 >

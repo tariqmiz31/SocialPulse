@@ -25,7 +25,7 @@ class Config:
 
     # إعدادات انتظار المنفذ | Port Waiting Settings
     WAIT_FOR_PORT = True
-    WAIT_FOR_PORT_TIMEOUT = 30
+    WAIT_FOR_PORT_TIMEOUT = 60  # زيادة وقت الانتظار للتأكد من جاهزية الخادم
 
 class ProductionConfig(Config):
     """تكوين بيئة الإنتاج | Production Environment Configuration"""
@@ -37,6 +37,7 @@ class ProductionConfig(Config):
         'https://*.repl.dev',
         os.getenv('APP_URL', 'https://silvariumsocial.com')
     ]
+    WAIT_FOR_PORT = True  # تأكيد تفعيل انتظار المنفذ في بيئة الإنتاج
 
 class DevelopmentConfig(Config):
     """تكوين بيئة التطوير | Development Environment Configuration"""

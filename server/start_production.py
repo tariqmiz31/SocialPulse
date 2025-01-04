@@ -51,7 +51,7 @@ def setup_logging():
 
     return logger
 
-def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 30) -> bool:
+def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 60) -> bool:
     """انتظار حتى يصبح المنفذ متاحاً"""
     logger = logging.getLogger('silvarium_production')
     start_time = time.time()
@@ -70,6 +70,9 @@ def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 30) -> bool:
 
 def main():
     """النقطة الرئيسية لبدء الخادم"""
+    # Ensure we're in production mode
+    os.environ['FLASK_ENV'] = 'production'
+
     # إعداد التسجيل
     logger = setup_logging()
     logger.info("بدء تشغيل خادم Silvarium Social... | Starting Silvarium Social server...")
@@ -77,17 +80,18 @@ def main():
     try:
         # تحميل المتغيرات البيئية والتكوين
         load_dotenv()
-        env = os.getenv('FLASK_ENV', 'production')
-        app_config = config[env]
+        app_config = config['production']
 
         # تكوين الخادم
-        host = '0.0.0.0'
-        port = int(os.getenv('PORT', '8080'))
+        host = app_config.HOST
+        port = int(os.getenv('PORT', str(app_config.PORT)))
+        timeout = app_config.WAIT_FOR_PORT_TIMEOUT
 
         logger.info(f"محاولة بدء الخادم على {host}:{port} | Attempting to start server on {host}:{port}")
 
         # انتظار حتى يصبح المنفذ متاحاً
-        if not wait_for_port(port):
+        if not wait_for_port(port, host, timeout):
+            logger.error(f"فشل في انتظار المنفذ {port} | Failed to wait for port {port}")
             return 1
 
         # إنشاء تطبيق Flask
@@ -95,6 +99,10 @@ def main():
         if not app:
             logger.error("فشل في إنشاء تطبيق Flask | Failed to create Flask application")
             return 1
+
+        # إرسال إشارة جاهزية قبل بدء تشغيل الخادم
+        print('ready')
+        sys.stdout.flush()
 
         # تشغيل الخادم
         serve(
@@ -107,17 +115,6 @@ def main():
             cleanup_interval=30,
             ident='Silvarium Social'
         )
-
-        # إرسال إشارة جاهزية
-        print('ready')
-        sys.stdout.flush()
-
-        # استمرار تشغيل الخادم
-        try:
-            while True:
-                time.sleep(1)
-        except KeyboardInterrupt:
-            logger.info("تم استلام إشارة إيقاف، إغلاق التطبيق... | Received shutdown signal, closing application...")
 
         return 0
 

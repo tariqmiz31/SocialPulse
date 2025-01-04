@@ -41,7 +41,7 @@ def setup_logging():
 
 logger = setup_logging()
 
-def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 30) -> bool:
+def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 60) -> bool:
     """انتظار حتى يصبح المنفذ متاحاً | Wait until port becomes available"""
     start_time = time.time()
     while True:
@@ -96,7 +96,7 @@ def main() -> bool:
             logger.error("Failed to initialize Firebase")
             return False
 
-        # Create Flask app
+        # Create Flask app with production config
         from server import create_app
         app = create_app()
         if not app:
@@ -105,9 +105,14 @@ def main() -> bool:
 
         port = int(os.getenv("PORT", "8080"))
 
-        # Wait for port to become available
-        if not wait_for_port(port):
+        # Always wait for port in production
+        if not wait_for_port(port, timeout=60):
+            logger.error(f"Port {port} is not available after timeout")
             return False
+
+        # Signal that we're ready to accept connections
+        print("ready")
+        sys.stdout.flush()
 
         logger.info(f"Starting server on port {port}")
 
@@ -122,10 +127,6 @@ def main() -> bool:
             cleanup_interval=30,
             ident='Silvarium Social'
         )
-
-        # Signal that the server is ready
-        print("ready")
-        sys.stdout.flush()
 
         return True
 

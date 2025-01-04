@@ -99,7 +99,8 @@ def create_app():
     # انتظار المنفذ إذا كان مطلوباً | Wait for port if required
     if app.config['WAIT_FOR_PORT']:
         port = app.config['PORT']
-        if not wait_for_port(port, app.config['HOST'], app.config['WAIT_FOR_PORT_TIMEOUT']):
+        timeout = app.config['WAIT_FOR_PORT_TIMEOUT']
+        if not wait_for_port(port, app.config['HOST'], timeout):
             logger.error(f"المنفذ {port} غير متاح | Port {port} is not available")
             return None
 
@@ -126,5 +127,4 @@ def create_app():
 if __name__ == '__main__':
     app = create_app()
     if app:
-        port = int(os.getenv('PORT', '8080'))
-        app.run(host='0.0.0.0', port=port)
+        app.run(host='0.0.0.0', port=int(os.getenv('PORT', '8080')))
