@@ -57,14 +57,14 @@ def wait_for_port_available(port: int, max_retries: int = 30, delay: int = 1) ->
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                 sock.bind(('0.0.0.0', port))
                 sock.close()
-                logger.info(f"المنفذ {port} متاح للاستخدام")
+                logger.info(f"المنفذ {port} متاح للاستخدام | Port {port} is available")
                 return True
         except socket.error:
             if i < max_retries - 1:
-                logger.warning(f"المنفذ {port} مشغول، محاولة {i+1}/{max_retries}. انتظار {delay} ثوانٍ...")
+                logger.warning(f"المنفذ {port} مشغول، محاولة {i+1}/{max_retries}. انتظار {delay} ثوانٍ... | Port {port} is busy, attempt {i+1}/{max_retries}. Waiting {delay} seconds...")
                 time.sleep(delay)
             else:
-                logger.error(f"فشل في الوصول إلى المنفذ {port} بعد {max_retries} محاولات")
+                logger.error(f"فشل في الوصول إلى المنفذ {port} بعد {max_retries} محاولات | Failed to access port {port} after {max_retries} attempts")
                 return False
 
     return False
@@ -73,7 +73,7 @@ def handle_signals(server=None):
     """إعداد معالجة الإشارات"""
     def handle_term(signum, frame):
         logger = logging.getLogger('silvarium_production')
-        logger.info("تم استلام إشارة إيقاف، إغلاق التطبيق...")
+        logger.info("تم استلام إشارة إيقاف، إغلاق التطبيق... | Received termination signal, shutting down...")
         if server:
             server.close()
         sys.exit(0)
@@ -86,7 +86,7 @@ def main():
     try:
         # إعداد التسجيل
         logger = setup_logging()
-        logger.info("بدء تشغيل خادم Silvarium Social...")
+        logger.info("بدء تشغيل خادم Silvarium Social... | Starting Silvarium Social server...")
 
         # تحميل المتغيرات البيئية والتكوين
         load_dotenv()
@@ -94,14 +94,14 @@ def main():
         app_config = config[env]
 
         # تكوين الخادم
-        host = app_config.HOST
-        port = app_config.PORT
+        host = '0.0.0.0'
+        port = int(os.getenv('PORT', '8080'))
 
-        logger.info(f"محاولة بدء الخادم على {host}:{port}")
+        logger.info(f"محاولة بدء الخادم على {host}:{port} | Attempting to start server on {host}:{port}")
 
         # انتظار حتى يصبح المنفذ متاحاً
         if not wait_for_port_available(port):
-            logger.error(f"المنفذ {port} غير متاح")
+            logger.error(f"المنفذ {port} غير متاح | Port {port} is not available")
             return 1
 
         # إنشاء تطبيق Flask
@@ -110,7 +110,7 @@ def main():
         # بدء خادم المقاييس على منفذ مختلف
         metrics_port = port + 1
         prometheus_client.start_http_server(metrics_port)
-        logger.info(f"تم بدء خادم المقاييس على المنفذ {metrics_port}")
+        logger.info(f"تم بدء خادم المقاييس على المنفذ {metrics_port} | Metrics server started on port {metrics_port}")
 
         # إعداد معالجة الإشارات
         handle_signals()
@@ -135,7 +135,7 @@ def main():
 
     except Exception as e:
         logger = logging.getLogger('silvarium_production')
-        logger.error(f"خطأ غير متوقع: {str(e)}", exc_info=True)
+        logger.error(f"خطأ غير متوقع: {str(e)} | Unexpected error: {str(e)}", exc_info=True)
         return 1
 
 if __name__ == "__main__":

@@ -94,8 +94,8 @@ def main():
             PERMANENT_SESSION_LIFETIME=1800,  # 30 minutes
         )
 
-        # Determine port
-        port = int(os.getenv("PORT", "5001"))
+        # Use port 8080 for Replit compatibility
+        port = int(os.getenv("PORT", "8080"))
 
         # Start the metrics server
         metrics_port = port + 1

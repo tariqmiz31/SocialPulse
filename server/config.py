@@ -4,22 +4,22 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class Config:
-    """التكوين الأساسي للتطبيق"""
+    """التكوين الأساسي للتطبيق | Base Application Configuration"""
     SECRET_KEY = os.getenv('SECRET_KEY', 'silvarium-social-default-key')
     DATABASE_URL = os.getenv('DATABASE_URL')
     DEBUG = False
-    PORT = int(os.getenv('PORT', 5001))  # تعيين المنفذ الافتراضي إلى 5001
+    PORT = int(os.getenv('PORT', '8080'))  # Using port 8080 as default
     HOST = '0.0.0.0'
 
-    # إعدادات الجلسة
+    # إعدادات الجلسة | Session Settings
     SESSION_TYPE = 'filesystem'
     SESSION_FILE_DIR = '/tmp/flask_session'
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = 'Lax'
-    PERMANENT_SESSION_LIFETIME = 1800  # 30 دقيقة
+    PERMANENT_SESSION_LIFETIME = 1800  # 30 minutes | 30 دقيقة
 
 class ProductionConfig(Config):
-    """تكوين بيئة الإنتاج"""
+    """تكوين بيئة الإنتاج | Production Environment Configuration"""
     ENV = 'production'
     DEBUG = False
     SESSION_COOKIE_SECURE = True
@@ -30,13 +30,13 @@ class ProductionConfig(Config):
     ]
 
 class DevelopmentConfig(Config):
-    """تكوين بيئة التطوير"""
+    """تكوين بيئة التطوير | Development Environment Configuration"""
     ENV = 'development'
     DEBUG = True
     SESSION_COOKIE_SECURE = False
     CORS_ORIGINS = [
-        'http://localhost:5001',
-        'https://localhost:5001'
+        'http://localhost:8080',
+        'https://localhost:8080'
     ]
 
 config = {

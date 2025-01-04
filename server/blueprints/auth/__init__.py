@@ -7,6 +7,7 @@ import os
 import psycopg2
 from datetime import datetime
 import traceback
+from .firebase_service import firebase_auth
 
 # إعداد التسجيل
 logger = logging.getLogger('silvarium_auth')
@@ -241,6 +242,43 @@ def get_current_user():
         logger.error(f"خطأ في جلب معلومات المستخدم: {str(e)}")
         return jsonify({"error": "حدث خطأ في جلب معلومات المستخدم"}), 500
 
+@auth_bp.route('/verify-phone', methods=['POST'])
+def verify_phone():
+    """التحقق من رقم الهاتف"""
+    try:
+        data = request.get_json()
+        phone_number = data.get('phoneNumber')
+        id_token = data.get('idToken')
+
+        if not phone_number or not id_token:
+            return jsonify({
+                "error": "يجب توفير رقم الهاتف ورمز التحقق | Phone number and verification token are required"
+            }), 400
+
+        # التحقق من رمز Firebase
+        decoded_token = firebase_auth.verify_id_token(id_token)
+        if not decoded_token:
+            return jsonify({
+                "error": "رمز التحقق غير صالح | Invalid verification token"
+            }), 401
+
+        # التحقق من تطابق رقم الهاتف
+        if decoded_token.get('phone_number') != phone_number:
+            return jsonify({
+                "error": "رقم الهاتف غير متطابق | Phone number mismatch"
+            }), 400
+
+        return jsonify({
+            "message": "تم التحقق من رقم الهاتف بنجاح | Phone number verified successfully",
+            "verified": True
+        })
+
+    except Exception as e:
+        logger.error(f"خطأ في التحقق من رقم الهاتف: {str(e)}")
+        return jsonify({
+            "error": "حدث خطأ في التحقق من رقم الهاتف | Error verifying phone number"
+        }), 500
+
 @auth_bp.route('/reset-password', methods=['POST'])
 def reset_password():
     """إعادة تعيين كلمة المرور"""
@@ -248,39 +286,61 @@ def reset_password():
         data = request.get_json()
         username = data.get('username')
         new_password = data.get('password')
+        id_token = data.get('idToken')
 
-        if not username or not new_password:
-            logger.warning("محاولة إعادة تعيين كلمة المرور بدون اسم مستخدم أو كلمة مرور")
-            return jsonify({"error": "يجب توفير اسم المستخدم وكلمة المرور الجديدة"}), 400
+        if not all([username, new_password, id_token]):
+            logger.warning("بيانات غير مكتملة في طلب إعادة تعيين كلمة المرور")
+            return jsonify({
+                "error": "يجب توفير جميع البيانات المطلوبة | All required data must be provided"
+            }), 400
+
+        # التحقق من رمز Firebase
+        decoded_token = firebase_auth.verify_id_token(id_token)
+        if not decoded_token:
+            return jsonify({
+                "error": "رمز التحقق غير صالح | Invalid verification token"
+            }), 401
 
         # التحقق من أن المستخدم هو Tariq
         if username.lower() != 'tariq':
             logger.warning(f"محاولة إعادة تعيين كلمة المرور لمستخدم غير مصرح له: {username}")
-            return jsonify({"error": "عذراً، هذه الوظيفة متاحة فقط للمستخدم Tariq"}), 403
+            return jsonify({
+                "error": "عذراً، هذه الوظيفة متاحة فقط للمستخدم Tariq | Sorry, this function is only available for user Tariq"
+            }), 403
 
         conn = psycopg2.connect(os.getenv('DATABASE_URL'))
         cur = conn.cursor()
 
         # التحقق من وجود المستخدم
-        cur.execute("SELECT id, username, status, is_approved FROM users WHERE username = %s", (username,))
+        cur.execute("""
+            SELECT id, username, status, is_approved 
+            FROM users 
+            WHERE username = %s
+        """, (username,))
         user = cur.fetchone()
 
         if not user:
             logger.warning(f"محاولة إعادة تعيين كلمة المرور لمستخدم غير موجود: {username}")
             cur.close()
             conn.close()
-            return jsonify({"error": "المستخدم غير موجود"}), 404
+            return jsonify({
+                "error": "المستخدم غير موجود | User not found"
+            }), 404
 
         # التحقق من حالة المستخدم
         user_id, user_username, user_status, is_approved = user
 
         if not is_approved:
             logger.warning(f"محاولة إعادة تعيين كلمة المرور لحساب غير معتمد: {username}")
-            return jsonify({"error": "الحساب غير معتمد، يرجى الاتصال بالمسؤول"}), 403
+            return jsonify({
+                "error": "الحساب غير معتمد، يرجى الاتصال بالمسؤول | Account not approved, please contact administrator"
+            }), 403
 
         if user_status != 'active':
             logger.warning(f"محاولة إعادة تعيين كلمة المرور لحساب غير نشط: {username}")
-            return jsonify({"error": "الحساب غير نشط، يرجى الاتصال بالمسؤول"}), 403
+            return jsonify({
+                "error": "الحساب غير نشط، يرجى الاتصال بالمسؤول | Account not active, please contact administrator"
+            }), 403
 
         # تحديث كلمة المرور
         hashed_password = generate_password_hash(new_password)
@@ -295,11 +355,13 @@ def reset_password():
 
         logger.info(f"تم إعادة تعيين كلمة المرور بنجاح للمستخدم: {username}")
         return jsonify({
-            "message": "تم إعادة تعيين كلمة المرور بنجاح",
+            "message": "تم إعادة تعيين كلمة المرور بنجاح | Password reset successfully",
             "username": username
         })
 
     except Exception as e:
         logger.error(f"خطأ في إعادة تعيين كلمة المرور: {str(e)}")
         logger.error(traceback.format_exc())
-        return jsonify({"error": "حدث خطأ في إعادة تعيين كلمة المرور"}), 500
+        return jsonify({
+            "error": "حدث خطأ في إعادة تعيين كلمة المرور | Error resetting password"
+        }), 500

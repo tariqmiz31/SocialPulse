@@ -43,6 +43,7 @@ def create_app():
     logger.addHandler(console_handler)
 
     # تكوين التطبيق
+    port = int(os.getenv('PORT', '8080'))  # Use PORT environment variable with default 8080
     app.config.update(
         SESSION_TYPE=app_config.SESSION_TYPE,
         SESSION_FILE_DIR=app_config.SESSION_FILE_DIR,
@@ -52,8 +53,8 @@ def create_app():
         PERMANENT_SESSION_LIFETIME=timedelta(seconds=app_config.PERMANENT_SESSION_LIFETIME),
         SECRET_KEY=app_config.SECRET_KEY,
         DEBUG=app_config.DEBUG,
-        PORT=app_config.PORT,
-        HOST=app_config.HOST
+        PORT=port,
+        HOST='0.0.0.0'
     )
 
     # إعداد CORS
@@ -89,8 +90,8 @@ def create_app():
     app = setup_routes(app)
 
     # تسجيل بدء تشغيل التطبيق
-    logger.info('تم تهيئة التطبيق بنجاح')
-    logger.info(f'التطبيق مكون للعمل على {app.config["HOST"]}:{app.config["PORT"]}')
+    logger.info('تم تهيئة التطبيق بنجاح | Application initialized successfully')
+    logger.info(f'التطبيق مكون للعمل على {app.config["HOST"]}:{app.config["PORT"]} | Application configured to run on {app.config["HOST"]}:{app.config["PORT"]}')
 
     return app
 

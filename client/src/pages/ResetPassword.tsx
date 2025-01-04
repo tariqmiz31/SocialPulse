@@ -22,8 +22,8 @@ import {
 } from "@/components/ui/form";
 import { useState } from "react";
 import { Languages } from "lucide-react";
-import { auth, setupRecaptcha } from "@/lib/firebase";
-import { PhoneAuthProvider, signInWithPhoneNumber } from "firebase/auth";
+import { auth } from "@/lib/firebase";
+import { RecaptchaVerifier, signInWithPhoneNumber } from "firebase/auth";
 
 const translations = {
   ar: {
@@ -152,21 +152,23 @@ export default function ResetPassword() {
     },
   });
 
+  async function setupRecaptcha() {
+    const recaptchaVerifier = new RecaptchaVerifier(auth, 'send-code-button', {
+      'size': 'invisible'
+    });
+    return recaptchaVerifier;
+  }
+
   const onSendCode = async (data: { username: string, phoneNumber: string }) => {
     try {
-      // إعداد reCAPTCHA
-      const recaptchaVerifier = setupRecaptcha('send-code-button');
-
-      // إرسال رمز التحقق
+      const recaptchaVerifier = await setupRecaptcha();
       const confirmationResult = await signInWithPhoneNumber(
         auth,
         data.phoneNumber,
         recaptchaVerifier
       );
-
       setVerificationId(confirmationResult.verificationId);
       setStep('verify');
-
       toast({
         title: t.codeSent,
         description: t.codeSentDesc,
@@ -174,7 +176,7 @@ export default function ResetPassword() {
     } catch (error) {
       toast({
         variant: "destructive",
-        title: t.error,
+        title: t.errors.invalidPhone,
         description: (error as Error).message,
       });
     }
@@ -182,8 +184,21 @@ export default function ResetPassword() {
 
   const onVerifyCode = async (data: { code: string }) => {
     try {
-      const credential = PhoneAuthProvider.credential(verificationId, data.code);
-      await auth.signInWithCredential(credential);
+      const response = await fetch('/api/auth/verify-phone', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          phoneNumber: phoneForm.getValues('phoneNumber'),
+          code: data.code,
+          verificationId
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
 
       setStep('reset');
       toast({
@@ -209,6 +224,7 @@ export default function ResetPassword() {
         body: JSON.stringify({
           username: phoneForm.getValues('username'),
           password: data.password,
+          verificationId
         }),
         credentials: "include",
       });
@@ -221,7 +237,6 @@ export default function ResetPassword() {
         title: t.success,
         description: t.successDesc,
       });
-
       setLocation("/login");
     } catch (error) {
       toast({
