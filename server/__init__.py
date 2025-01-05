@@ -28,8 +28,15 @@ def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 60) -> bool:
 
 def create_app(testing=False):
     """Create and configure Flask application | إنشاء وتكوين تطبيق Flask"""
-    # Load environment variables
+    # Load environment variables first
     load_dotenv()
+
+    # Verify required Firebase environment variables
+    required_env_vars = ['FIREBASE_PROJECT_ID', 'FIREBASE_PRIVATE_KEY', 'FIREBASE_CLIENT_EMAIL']
+    missing_vars = [var for var in required_env_vars if not os.getenv(var)]
+
+    if missing_vars:
+        raise EnvironmentError(f"Missing required environment variables: {', '.join(missing_vars)}")
 
     # Initialize logger first
     logger = logging.getLogger('silvarium')
@@ -65,6 +72,12 @@ def create_app(testing=False):
         # Configure application | تكوين التطبيق
         port = int(os.getenv('PORT', str(app_config.PORT)))
 
+        # Wait for port availability | انتظار توفر المنفذ
+        if os.getenv('WAIT_FOR_PORT', 'false').lower() == 'true':
+            if not wait_for_port(port):
+                logger.error(f"Port {port} is not available | المنفذ {port} غير متاح")
+                return None
+
         app.config.update(
             SESSION_TYPE=app_config.SESSION_TYPE,
             SESSION_FILE_DIR=app_config.SESSION_FILE_DIR,
@@ -78,13 +91,6 @@ def create_app(testing=False):
             HOST='0.0.0.0'
         )
 
-        # Wait for port if enabled | انتظار المنفذ إذا كان مفعلاً
-        if os.getenv('WAIT_FOR_PORT', 'false').lower() == 'true':
-            if not wait_for_port(port):
-                logger.error(f"المنفذ {port} غير متاح بعد انتهاء المهلة")
-                return None
-            logger.info(f"المنفذ {port} متاح")
-
         # Setup CORS | إعداد CORS
         CORS(app, supports_credentials=True)
 
@@ -95,22 +101,22 @@ def create_app(testing=False):
 
         # Initialize routes | إعداد المسارات
         app = setup_routes(app)
-        logger.info("تم إعداد المسارات")
+        logger.info("تم إعداد المسارات | Routes setup complete")
 
         # Initialize authentication after routes | تهيئة المصادقة بعد المسارات
         from server.blueprints.auth import init_auth
         app = init_auth(app)
         if app:
-            logger.info("تم تهيئة المصادقة")
+            logger.info("تم تهيئة المصادقة بنجاح | Authentication initialized successfully")
         else:
-            logger.error("فشل في تهيئة المصادقة")
+            logger.error("فشل في تهيئة المصادقة | Failed to initialize authentication")
             return None
 
-        logger.info("تم تهيئة التطبيق بنجاح")
+        logger.info("تم تهيئة التطبيق بنجاح | Application initialized successfully")
         return app
 
     except Exception as e:
-        logger.error(f"خطأ في تهيئة التطبيق: {str(e)}")
+        logger.error(f"خطأ في تهيئة التطبيق: {str(e)} | Error initializing application: {str(e)}")
         return None
 
 if __name__ == '__main__':

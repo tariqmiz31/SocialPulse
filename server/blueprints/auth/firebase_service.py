@@ -12,20 +12,25 @@ class FirebaseAuthService:
     def __init__(self):
         """Initialize Firebase Auth Service"""
         try:
-            # Load credentials from environment variables
-            cred = credentials.Certificate({
-                "type": "service_account",
-                "project_id": os.getenv('FIREBASE_PROJECT_ID'),
-                "private_key": os.getenv('FIREBASE_PRIVATE_KEY').replace('\\n', '\n'),
-                "client_email": os.getenv('FIREBASE_CLIENT_EMAIL'),
-                "token_uri": "https://oauth2.googleapis.com/token",
-                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-                "client_x509_cert_url": f"https://www.googleapis.com/robot/v1/metadata/x509/{os.getenv('FIREBASE_CLIENT_EMAIL', '').replace('@', '%40')}"
-            })
+            # Load credentials directly from service account file
+            service_account_path = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
+                'attached_assets',
+                'silva-deb1c-firebase-adminsdk-g19p8-2ab855fd52.json'
+            )
+
+            logger.info(f"Loading Firebase credentials from: {service_account_path}")
+
+            if not os.path.exists(service_account_path):
+                raise FileNotFoundError(f"Service account file not found at: {service_account_path}")
+
+            with open(service_account_path, 'r') as f:
+                service_account_info = json.load(f)
+                logger.info("Successfully loaded service account info")
 
             # Initialize Firebase Admin SDK with credentials
             if not firebase_admin._apps:
+                cred = credentials.Certificate(service_account_info)
                 firebase_admin.initialize_app(cred)
                 logger.info("تم تهيئة خدمة Firebase بنجاح | Firebase service initialized successfully")
 

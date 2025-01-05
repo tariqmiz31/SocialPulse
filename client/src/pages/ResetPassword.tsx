@@ -24,6 +24,8 @@ import {
 import { Languages, Loader2 } from "lucide-react";
 import { setupRecaptcha, sendVerificationCode, verifyCode } from "@/lib/firebase";
 import type { ConfirmationResult } from "firebase/auth";
+import { auth } from "@/lib/firebase";
+
 
 // Translations | الترجمات
 const translations = {
@@ -58,7 +60,10 @@ const translations = {
       invalidPhone: "رقم الهاتف غير صالح",
       userNotFound: "المستخدم غير موجود",
       recaptchaError: "خطأ في تهيئة reCAPTCHA",
-      unknownError: "حدث خطأ غير معروف"
+      unknownError: "حدث خطأ غير معروف",
+      smsRequired: "رقم الهاتف مطلوب للتحقق",
+      verificationFailed: "فشل التحقق من الرمز",
+      tooManyRequests: "لقد تجاوزت الحد المسموح من المحاولات، يرجى المحاولة لاحقاً"
     },
     success: {
       title: "تم إعادة تعيين كلمة المرور بنجاح",
@@ -73,6 +78,17 @@ const translations = {
       codeSentDesc: "يرجى إدخال الرمز المرسل إلى هاتفك",
       success: "تم التحقق بنجاح",
       error: "خطأ في التحقق من الرمز"
+    },
+    smsVerification: {
+      title: "التحقق عبر الرسائل النصية",
+      description: "أدخل رقم هاتفك للتحقق",
+      codeSent: "تم إرسال رمز التحقق",
+      codeSentDesc: "تم إرسال رمز التحقق إلى هاتفك",
+      codeVerified: "تم التحقق بنجاح",
+      invalidCode: "رمز التحقق غير صحيح",
+      retryCode: "إعادة إرسال الرمز",
+      retryIn: "يمكنك إعادة الإرسال بعد",
+      seconds: "ثانية"
     }
   },
   en: {
@@ -106,7 +122,11 @@ const translations = {
       invalidPhone: "Invalid phone number",
       userNotFound: "User not found",
       recaptchaError: "Error initializing reCAPTCHA",
-      unknownError: "An unknown error occurred"
+      unknownError: "An unknown error occurred",
+      smsRequired: "Phone number is required for verification",
+      verificationFailed: "Failed to verify code",
+      tooManyRequests: "Too many attempts, please try again later"
+
     },
     success: {
       title: "Password Reset Successful",
@@ -121,6 +141,17 @@ const translations = {
       codeSentDesc: "Please enter the code sent to your phone",
       success: "Verification Successful",
       error: "Verification Failed"
+    },
+    smsVerification: {
+      title: "SMS Verification",
+      description: "Enter your phone number for verification",
+      codeSent: "Verification Code Sent",
+      codeSentDesc: "A verification code has been sent to your phone",
+      codeVerified: "Verification Successful",
+      invalidCode: "Invalid verification code",
+      retryCode: "Resend Code",
+      retryIn: "You can resend in",
+      seconds: "seconds"
     }
   }
 };
@@ -220,6 +251,10 @@ export default function ResetPassword() {
       setIsLoading(true);
 
       const result = await verifyCode(data.code);
+      if (!result) {
+        throw new Error(t.errors.verificationFailed);
+      }
+
       const idToken = await result.user.getIdToken();
 
       const response = await fetch('/api/auth/verify-phone', {
@@ -229,27 +264,43 @@ export default function ResetPassword() {
         },
         body: JSON.stringify({
           phoneNumber: phoneForm.getValues('phoneNumber'),
+          code: data.code,
           verificationId: idToken
         }),
       });
 
-      const apiResult = await response.json();
-
       if (!response.ok) {
-        throw new Error(apiResult.message?.[language] || apiResult.message);
+        const error = await response.json();
+        throw new Error(error.message?.[language] || t.errors.verificationFailed);
       }
 
       setStep('reset');
       toast({
-        title: t.verification.success,
-        description: apiResult.message?.[language] || apiResult.message,
+        title: t.smsVerification.codeVerified,
+        description: t.verification.success,
       });
     } catch (error: any) {
+      let errorMessage = t.errors.verificationFailed;
+
+      // Handle specific Firebase errors
+      if (error.code === 'auth/code-expired') {
+        errorMessage = t.errors.verificationExpired;
+      } else if (error.code === 'auth/invalid-verification-code') {
+        errorMessage = t.smsVerification.invalidCode;
+      } else if (error.code === 'auth/too-many-requests') {
+        errorMessage = t.errors.tooManyRequests;
+      }
+
       toast({
         variant: "destructive",
         title: t.error.title,
-        description: error.message || t.errors.unknownError,
+        description: errorMessage,
       });
+
+      if (window.recaptchaVerifier) {
+        await window.recaptchaVerifier.clear();
+        window.recaptchaVerifier = null;
+      }
     } finally {
       setIsLoading(false);
     }
@@ -266,7 +317,7 @@ export default function ResetPassword() {
         body: JSON.stringify({
           username: phoneForm.getValues('username'),
           password: data.password,
-          verificationId: await auth.currentUser?.getIdToken() // Added this line
+          verificationId: await auth.currentUser?.getIdToken() 
         }),
       });
 
