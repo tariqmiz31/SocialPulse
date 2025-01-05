@@ -34,7 +34,10 @@ function App() {
           </div>
         }>
           <Switch>
+            {/* Always accessible routes */}
             <Route path="/reset-password" component={ResetPassword} />
+
+            {/* Auth-protected routes */}
             {!user ? (
               <Route path="*" component={AuthPage} />
             ) : (
