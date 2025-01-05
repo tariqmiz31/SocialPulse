@@ -5,6 +5,8 @@ import os
 import json
 import logging
 from typing import Optional, Dict, Any, Tuple
+import time
+from datetime import datetime, timedelta
 
 logger = logging.getLogger('silvarium_auth')
 
@@ -52,6 +54,21 @@ class FirebaseAuthService:
                     }
                 }
 
+            # التحقق من عدد محاولات إرسال الرمز | Check verification code attempts
+            try:
+                user = auth.get_user_by_phone_number(phone_number)
+                if user and user.disabled:
+                    logger.warning(f"الحساب معطل لرقم الهاتف: {phone_number}")
+                    return {
+                        'success': False,
+                        'message': {
+                            'ar': 'هذا الحساب معطل، يرجى الاتصال بالدعم',
+                            'en': 'This account is disabled, please contact support'
+                        }
+                    }
+            except auth.UserNotFoundError:
+                pass  # This is fine, user doesn't exist yet
+
             # إنشاء رابط التحقق | Create verification link
             link = auth.generate_sign_in_with_phone_number_link(
                 phone_number,
@@ -84,51 +101,76 @@ class FirebaseAuthService:
                     'en': 'Phone number is already in use'
                 }
             }
+        except auth.QuotaExceededError:
+            logger.error(f"تم تجاوز الحد الأقصى لعدد الرسائل: {phone_number}")
+            return {
+                'success': False,
+                'message': {
+                    'ar': 'تم تجاوز الحد الأقصى لعدد محاولات التحقق، يرجى المحاولة لاحقاً',
+                    'en': 'SMS quota exceeded, please try again later'
+                }
+            }
         except Exception as e:
             logger.error(f"خطأ في إرسال رمز التحقق: {str(e)}")
             return {
                 'success': False,
                 'message': {
-                    'ar': f'فشل في إرسال رمز التحقق: {str(e)}',
-                    'en': f'Failed to send verification code: {str(e)}'
+                    'ar': 'فشل في إرسال رمز التحقق، يرجى المحاولة مرة أخرى',
+                    'en': 'Failed to send verification code, please try again'
                 }
             }
 
     def verify_phone_number(self, phone_number: str, verification_id: str, code: str) -> Tuple[bool, Optional[str]]:
         """التحقق من رقم الهاتف والرمز | Verify phone number and code"""
-        try:
-            # التحقق من صحة البيانات | Validate input data
-            if not all([phone_number, verification_id, code]):
-                logger.warning("بيانات التحقق غير مكتملة")
-                return False, "يجب توفير جميع بيانات التحقق | All verification data must be provided"
+        max_retries = 3
+        retry_count = 0
+        retry_delay = 1  # Start with 1 second delay
 
-            # التحقق من رمز الجلسة | Verify session token
+        while retry_count < max_retries:
             try:
-                decoded_token = auth.verify_id_token(verification_id)
-                if not decoded_token:
-                    logger.warning(f"رمز التحقق غير صالح لرقم الهاتف: {phone_number}")
-                    return False, "رمز التحقق غير صالح | Invalid verification code"
+                # التحقق من صحة البيانات | Validate input data
+                if not all([phone_number, verification_id, code]):
+                    logger.warning("بيانات التحقق غير مكتملة")
+                    return False, "يجب توفير جميع بيانات التحقق | All verification data must be provided"
+
+                # التحقق من رمز الجلسة | Verify session token
+                try:
+                    decoded_token = auth.verify_id_token(verification_id)
+                    if not decoded_token:
+                        logger.warning(f"رمز التحقق غير صالح لرقم الهاتف: {phone_number}")
+                        return False, "رمز التحقق غير صالح | Invalid verification code"
+                except auth.InvalidIdTokenError:
+                    logger.warning(f"جلسة التحقق منتهية الصلاحية لرقم الهاتف: {phone_number}")
+                    return False, "جلسة التحقق منتهية الصلاحية | Verification session expired"
+
+                # التحقق من تطابق رقم الهاتف | Verify phone number match
+                if decoded_token.get('phone_number') != phone_number:
+                    logger.warning(f"رقم الهاتف لا يتطابق مع جلسة التحقق: {phone_number}")
+                    return False, "رقم الهاتف غير متطابق | Phone number mismatch"
+
+                logger.info(f"تم التحقق من رقم الهاتف بنجاح: {phone_number}")
+                return True, None
+
+            except auth.ExpiredIdTokenError:
+                logger.error("رمز التحقق منتهي الصلاحية")
+                return False, "رمز التحقق منتهي الصلاحية | Verification code expired"
             except auth.InvalidIdTokenError:
-                logger.warning(f"جلسة التحقق منتهية الصلاحية لرقم الهاتف: {phone_number}")
-                return False, "جلسة التحقق منتهية الصلاحية | Verification session expired"
+                logger.error("رمز التحقق غير صالح")
+                return False, "رمز التحقق غير صالح | Invalid verification code"
+            except auth.RevokedIdTokenError:
+                logger.error("تم إلغاء رمز التحقق")
+                return False, "تم إلغاء رمز التحقق | Verification code revoked"
+            except Exception as e:
+                retry_count += 1
+                if retry_count >= max_retries:
+                    logger.error(f"فشل التحقق بعد {max_retries} محاولات: {str(e)}")
+                    return False, f"فشل التحقق من رقم الهاتف بعد عدة محاولات | Phone verification failed after several attempts"
 
-            # التحقق من تطابق رقم الهاتف | Verify phone number match
-            if decoded_token.get('phone_number') != phone_number:
-                logger.warning(f"رقم الهاتف لا يتطابق مع جلسة التحقق: {phone_number}")
-                return False, "رقم الهاتف غير متطابق | Phone number mismatch"
-
-            logger.info(f"تم التحقق من رقم الهاتف بنجاح: {phone_number}")
-            return True, None
-
-        except auth.ExpiredIdTokenError:
-            logger.error("رمز التحقق منتهي الصلاحية")
-            return False, "رمز التحقق منتهي الصلاحية | Verification code expired"
-        except auth.InvalidIdTokenError:
-            logger.error("رمز التحقق غير صالح")
-            return False, "رمز التحقق غير صالح | Invalid verification code"
-        except Exception as e:
-            logger.error(f"خطأ في التحقق من رقم الهاتف: {str(e)}")
-            return False, f"خطأ في التحقق من رقم الهاتف | Phone verification error: {str(e)}"
+                # Exponential backoff
+                time.sleep(retry_delay)
+                retry_delay *= 2  # Double the delay for next retry
+                logger.info(f"محاولة إعادة التحقق {retry_count} من {max_retries}")
+                continue
 
     def verify_id_token(self, id_token: str) -> Optional[Dict[str, Any]]:
         """التحقق من صحة رمز المصادقة | Verify authentication token"""
@@ -172,4 +214,5 @@ class FirebaseAuthService:
             logger.error(f"خطأ في ربط رقم الهاتف: {str(e)}")
             return False, f"خطأ في ربط رقم الهاتف | Error linking phone number: {str(e)}"
 
+# Initialize Firebase Auth Service
 firebase_auth = FirebaseAuthService()

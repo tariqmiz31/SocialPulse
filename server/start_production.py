@@ -3,7 +3,6 @@ import os
 import sys
 import logging
 from logging.handlers import RotatingFileHandler
-from dotenv import load_dotenv, find_dotenv
 from waitress import serve
 import socket
 import time
@@ -25,60 +24,6 @@ console_handler = logging.StreamHandler()
 console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 
-# Load environment variables first
-load_dotenv(find_dotenv())
-
-# Load Firebase credentials from service account file
-service_account_path = 'attached_assets/silva-deb1c-firebase-adminsdk-g19p8-5d6dc42cd6.json'
-
-if not os.path.exists(service_account_path):
-    logger.error(f"Firebase service account file not found: {service_account_path}")
-    sys.exit(1)
-
-try:
-    with open(service_account_path, 'r') as file:
-        cred_dict = json.load(file)
-
-    # Set environment variables from service account file
-    os.environ['FIREBASE_PROJECT_ID'] = cred_dict['project_id']
-    os.environ['FIREBASE_PRIVATE_KEY'] = cred_dict['private_key']
-    os.environ['FIREBASE_CLIENT_EMAIL'] = cred_dict['client_email']
-
-    logger.info(f"Loaded Firebase credentials for project: {cred_dict['project_id']}")
-except Exception as e:
-    logger.error(f"Error loading Firebase service account: {str(e)}")
-    sys.exit(1)
-
-# Verify required Firebase environment variables
-required_env_vars = [
-    'FIREBASE_PROJECT_ID', 
-    'FIREBASE_PRIVATE_KEY', 
-    'FIREBASE_CLIENT_EMAIL',
-    'VITE_FIREBASE_API_KEY',
-    'VITE_FIREBASE_PROJECT_ID'
-]
-
-# Log environment variables status
-for var in required_env_vars:
-    if os.getenv(var):
-        logger.info(f"Environment variable {var} is set")
-    else:
-        logger.error(f"Missing required environment variable: {var}")
-
-missing_vars = [var for var in required_env_vars if not os.getenv(var)]
-
-if missing_vars:
-    logger.error(f"المتغيرات البيئية المطلوبة مفقودة: {', '.join(missing_vars)}")
-    logger.error("Missing required environment variables")
-    sys.exit(1)
-
-# Force wait for port before app creation
-os.environ['WAIT_FOR_PORT'] = 'true'
-os.environ['FLASK_ENV'] = 'production'
-
-# Now import the app after environment setup
-from server import create_app
-
 def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
     """Wait for port availability | انتظار حتى يصبح المنفذ متاحاً"""
     start_time = time.time()
@@ -93,7 +38,7 @@ def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
             logger.info(f"Waiting for port {port}... | انتظار المنفذ {port}...")
             time.sleep(1)
 
-    logger.error(f"Port {port} is not available after timeout | المنفذ {port} غير متاح بعد انتهاء المهلة")
+    logger.error(f"Port {port} is not available | المنفذ {port} غير متاح")
     return False
 
 def main():
@@ -102,10 +47,16 @@ def main():
         # Get port | الحصول على المنفذ
         port = int(os.getenv('PORT', '5000'))
 
-        # Wait for port availability | انتظار توفر المنفذ
+        # Force wait for port | إجبار انتظار المنفذ
+        os.environ['WAIT_FOR_PORT'] = 'true'
+        os.environ['FLASK_ENV'] = 'production'
+
         if not wait_for_port(port):
             logger.error(f"Port {port} is not available | المنفذ {port} غير متاح")
             return 1
+
+        # Import create_app after environment setup | استيراد create_app بعد إعداد البيئة
+        from server import create_app
 
         # Create Flask app | إنشاء تطبيق Flask
         logger.info("Creating Flask application | إنشاء تطبيق Flask")
@@ -113,11 +64,6 @@ def main():
         if not app:
             logger.error("Failed to create Flask application | فشل في إنشاء تطبيق Flask")
             return 1
-
-        # Log environment status
-        logger.info("Environment check complete")
-        logger.info(f"FLASK_ENV: {os.getenv('FLASK_ENV')}")
-        logger.info(f"Firebase Project ID: {os.getenv('FIREBASE_PROJECT_ID')}")
 
         # Signal ready | إشارة الجاهزية
         logger.info('Server is ready | الخادم جاهز')

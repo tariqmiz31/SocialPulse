@@ -12,6 +12,8 @@ from dotenv import load_dotenv
 import socket
 import time
 import json
+import firebase_admin
+from firebase_admin import credentials
 
 def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
     """Wait for port to be available | انتظار حتى يصبح المنفذ متاحاً"""
@@ -25,6 +27,35 @@ def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
         except socket.error:
             time.sleep(1)
     return False
+
+def init_firebase(logger) -> bool:
+    """Initialize Firebase | تهيئة Firebase"""
+    try:
+        if not firebase_admin._apps:
+            service_account_path = 'attached_assets/silva-deb1c-firebase-adminsdk-g19p8-5d6dc42cd6.json'
+
+            if not os.path.exists(service_account_path):
+                logger.error("Firebase service account file not found | ملف حساب الخدمة غير موجود")
+                return False
+
+            with open(service_account_path, 'r') as file:
+                cred_dict = json.load(file)
+
+            # Set environment variables from service account file
+            os.environ['FIREBASE_PROJECT_ID'] = cred_dict['project_id']
+            os.environ['FIREBASE_PRIVATE_KEY'] = cred_dict['private_key']
+            os.environ['FIREBASE_CLIENT_EMAIL'] = cred_dict['client_email']
+
+            # Initialize Firebase
+            cred = credentials.Certificate(cred_dict)
+            firebase_admin.initialize_app(cred)
+            logger.info(f"Firebase initialized successfully for project: {cred_dict['project_id']}")
+            return True
+
+        return True
+    except Exception as e:
+        logger.error(f"Firebase initialization error: {str(e)}")
+        return False
 
 def create_app(testing=False):
     """Create and configure Flask application | إنشاء وتكوين تطبيق Flask"""
@@ -55,39 +86,9 @@ def create_app(testing=False):
             console_handler.setFormatter(formatter)
             logger.addHandler(console_handler)
 
-        # Load Firebase credentials from service account file
-        service_account_path = 'attached_assets/silva-deb1c-firebase-adminsdk-g19p8-5d6dc42cd6.json'
-
-        if not os.path.exists(service_account_path):
-            logger.error("Service account file not found")
-            return None
-
-        try:
-            with open(service_account_path, 'r') as file:
-                cred_dict = json.load(file)
-
-            # Set environment variables from service account file
-            os.environ['FIREBASE_PROJECT_ID'] = cred_dict['project_id']
-            os.environ['FIREBASE_PRIVATE_KEY'] = cred_dict['private_key']
-            os.environ['FIREBASE_CLIENT_EMAIL'] = cred_dict['client_email']
-
-            logger.info(f"Loaded Firebase credentials for project: {cred_dict['project_id']}")
-        except Exception as e:
-            logger.error(f"Error loading Firebase service account: {str(e)}")
-            return None
-
-        # Verify required Firebase environment variables
-        required_env_vars = [
-            'FIREBASE_PROJECT_ID', 
-            'FIREBASE_PRIVATE_KEY', 
-            'FIREBASE_CLIENT_EMAIL',
-            'VITE_FIREBASE_API_KEY',
-            'VITE_FIREBASE_PROJECT_ID'
-        ]
-        missing_vars = [var for var in required_env_vars if not os.getenv(var)]
-
-        if missing_vars:
-            logger.error(f"Missing required environment variables: {', '.join(missing_vars)}")
+        # Initialize Firebase first
+        if not init_firebase(logger):
+            logger.error("Failed to initialize Firebase")
             return None
 
         # Determine environment | تحديد بيئة التشغيل
@@ -100,8 +101,8 @@ def create_app(testing=False):
         # Configure application | تكوين التطبيق
         port = int(os.getenv('PORT', str(app_config.PORT)))
 
-        # Always wait for port in production | دائماً انتظر المنفذ في بيئة الإنتاج
-        if env == 'production' or os.getenv('WAIT_FOR_PORT', 'false').lower() == 'true':
+        # Always wait for port | دائماً انتظر المنفذ
+        if os.getenv('WAIT_FOR_PORT', 'true').lower() == 'true':
             if not wait_for_port(port):
                 logger.error(f"Port {port} is not available")
                 return None
@@ -145,7 +146,7 @@ def create_app(testing=False):
         return app
 
     except Exception as e:
-        if logger:
+        if 'logger' in locals():
             logger.error(f"Error initializing application: {str(e)}")
         return None
 

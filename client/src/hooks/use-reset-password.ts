@@ -51,15 +51,42 @@ export function useResetPassword() {
   const sendCodeMutation = useMutation({
     mutationFn: async (data: SendCodeData) => {
       const recaptchaVerifier = await setupRecaptcha('send-code-button');
-      const confirmationResult = await sendVerificationCode(data.phoneNumber, recaptchaVerifier);
+      await sendVerificationCode(data.phoneNumber, recaptchaVerifier);
       return handleRequest("send-verification-code", { phoneNumber: data.phoneNumber });
     },
     onError: (error: Error) => {
       if (error instanceof FirebaseError) {
+        let errorMessage = {
+          ar: "خطأ في إرسال الرمز",
+          en: "Error sending code"
+        };
+
+        // Handle specific Firebase errors with bilingual messages
+        switch (error.code) {
+          case 'auth/too-many-requests':
+            errorMessage = {
+              ar: "عدد محاولات كثيرة، يرجى المحاولة لاحقاً",
+              en: "Too many attempts, please try again later"
+            };
+            break;
+          case 'auth/invalid-phone-number':
+            errorMessage = {
+              ar: "رقم الهاتف غير صالح",
+              en: "Invalid phone number"
+            };
+            break;
+          case 'auth/quota-exceeded':
+            errorMessage = {
+              ar: "تم تجاوز الحد المسموح من المحاولات، يرجى المحاولة لاحقاً",
+              en: "SMS quota exceeded, please try again later"
+            };
+            break;
+        }
+
         toast({
           variant: "destructive",
-          title: "خطأ في إرسال الرمز",
-          description: error.message,
+          title: errorMessage.ar,
+          description: errorMessage.en,
         });
       } else {
         toast({
@@ -83,12 +110,39 @@ export function useResetPassword() {
         verificationId: idToken
       });
     },
-    onError: (error) => {
+    onError: (error: Error) => {
       if (error instanceof FirebaseError) {
+        let errorMessage = {
+          ar: "خطأ في التحقق",
+          en: "Verification error"
+        };
+
+        // Handle specific Firebase errors with bilingual messages
+        switch (error.code) {
+          case 'auth/code-expired':
+            errorMessage = {
+              ar: "انتهت صلاحية الرمز",
+              en: "Code expired"
+            };
+            break;
+          case 'auth/invalid-verification-code':
+            errorMessage = {
+              ar: "رمز التحقق غير صحيح",
+              en: "Invalid verification code"
+            };
+            break;
+          case 'auth/too-many-requests':
+            errorMessage = {
+              ar: "عدد محاولات كثيرة، يرجى المحاولة لاحقاً",
+              en: "Too many attempts, please try again later"
+            };
+            break;
+        }
+
         toast({
           variant: "destructive",
-          title: "خطأ في التحقق",
-          description: error.message,
+          title: errorMessage.ar,
+          description: errorMessage.en,
         });
       } else {
         toast({
@@ -111,7 +165,7 @@ export function useResetPassword() {
         verificationId: idToken
       });
     },
-    onError: (error) => {
+    onError: (error: Error) => {
       toast({
         variant: "destructive",
         title: "خطأ في إعادة تعيين كلمة المرور",
