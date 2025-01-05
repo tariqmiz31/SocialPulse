@@ -72,6 +72,8 @@ def main() -> int:
     try:
         # Set production environment
         os.environ['FLASK_ENV'] = 'production'
+
+        # Always set wait_for_port to true in production
         os.environ['WAIT_FOR_PORT'] = 'true'
 
         logger.info("Starting Silvarium Social production server")
@@ -83,6 +85,7 @@ def main() -> int:
             logger.warning("Invalid PORT environment variable, using default port 5000")
             port = 5000
 
+        # Always wait for port
         if not wait_for_port(port):
             logger.warning(f"Port {port} is not available, searching for available port...")
             try:

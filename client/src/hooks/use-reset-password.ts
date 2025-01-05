@@ -54,6 +54,12 @@ export function useResetPassword() {
       await sendVerificationCode(data.phoneNumber, recaptchaVerifier);
       return handleRequest("send-verification-code", { phoneNumber: data.phoneNumber });
     },
+    onSuccess: () => {
+      toast({
+        title: "تم إرسال رمز التحقق",
+        description: "يرجى استخدام الرقم المؤقت لاستعادة كلمة المرور",
+      });
+    },
     onError: (error: Error) => {
       if (error instanceof FirebaseError) {
         let errorMessage = {

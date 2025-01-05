@@ -59,6 +59,8 @@ def main():
     try:
         # Set production environment
         os.environ['FLASK_ENV'] = 'production'
+
+        # Always set wait_for_port to true
         os.environ['WAIT_FOR_PORT'] = 'true'
 
         logger.info("Starting Silvarium Social production server")
@@ -66,10 +68,20 @@ def main():
         # Use configured port
         port = int(os.getenv('PORT', str(DEFAULT_PORT)))
 
-        # Wait for port availability
+        # Always wait for port availability
         if not wait_for_port(port):
-            logger.error(f"Port {port} is not available | المنفذ {port} غير متاح")
-            return 1
+            logger.warning(f"Port {port} is not available, trying to find another port...")
+            try:
+                for test_port in range(port + 1, port + 10):
+                    if wait_for_port(test_port):
+                        port = test_port
+                        break
+                else:
+                    logger.error("No available ports found")
+                    return 1
+            except Exception as e:
+                logger.error(f"Error finding available port: {str(e)}")
+                return 1
 
         # Create Flask app
         logger.info("Creating Flask application | إنشاء تطبيق Flask")

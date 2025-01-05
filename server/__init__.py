@@ -64,7 +64,7 @@ def init_firebase(logger) -> bool:
 
             # Initialize Firebase with error handling
             try:
-                cred = credentials.Certificate(cred_dict)
+                cred = credentials.Certificate(service_account_path)
                 firebase_admin.initialize_app(cred)
                 logger.info(f"Firebase initialized successfully for project: {cred_dict['project_id']}")
                 return True
@@ -118,23 +118,14 @@ def create_app(testing=False):
         # Create application | إنشاء التطبيق
         app = Flask(__name__, static_folder='../client/dist', static_url_path='/')
 
-        # Configure application | تكوين التطبيق
+        # Try to find an available port
         try:
-            port = int(os.getenv('PORT', str(DEFAULT_PORT)))
-        except ValueError:
-            logger.warning(f"Invalid PORT environment variable, using default port {DEFAULT_PORT}")
-            port = DEFAULT_PORT
-
-        # Find available port if the specified port is not available
-        if os.getenv('WAIT_FOR_PORT', 'true').lower() == 'true':
-            if not wait_for_port(port):
-                logger.warning(f"Port {port} is not available, searching for available port...")
-                try:
-                    port = find_available_port(DEFAULT_PORT)
-                    logger.info(f"Found available port: {port}")
-                except RuntimeError as e:
-                    logger.error(str(e))
-                    return None
+            start_port = int(os.getenv('PORT', str(DEFAULT_PORT)))
+            port = find_available_port(start_port)
+            logger.info(f"Found available port: {port}")
+        except Exception as e:
+            logger.error(f"Failed to find available port: {str(e)}")
+            return None
 
         app.config.update(
             SESSION_TYPE=app_config.SESSION_TYPE,

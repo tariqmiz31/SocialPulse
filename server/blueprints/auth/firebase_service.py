@@ -32,7 +32,11 @@ class FirebaseAuthService:
             # Initialize Firebase Admin SDK if not already initialized
             if not firebase_admin._apps:
                 cred = credentials.Certificate(service_account_path)
-                firebase_admin.initialize_app(cred)
+                firebase_admin.initialize_app(cred, {
+                    'auth_settings': {
+                        'sms_verification_message': 'يرجى استخدام الرقم المؤقت لاستعادة كلمة المرور: %CODE%'
+                    }
+                })
                 logger.info("تم تهيئة خدمة Firebase بنجاح | Firebase service initialized successfully")
             else:
                 logger.info("Firebase already initialized | تم تهيئة Firebase مسبقاً")
@@ -100,6 +104,15 @@ class FirebaseAuthService:
                 'message': {
                     'ar': 'رقم الهاتف مستخدم بالفعل',
                     'en': 'Phone number is already in use'
+                }
+            }
+        except auth.QuotaExceededError:
+            logger.error(f"تم تجاوز الحد الأقصى لعدد الرسائل: {phone_number}")
+            return {
+                'success': False,
+                'message': {
+                    'ar': 'تم تجاوز الحد المسموح من المحاولات، يرجى المحاولة لاحقاً',
+                    'en': 'SMS quota exceeded, please try again later'
                 }
             }
         except Exception as e:
