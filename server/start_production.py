@@ -3,7 +3,7 @@ import os
 import sys
 import logging
 from logging.handlers import RotatingFileHandler
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv
 from waitress import serve
 import socket
 import time
@@ -25,13 +25,24 @@ console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 
 # Load environment variables first
-load_dotenv()
-
-# Force wait for port
-os.environ['WAIT_FOR_PORT'] = 'true'
+load_dotenv(find_dotenv())
 
 # Verify required Firebase environment variables
-required_env_vars = ['FIREBASE_PROJECT_ID', 'FIREBASE_PRIVATE_KEY', 'FIREBASE_CLIENT_EMAIL']
+required_env_vars = [
+    'FIREBASE_PROJECT_ID', 
+    'FIREBASE_PRIVATE_KEY', 
+    'FIREBASE_CLIENT_EMAIL',
+    'VITE_FIREBASE_API_KEY',
+    'VITE_FIREBASE_PROJECT_ID'
+]
+
+# Log environment variables status
+for var in required_env_vars:
+    if os.getenv(var):
+        logger.info(f"Environment variable {var} is set")
+    else:
+        logger.error(f"Missing required environment variable: {var}")
+
 missing_vars = [var for var in required_env_vars if not os.getenv(var)]
 
 if missing_vars:
@@ -79,6 +90,11 @@ def main():
         if not app:
             logger.error("Failed to create Flask application | فشل في إنشاء تطبيق Flask")
             return 1
+
+        # Log environment status
+        logger.info("Environment check complete")
+        logger.info(f"FLASK_ENV: {os.getenv('FLASK_ENV')}")
+        logger.info(f"Firebase Project ID: {os.getenv('FIREBASE_PROJECT_ID')}")
 
         # Signal ready | إشارة الجاهزية
         logger.info('Server is ready | الخادم جاهز')

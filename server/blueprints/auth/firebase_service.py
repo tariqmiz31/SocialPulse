@@ -12,24 +12,33 @@ class FirebaseAuthService:
     def __init__(self):
         """Initialize Firebase Auth Service"""
         try:
-            # Load Firebase credentials
-            cred = credentials.Certificate({
-                "type": "service_account",
-                "project_id": os.getenv('FIREBASE_PROJECT_ID'),
-                "private_key": os.getenv('FIREBASE_PRIVATE_KEY').replace('\\n', '\n'),
-                "client_email": os.getenv('FIREBASE_CLIENT_EMAIL')
-            })
+            # Load service account JSON file
+            service_account_path = 'attached_assets/silva-deb1c-firebase-adminsdk-g19p8-5d6dc42cd6.json'
+
+            if not os.path.exists(service_account_path):
+                raise ValueError("Service account file not found")
+
+            with open(service_account_path, 'r') as file:
+                cred_dict = json.load(file)
+
+            logger.info("جاري تهيئة Firebase بالبيانات التالية | Initializing Firebase with credentials")
+            logger.info(f"Project ID: {cred_dict['project_id']}")
+            logger.info(f"Client Email: {cred_dict['client_email']}")
 
             # Initialize Firebase Admin SDK
+            cred = credentials.Certificate(cred_dict)
             if not firebase_admin._apps:
                 firebase_admin.initialize_app(cred)
                 logger.info("تم تهيئة خدمة Firebase بنجاح | Firebase service initialized successfully")
 
+        except ValueError as ve:
+            logger.error(f"خطأ في تنسيق بيانات الاعتماد: {str(ve)} | Credential format error: {str(ve)}")
+            raise
         except Exception as e:
             logger.error(f"خطأ في تهيئة Firebase: {str(e)} | Firebase initialization error: {str(e)}")
             raise
 
-    async def send_verification_code(self, phone_number: str) -> dict:
+    async def send_verification_code(self, phone_number: str) -> Dict[str, Any]:
         """إرسال رمز التحقق عبر SMS | Send verification code via SMS"""
         try:
             # التحقق من تنسيق رقم الهاتف | Validate phone number format
@@ -43,47 +52,29 @@ class FirebaseAuthService:
                     }
                 }
 
-            # إعداد خيارات التحقق | Setup verification options
-            verification_settings = {
-                'phoneNumber': phone_number,
-                'recaptchaToken': True,
-                'sms': {
-                    'androidPackageName': 'com.silvarium.social',
-                    'template': 'رمز التحقق الخاص بك هو: %CODE% | Your verification code is: %CODE%'
-                }
-            }
+            # إنشاء رابط التحقق | Create verification link
+            link = auth.generate_sign_in_with_phone_number_link(
+                phone_number,
+                auth.ActionCodeSettings(
+                    url=os.getenv('APP_URL', 'https://silvariumsocial.com'),
+                    handle_code_in_app=True,
+                    ios_bundle_id='com.silvarium.social',
+                    android_package_name='com.silvarium.social',
+                    android_install_app=True,
+                    android_minimum_version='12'
+                )
+            )
 
-            # إرسال رمز التحقق | Send verification code
-            verification = auth.create_phone_verification(verification_settings)
-            logger.info(f"تم إرسال رمز التحقق بنجاح للرقم: {phone_number}")
-
+            logger.info(f"تم إرسال رابط التحقق بنجاح للرقم: {phone_number}")
             return {
                 'success': True,
                 'message': {
                     'ar': 'تم إرسال رمز التحقق بنجاح',
                     'en': 'Verification code sent successfully'
                 },
-                'session_info': verification.session_info
+                'verification_link': link
             }
 
-        except auth.QuotaExceededError:
-            logger.error(f"تم تجاوز الحد الأقصى لإرسال الرسائل للرقم: {phone_number}")
-            return {
-                'success': False,
-                'message': {
-                    'ar': 'تم تجاوز الحد الأقصى لإرسال الرسائل، يرجى المحاولة لاحقاً',
-                    'en': 'SMS quota exceeded, please try again later'
-                }
-            }
-        except auth.InvalidPhoneNumberError:
-            logger.error(f"رقم هاتف غير صالح: {phone_number}")
-            return {
-                'success': False,
-                'message': {
-                    'ar': 'رقم الهاتف غير صالح',
-                    'en': 'Invalid phone number'
-                }
-            }
         except auth.PhoneNumberAlreadyExistsError:
             logger.error(f"رقم الهاتف مستخدم بالفعل: {phone_number}")
             return {
@@ -135,11 +126,16 @@ class FirebaseAuthService:
         except auth.InvalidIdTokenError:
             logger.error("رمز التحقق غير صالح")
             return False, "رمز التحقق غير صالح | Invalid verification code"
-        except auth.RevokedIdTokenError:
-            logger.error("تم إلغاء رمز التحقق")
-            return False, "تم إلغاء رمز التحقق | Verification code revoked"
         except Exception as e:
             logger.error(f"خطأ في التحقق من رقم الهاتف: {str(e)}")
             return False, f"خطأ في التحقق من رقم الهاتف | Phone verification error: {str(e)}"
+
+    def verify_id_token(self, id_token: str) -> dict:
+        """التحقق من صحة رمز المصادقة | Verify authentication token"""
+        try:
+            return auth.verify_id_token(id_token)
+        except Exception as e:
+            logger.error(f"خطأ في التحقق من رمز المصادقة: {str(e)}")
+            return None
 
 firebase_auth = FirebaseAuthService()

@@ -1,5 +1,5 @@
 """Authentication blueprint for the application"""
-from flask import Blueprint, request, jsonify, session
+from flask import Blueprint, request, jsonify
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 import logging
@@ -78,45 +78,41 @@ def init_auth(app):
     """تهيئة المصادقة | Initialize authentication"""
     try:
         # Initialize login manager if not already initialized
-        if not hasattr(app, 'login_manager'):
-            login_manager = LoginManager()
-            login_manager.init_app(app)
-            app.login_manager = login_manager
-            logger.info("تم تهيئة مدير تسجيل الدخول")
+        login_manager = LoginManager()
+        login_manager.init_app(app)
+        login_manager.login_view = 'silvarium_auth.login'
+        logger.info("تم تهيئة مدير تسجيل الدخول")
 
-            # Set login view
-            login_manager.login_view = 'silvarium_auth.login'
+        @login_manager.user_loader
+        def load_user(user_id):
+            try:
+                conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+                cur = conn.cursor()
 
-            @login_manager.user_loader
-            def load_user(user_id):
-                try:
-                    conn = psycopg2.connect(os.getenv('DATABASE_URL'))
-                    cur = conn.cursor()
+                cur.execute("""
+                    SELECT id, username, password, role, is_approved, status 
+                    FROM users 
+                    WHERE id = %s
+                """, (user_id,))
 
-                    cur.execute("""
-                        SELECT id, username, password, role, is_approved, status 
-                        FROM users 
-                        WHERE id = %s
-                    """, (user_id,))
+                user_data = cur.fetchone()
+                cur.close()
+                conn.close()
 
-                    user_data = cur.fetchone()
-                    cur.close()
-                    conn.close()
+                if user_data:
+                    return User(
+                        id=user_data[0],
+                        username=user_data[1],
+                        password=user_data[2],
+                        role=user_data[3],
+                        is_approved=user_data[4],
+                        status=user_data[5]
+                    )
+                return None
 
-                    if user_data:
-                        return User(
-                            id=user_data[0],
-                            username=user_data[1],
-                            password=user_data[2],
-                            role=user_data[3],
-                            is_approved=user_data[4],
-                            status=user_data[5]
-                        )
-                    return None
-
-                except Exception as e:
-                    logger.error(f"خطأ في تحميل المستخدم: {str(e)}")
-                    return None
+            except Exception as e:
+                logger.error(f"خطأ في تحميل المستخدم: {str(e)}")
+                return None
 
         # Create users table if not exists
         conn = psycopg2.connect(os.getenv('DATABASE_URL'))
@@ -150,7 +146,6 @@ def init_auth(app):
     except Exception as e:
         logger.error(f"خطأ في تهيئة المصادقة: {str(e)}")
         return None
-
 
 @auth_bp.route('/verify-phone', methods=['POST'])
 def verify_phone():

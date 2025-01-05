@@ -85,10 +85,9 @@ def create_app(testing=False):
         port = int(os.getenv('PORT', str(app_config.PORT)))
 
         # Wait for port availability | انتظار توفر المنفذ
-        if os.getenv('WAIT_FOR_PORT', 'false').lower() == 'true':
-            if not wait_for_port(port):
-                logger.error(f"Port {port} is not available | المنفذ {port} غير متاح")
-                return None
+        if not wait_for_port(port):
+            logger.error(f"Port {port} is not available | المنفذ {port} غير متاح")
+            return None
 
         app.config.update(
             SESSION_TYPE=app_config.SESSION_TYPE,
