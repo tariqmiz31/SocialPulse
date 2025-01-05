@@ -22,7 +22,7 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { useState } from "react";
-import { Languages } from "lucide-react";
+import { Languages, Loader2 } from "lucide-react";
 import { auth } from "@/lib/firebase";
 import { RecaptchaVerifier, signInWithPhoneNumber } from "firebase/auth";
 
@@ -133,7 +133,8 @@ export default function ResetPassword() {
   const { toast } = useToast();
   const [step, setStep] = useState<ResetStep>('phone');
   const [verificationId, setVerificationId] = useState<string>("");
-  const [language, setLanguage] = useState<'ar' | 'en'>('ar'); // Set Arabic as default
+  const [language, setLanguage] = useState<'ar' | 'en'>('ar');
+  const [isLoading, setIsLoading] = useState(false);
   const t = translations[language];
 
   // Form schemas with translations
@@ -186,9 +187,11 @@ export default function ResetPassword() {
       const setupRecaptcha = async () => {
         try {
           if (window.recaptchaVerifier) {
-            window.recaptchaVerifier.clear();
+            await window.recaptchaVerifier.clear();
+            window.recaptchaVerifier = null;
           }
-          window.recaptchaVerifier = new RecaptchaVerifier(auth, 'send-code-button', {
+
+          const verifier = new RecaptchaVerifier(auth, 'send-code-button', {
             'size': 'invisible',
             'callback': () => {
               console.log('reCAPTCHA verified');
@@ -202,6 +205,9 @@ export default function ResetPassword() {
               window.recaptchaVerifier = null;
             }
           });
+
+          await verifier.render();
+          window.recaptchaVerifier = verifier;
         } catch (error) {
           console.error('Error setting up reCAPTCHA:', error);
           toast({
@@ -226,6 +232,7 @@ export default function ResetPassword() {
   // Form submission handlers
   const onSendCode = async (data: { username: string; phoneNumber: string }) => {
     try {
+      setIsLoading(true);
       const phoneNumber = data.phoneNumber;
       const appVerifier = window.recaptchaVerifier;
 
@@ -251,14 +258,17 @@ export default function ResetPassword() {
 
       // Reset reCAPTCHA on error
       if (window.recaptchaVerifier) {
-        window.recaptchaVerifier.clear();
+        await window.recaptchaVerifier.clear();
         window.recaptchaVerifier = null;
       }
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const onVerifyCode = async (data: { code: string }) => {
     try {
+      setIsLoading(true);
       const response = await fetch('/api/auth/verify-phone', {
         method: 'POST',
         headers: {
@@ -288,11 +298,14 @@ export default function ResetPassword() {
         title: t.error.title,
         description: error.message || t.errors.unknownError,
       });
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const onResetPassword = async (data: { password: string; confirmPassword: string }) => {
     try {
+      setIsLoading(true);
       const response = await fetch("/api/auth/reset-password", {
         method: "POST",
         headers: {
@@ -316,13 +329,16 @@ export default function ResetPassword() {
         description: handleBilingualMessage(result),
       });
 
-      setLocation("/");
+      // Redirect after successful password reset
+      setTimeout(() => setLocation("/"), 2000);
     } catch (error: any) {
       toast({
         variant: "destructive",
         title: t.error.title,
         description: error.message || t.errors.unknownError,
       });
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -388,15 +404,20 @@ export default function ResetPassword() {
                     type="submit"
                     className="w-full"
                     id="send-code-button"
-                    disabled={phoneForm.formState.isSubmitting}
+                    disabled={isLoading || phoneForm.formState.isSubmitting}
                   >
-                    {phoneForm.formState.isSubmitting ? t.sending : t.sendCode}
+                    {isLoading || phoneForm.formState.isSubmitting ? (
+                      <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> {t.sending}</>
+                    ) : (
+                      t.sendCode
+                    )}
                   </Button>
                   <Button
                     type="button"
                     variant="outline"
                     className="w-full"
                     onClick={() => setLocation("/")}
+                    disabled={isLoading}
                   >
                     {t.backToLogin}
                   </Button>
@@ -427,9 +448,13 @@ export default function ResetPassword() {
                 <Button
                   type="submit"
                   className="w-full"
-                  disabled={verifyForm.formState.isSubmitting}
+                  disabled={isLoading || verifyForm.formState.isSubmitting}
                 >
-                  {verifyForm.formState.isSubmitting ? t.verifying : t.verify}
+                  {isLoading || verifyForm.formState.isSubmitting ? (
+                    <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> {t.verifying}</>
+                  ) : (
+                    t.verify
+                  )}
                 </Button>
               </form>
             </Form>
@@ -475,9 +500,13 @@ export default function ResetPassword() {
                 <Button
                   type="submit"
                   className="w-full"
-                  disabled={resetForm.formState.isSubmitting}
+                  disabled={isLoading || resetForm.formState.isSubmitting}
                 >
-                  {resetForm.formState.isSubmitting ? t.resetting : t.resetButton}
+                  {isLoading || resetForm.formState.isSubmitting ? (
+                    <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> {t.resetting}</>
+                  ) : (
+                    t.resetButton
+                  )}
                 </Button>
               </form>
             </Form>

@@ -70,6 +70,37 @@ class FirebaseAuthService:
             logger.error(f"خطأ في التحقق من رقم الهاتف: {str(e)} | Phone verification error: {str(e)}")
             return False, str(e)
 
+    def link_phone_number(self, username: str, phone_number: str) -> Tuple[bool, Optional[str]]:
+        """ربط رقم الهاتف بالمستخدم | Link phone number to user"""
+        try:
+            # Update user phone number in Firebase
+            try:
+                user = auth.get_user_by_phone_number(phone_number)
+                if user:
+                    logger.warning(f"رقم الهاتف مستخدم بالفعل: {phone_number}")
+                    return False, "رقم الهاتف مستخدم بالفعل"
+            except auth.UserNotFoundError:
+                pass  # This is good, phone number is not used
+
+            # Create or update user in Firebase
+            try:
+                user = auth.create_user(
+                    phone_number=phone_number,
+                    display_name=username
+                )
+                logger.info(f"تم ربط رقم الهاتف بالمستخدم بنجاح: {username} - {phone_number}")
+                return True, None
+            except auth.PhoneNumberAlreadyExistsError:
+                logger.warning(f"رقم الهاتف مستخدم بالفعل: {phone_number}")
+                return False, "رقم الهاتف مستخدم بالفعل"
+            except Exception as e:
+                logger.error(f"خطأ في إنشاء مستخدم Firebase: {str(e)}")
+                return False, str(e)
+
+        except Exception as e:
+            logger.error(f"خطأ في ربط رقم الهاتف: {str(e)} | Error linking phone number: {str(e)}")
+            return False, str(e)
+
     def get_user_by_phone(self, phone_number: str) -> Optional[Dict[str, Any]]:
         """الحصول على معلومات المستخدم برقم الهاتف | Get user by phone number"""
         try:
@@ -77,6 +108,7 @@ class FirebaseAuthService:
             return {
                 'uid': user.uid,
                 'phone_number': user.phone_number,
+                'display_name': user.display_name,
                 'provider_data': user.provider_data
             }
         except auth.UserNotFoundError:

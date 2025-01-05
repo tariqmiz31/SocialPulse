@@ -8,9 +8,13 @@ import logging
 from logging.handlers import RotatingFileHandler
 from server.routes import setup_routes
 from server.config import config
+from dotenv import load_dotenv
 
 def create_app(testing=False):
     """Create and configure Flask application | إنشاء وتكوين تطبيق Flask"""
+    # Load environment variables
+    load_dotenv()
+
     # Initialize logger first
     logger = logging.getLogger('silvarium')
     logger.setLevel(logging.INFO)
@@ -53,7 +57,8 @@ def create_app(testing=False):
             SECRET_KEY=app_config.SECRET_KEY,
             DEBUG=app_config.DEBUG,
             PORT=int(os.getenv('PORT', str(app_config.PORT))),
-            HOST='0.0.0.0'
+            HOST='0.0.0.0',
+            WAIT_FOR_PORT=True  # Enable port waiting
         )
 
         # Setup CORS | إعداد CORS

@@ -90,7 +90,7 @@ def init_auth(app):
 
     except Exception as e:
         logger.error(f"خطأ في تهيئة المصادقة: {str(e)}")
-        return app
+        return None
 
 # Import firebase service after blueprint creation to avoid circular imports
 from .firebase_service import firebase_auth
@@ -151,7 +151,123 @@ class User:
             logger.error(f"خطأ في البحث عن المستخدم: {str(e)}")
             return None
 
-# Define routes below
+@auth_bp.route('/verify-phone', methods=['POST'])
+def verify_phone():
+    """التحقق من رقم الهاتف"""
+    try:
+        data = request.get_json()
+        phone_number = data.get('phoneNumber')
+        code = data.get('code')
+        verification_id = data.get('verificationId')
+
+        if not all([phone_number, code, verification_id]):
+            logger.warning("بيانات غير مكتملة في طلب التحقق من رقم الهاتف")
+            return jsonify(get_bilingual_message(
+                "يجب توفير رقم الهاتف ورمز التحقق",
+                "Phone number and verification code are required"
+            )), 400
+
+        # التحقق من رقم الهاتف باستخدام Firebase
+        verified, error_message = firebase_auth.verify_phone_number(phone_number, verification_id, code)
+        if not verified:
+            logger.warning(f"فشل في التحقق من رقم الهاتف: {phone_number}")
+            return jsonify(get_bilingual_message(
+                error_message or "فشل في التحقق من رقم الهاتف",
+                error_message or "Failed to verify phone number"
+            )), 400
+
+        logger.info(f"تم التحقق من رقم الهاتف بنجاح: {phone_number}")
+        return jsonify(get_bilingual_message(
+            "تم التحقق من رقم الهاتف بنجاح",
+            "Phone number verified successfully"
+        ))
+
+    except Exception as e:
+        logger.error(f"خطأ في التحقق من رقم الهاتف: {str(e)}")
+        logger.error(traceback.format_exc())
+        return jsonify(get_bilingual_message(
+            "حدث خطأ في التحقق من رقم الهاتف",
+            "Error verifying phone number"
+        )), 500
+
+@auth_bp.route('/reset-password', methods=['POST'])
+def reset_password():
+    """إعادة تعيين كلمة المرور | Reset Password"""
+    try:
+        data = request.get_json()
+        username = data.get('username')
+        new_password = data.get('password')
+        verification_id = data.get('verificationId')
+
+        if not all([username, new_password, verification_id]):
+            logger.warning("بيانات غير مكتملة في طلب إعادة تعيين كلمة المرور")
+            return jsonify(get_bilingual_message(
+                "يجب توفير جميع البيانات المطلوبة",
+                "All required data must be provided"
+            )), 400
+
+        conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+        cur = conn.cursor()
+
+        # التحقق من وجود المستخدم | Check if user exists
+        cur.execute("""
+            SELECT id, username, status, is_approved 
+            FROM users 
+            WHERE username = %s
+        """, (username,))
+        user = cur.fetchone()
+
+        if not user:
+            logger.warning(f"محاولة إعادة تعيين كلمة المرور لمستخدم غير موجود: {username}")
+            cur.close()
+            conn.close()
+            return jsonify(get_bilingual_message(
+                "المستخدم غير موجود",
+                "User not found"
+            )), 404
+
+        # التحقق من حالة المستخدم | Check user status
+        user_id, user_username, user_status, is_approved = user
+
+        if not is_approved:
+            logger.warning(f"محاولة إعادة تعيين كلمة المرور لحساب غير معتمد: {username}")
+            return jsonify(get_bilingual_message(
+                "الحساب غير معتمد، يرجى الاتصال بالمسؤول",
+                "Account not approved, please contact administrator"
+            )), 403
+
+        if user_status != 'active':
+            logger.warning(f"محاولة إعادة تعيين كلمة المرور لحساب غير نشط: {username}")
+            return jsonify(get_bilingual_message(
+                "الحساب غير نشط، يرجى الاتصال بالمسؤول",
+                "Account not active, please contact administrator"
+            )), 403
+
+        # تحديث كلمة المرور | Update password
+        hashed_password = generate_password_hash(new_password)
+        cur.execute(
+            "UPDATE users SET password = %s WHERE username = %s",
+            (hashed_password, username)
+        )
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        logger.info(f"تم إعادة تعيين كلمة المرور بنجاح للمستخدم: {username}")
+        return jsonify(get_bilingual_message(
+            "تم إعادة تعيين كلمة المرور بنجاح",
+            "Password reset successfully"
+        ))
+
+    except Exception as e:
+        logger.error(f"خطأ في إعادة تعيين كلمة المرور: {str(e)}")
+        logger.error(traceback.format_exc())
+        return jsonify(get_bilingual_message(
+            "حدث خطأ في إعادة تعيين كلمة المرور",
+            "Error resetting password"
+        )), 500
+
 @auth_bp.route('/login', methods=['POST'])
 def login():
     try:
@@ -269,119 +385,62 @@ def get_current_user():
         logger.error(f"خطأ في جلب معلومات المستخدم: {str(e)}")
         return jsonify({"error": "حدث خطأ في جلب معلومات المستخدم"}), 500
 
-@auth_bp.route('/verify-phone', methods=['POST'])
-def verify_phone():
-    """التحقق من رقم الهاتف"""
-    try:
-        data = request.get_json()
-        phone_number = data.get('phoneNumber')
-        code = data.get('code')
-        verification_id = data.get('verificationId')
-
-        if not all([phone_number, code, verification_id]):
-            logger.warning("بيانات غير مكتملة في طلب التحقق من رقم الهاتف")
-            return jsonify(get_bilingual_message(
-                "يجب توفير رقم الهاتف ورمز التحقق",
-                "Phone number and verification code are required"
-            )), 400
-
-        # التحقق من رقم الهاتف باستخدام Firebase
-        result = firebase_auth.verify_phone_number(phone_number, verification_id)
-        if not result:
-            logger.warning(f"فشل في التحقق من رقم الهاتف: {phone_number}")
-            return jsonify(get_bilingual_message(
-                "فشل في التحقق من رقم الهاتف",
-                "Failed to verify phone number"
-            )), 400
-
-        logger.info(f"تم التحقق من رقم الهاتف بنجاح: {phone_number}")
-        return jsonify(get_bilingual_message(
-            "تم التحقق من رقم الهاتف بنجاح",
-            "Phone number verified successfully"
-        ))
-
-    except Exception as e:
-        logger.error(f"خطأ في التحقق من رقم الهاتف: {str(e)}")
-        logger.error(traceback.format_exc())
-        return jsonify(get_bilingual_message(
-            "حدث خطأ في التحقق من رقم الهاتف",
-            "Error verifying phone number"
-        )), 500
-
-@auth_bp.route('/reset-password', methods=['POST'])
-def reset_password():
-    """إعادة تعيين كلمة المرور | Reset Password"""
+@auth_bp.route('/link-phone', methods=['POST'])
+def link_phone():
+    """ربط رقم الهاتف بالمستخدم | Link phone number to user"""
     try:
         data = request.get_json()
         username = data.get('username')
-        new_password = data.get('password')
-        verification_id = data.get('verificationId')
+        phone_number = data.get('phoneNumber')
 
-        if not all([username, new_password, verification_id]):
-            logger.warning("بيانات غير مكتملة في طلب إعادة تعيين كلمة المرور")
+        if not all([username, phone_number]):
+            logger.warning("بيانات غير مكتملة في طلب ربط رقم الهاتف")
             return jsonify(get_bilingual_message(
-                "يجب توفير جميع البيانات المطلوبة",
-                "All required data must be provided"
+                "يجب توفير اسم المستخدم ورقم الهاتف",
+                "Username and phone number are required"
             )), 400
 
-        conn = psycopg2.connect(os.getenv('DATABASE_URL'))
-        cur = conn.cursor()
-
         # التحقق من وجود المستخدم | Check if user exists
-        cur.execute("""
-            SELECT id, username, status, is_approved 
-            FROM users 
-            WHERE username = %s
-        """, (username,))
-        user = cur.fetchone()
-
+        user = User.get_by_username(username)
         if not user:
-            logger.warning(f"محاولة إعادة تعيين كلمة المرور لمستخدم غير موجود: {username}")
-            cur.close()
-            conn.close()
+            logger.warning(f"محاولة ربط رقم الهاتف لمستخدم غير موجود: {username}")
             return jsonify(get_bilingual_message(
                 "المستخدم غير موجود",
                 "User not found"
             )), 404
 
-        # التحقق من حالة المستخدم | Check user status
-        user_id, user_username, user_status, is_approved = user
-
-        if not is_approved:
-            logger.warning(f"محاولة إعادة تعيين كلمة المرور لحساب غير معتمد: {username}")
+        # ربط رقم الهاتف باستخدام Firebase | Link phone number using Firebase
+        success, error_message = firebase_auth.link_phone_number(username, phone_number)
+        if not success:
+            logger.warning(f"فشل في ربط رقم الهاتف: {error_message}")
             return jsonify(get_bilingual_message(
-                "الحساب غير معتمد، يرجى الاتصال بالمسؤول",
-                "Account not approved, please contact administrator"
-            )), 403
+                error_message or "فشل في ربط رقم الهاتف",
+                error_message or "Failed to link phone number"
+            )), 400
 
-        if user_status != 'active':
-            logger.warning(f"محاولة إعادة تعيين كلمة المرور لحساب غير نشط: {username}")
-            return jsonify(get_bilingual_message(
-                "الحساب غير نشط، يرجى الاتصال بالمسؤول",
-                "Account not active, please contact administrator"
-            )), 403
+        # تحديث رقم الهاتف في قاعدة البيانات | Update phone number in database
+        conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+        cur = conn.cursor()
 
-        # تحديث كلمة المرور | Update password
-        hashed_password = generate_password_hash(new_password)
         cur.execute(
-            "UPDATE users SET password = %s WHERE username = %s",
-            (hashed_password, username)
+            "UPDATE users SET phone_number = %s WHERE username = %s",
+            (phone_number, username)
         )
 
         conn.commit()
         cur.close()
         conn.close()
 
-        logger.info(f"تم إعادة تعيين كلمة المرور بنجاح للمستخدم: {username}")
+        logger.info(f"تم ربط رقم الهاتف بنجاح للمستخدم: {username}")
         return jsonify(get_bilingual_message(
-            "تم إعادة تعيين كلمة المرور بنجاح",
-            "Password reset successfully"
+            "تم ربط رقم الهاتف بنجاح",
+            "Phone number linked successfully"
         ))
 
     except Exception as e:
-        logger.error(f"خطأ في إعادة تعيين كلمة المرور: {str(e)}")
+        logger.error(f"خطأ في ربط رقم الهاتف: {str(e)}")
         logger.error(traceback.format_exc())
         return jsonify(get_bilingual_message(
-            "حدث خطأ في إعادة تعيين كلمة المرور",
-            "Error resetting password"
+            "حدث خطأ في ربط رقم الهاتف",
+            "Error linking phone number"
         )), 500
