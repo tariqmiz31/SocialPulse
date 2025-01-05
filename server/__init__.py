@@ -101,17 +101,6 @@ def create_app(testing=False):
                  }
              })
 
-        # Register authentication blueprint | تسجيل مخطط المصادقة
-        app.register_blueprint(auth_bp)
-
-        # Wait for port if not testing | انتظار المنفذ إذا لم يكن في وضع الاختبار
-        if not testing and app_config.WAIT_FOR_PORT:
-            port = app.config['PORT']
-            if not wait_for_port(port, app.config['HOST'], app_config.WAIT_FOR_PORT_TIMEOUT):
-                if logger:
-                    logger.error(f"Port {port} is not available | المنفذ {port} غير متاح")
-                return None
-
         # Setup authentication | إعداد المصادقة
         app = init_auth(app)
 

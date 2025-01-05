@@ -1,5 +1,5 @@
 import { initializeApp } from "firebase/app";
-import { getAuth, RecaptchaVerifier, type Persistence } from "firebase/auth";
+import { getAuth, RecaptchaVerifier, type Persistence, browserLocalPersistence } from "firebase/auth";
 
 declare global {
   interface Window {
@@ -18,8 +18,8 @@ const firebaseConfig = {
 export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 
-// Enable local persistence
-auth.setPersistence('browser');
+// Enable local persistence with proper type
+auth.setPersistence(browserLocalPersistence);
 
 // Default language to Arabic
 auth.languageCode = 'ar';

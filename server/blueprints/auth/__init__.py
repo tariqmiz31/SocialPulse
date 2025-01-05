@@ -74,10 +74,16 @@ class User:
 
 def init_auth(app):
     """تهيئة المصادقة"""
-    if not hasattr(app, '_login_manager'):
-        login_manager.init_app(app)
-        app._login_manager = login_manager
+    global login_manager
 
+    # Check if login manager is already initialized
+    if not hasattr(app, 'login_manager'):
+        login_manager.init_app(app)
+        app.login_manager = login_manager
+
+        logger.info("تم تهيئة مدير تسجيل الدخول")
+
+    # Set login view
     login_manager.login_view = 'auth.login'
 
     @login_manager.user_loader
@@ -124,7 +130,8 @@ def init_auth(app):
                 role VARCHAR(50) DEFAULT 'user',
                 is_approved BOOLEAN DEFAULT true,
                 status VARCHAR(50) DEFAULT 'active',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                phone_number VARCHAR(20) UNIQUE
             )
         """)
 
@@ -138,6 +145,7 @@ def init_auth(app):
     # Only register the blueprint if it hasn't been registered yet
     if 'auth' not in app.blueprints:
         app.register_blueprint(auth_bp)
+        logger.info("تم تسجيل مخطط المصادقة")
 
     return app
 
