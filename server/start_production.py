@@ -49,15 +49,15 @@ def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 60) -> bool:
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                 sock.settimeout(1)
-                sock.bind((host, port))  # Try to bind to the port
-                sock.close()  # Close immediately if successful
-                print(f"Port {port} is available | المنفذ {port} متاح")
+                sock.bind((host, port))
+                sock.close()
+                logger.info(f"Port {port} is available | المنفذ {port} متاح")
                 return True
         except socket.error:
-            print(f"Waiting for port {port}... | انتظار المنفذ {port}...")
+            logger.info(f"Waiting for port {port}... | انتظار المنفذ {port}...")
             time.sleep(1)
 
-    print(f"Port {port} is not available after timeout | المنفذ {port} غير متاح بعد انتهاء المهلة")
+    logger.error(f"Port {port} is not available after timeout | المنفذ {port} غير متاح بعد انتهاء المهلة")
     return False
 
 def main():

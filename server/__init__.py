@@ -47,6 +47,9 @@ def create_app(testing=False):
             f"Missing required environment variables: {', '.join(missing_vars)}"
         )
 
+    # Force wait for port
+    os.environ['WAIT_FOR_PORT'] = 'true'
+
     # Initialize logger first
     logger = logging.getLogger('silvarium')
     logger.setLevel(logging.INFO)

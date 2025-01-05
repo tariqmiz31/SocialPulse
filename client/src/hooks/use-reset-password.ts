@@ -1,6 +1,7 @@
 import { useMutation } from "@tanstack/react-query";
 import { toast } from "@/hooks/use-toast";
 import { FirebaseError } from "firebase/auth";
+import { auth, setupRecaptcha, sendVerificationCode, verifyCode } from "@/lib/firebase";
 
 type RequestResult = {
   message: {
@@ -9,10 +10,8 @@ type RequestResult = {
   };
 };
 
-interface ResetPasswordData {
-  username: string;
-  password: string;
-  verificationId: string;
+interface SendCodeData {
+  phoneNumber: string;
 }
 
 interface VerifyPhoneData {
@@ -21,9 +20,15 @@ interface VerifyPhoneData {
   verificationId: string;
 }
 
+interface ResetPasswordData {
+  username: string;
+  password: string;
+  verificationId: string;
+}
+
 async function handleRequest(
   url: string,
-  data: ResetPasswordData | VerifyPhoneData
+  data: SendCodeData | VerifyPhoneData | ResetPasswordData
 ): Promise<RequestResult> {
   const response = await fetch(`/api/auth/${url}`, {
     method: "POST",
@@ -43,8 +48,41 @@ async function handleRequest(
 }
 
 export function useResetPassword() {
+  const sendCodeMutation = useMutation({
+    mutationFn: async (data: SendCodeData) => {
+      const recaptchaVerifier = await setupRecaptcha('send-code-button');
+      const confirmationResult = await sendVerificationCode(data.phoneNumber, recaptchaVerifier);
+      return handleRequest("send-verification-code", { phoneNumber: data.phoneNumber });
+    },
+    onError: (error: Error) => {
+      if (error instanceof FirebaseError) {
+        toast({
+          variant: "destructive",
+          title: "خطأ في إرسال الرمز",
+          description: error.message,
+        });
+      } else {
+        toast({
+          variant: "destructive",
+          title: "خطأ",
+          description: error.message,
+        });
+      }
+    },
+  });
+
   const verifyPhoneMutation = useMutation({
-    mutationFn: (data: VerifyPhoneData) => handleRequest("verify-phone", data),
+    mutationFn: async (data: VerifyPhoneData) => {
+      const result = await verifyCode(data.code);
+      if (!result) {
+        throw new Error("فشل في التحقق من الرمز");
+      }
+      const idToken = await result.user.getIdToken();
+      return handleRequest("verify-phone", {
+        ...data,
+        verificationId: idToken
+      });
+    },
     onError: (error) => {
       if (error instanceof FirebaseError) {
         toast({
@@ -63,7 +101,16 @@ export function useResetPassword() {
   });
 
   const resetPasswordMutation = useMutation({
-    mutationFn: (data: ResetPasswordData) => handleRequest("reset-password", data),
+    mutationFn: async (data: ResetPasswordData) => {
+      const idToken = await auth.currentUser?.getIdToken();
+      if (!idToken) {
+        throw new Error("يجب التحقق من رقم الهاتف أولاً");
+      }
+      return handleRequest("reset-password", {
+        ...data,
+        verificationId: idToken
+      });
+    },
     onError: (error) => {
       toast({
         variant: "destructive",
@@ -74,8 +121,10 @@ export function useResetPassword() {
   });
 
   return {
+    sendCode: sendCodeMutation.mutateAsync,
     verifyPhone: verifyPhoneMutation.mutateAsync,
     resetPassword: resetPasswordMutation.mutateAsync,
+    isSending: sendCodeMutation.isPending,
     isVerifying: verifyPhoneMutation.isPending,
     isResetting: resetPasswordMutation.isPending,
   };

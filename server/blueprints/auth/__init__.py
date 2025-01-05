@@ -14,13 +14,72 @@ logger.setLevel(logging.INFO)
 
 # Create blueprint with unique name
 auth_bp = Blueprint('silvarium_auth', __name__, url_prefix='/api/auth')
-login_manager = LoginManager()
+
+# Import firebase service after blueprint creation to avoid circular imports
+from .firebase_service import firebase_auth
+
+def get_bilingual_message(ar_msg: str, en_msg: str) -> dict:
+    """Return bilingual message format"""
+    return {
+        "message": {
+            "ar": ar_msg,
+            "en": en_msg
+        }
+    }
+
+class User:
+    def __init__(self, id, username, password=None, role='user', is_approved=True, status='active'):
+        self.id = id
+        self.username = username
+        self.password = password
+        self.role = role
+        self.is_approved = is_approved
+        self.status = status
+        self.is_authenticated = True
+        self.is_active = True
+        self.is_anonymous = False
+
+    def get_id(self):
+        return str(self.id)
+
+    @staticmethod
+    def get_by_username(username):
+        """البحث عن مستخدم باستخدام اسم المستخدم"""
+        try:
+            conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+            cur = conn.cursor()
+
+            cur.execute("""
+                SELECT id, username, password, role, is_approved, status 
+                FROM users 
+                WHERE username = %s
+            """, (username,))
+
+            user_data = cur.fetchone()
+            cur.close()
+            conn.close()
+
+            if user_data:
+                return User(
+                    id=user_data[0],
+                    username=user_data[1],
+                    password=user_data[2],
+                    role=user_data[3],
+                    is_approved=user_data[4],
+                    status=user_data[5]
+                )
+            return None
+
+        except Exception as e:
+            logger.error(f"خطأ في البحث عن المستخدم: {str(e)}")
+            return None
 
 def init_auth(app):
     """تهيئة المصادقة | Initialize authentication"""
     try:
         # Initialize login manager if not already initialized
         if not hasattr(app, 'login_manager'):
+            login_manager = LoginManager()
             login_manager.init_app(app)
             app.login_manager = login_manager
             logger.info("تم تهيئة مدير تسجيل الدخول")
@@ -92,64 +151,6 @@ def init_auth(app):
         logger.error(f"خطأ في تهيئة المصادقة: {str(e)}")
         return None
 
-# Import firebase service after blueprint creation to avoid circular imports
-from .firebase_service import firebase_auth
-
-def get_bilingual_message(ar_msg: str, en_msg: str) -> dict:
-    """Return bilingual message format"""
-    return {
-        "message": {
-            "ar": ar_msg,
-            "en": en_msg
-        }
-    }
-
-class User:
-    def __init__(self, id, username, password=None, role='user', is_approved=True, status='active'):
-        self.id = id
-        self.username = username
-        self.password = password
-        self.role = role
-        self.is_approved = is_approved
-        self.status = status
-        self.is_authenticated = True
-        self.is_active = True
-        self.is_anonymous = False
-
-    def get_id(self):
-        return str(self.id)
-
-    @staticmethod
-    def get_by_username(username):
-        """البحث عن مستخدم باستخدام اسم المستخدم"""
-        try:
-            conn = psycopg2.connect(os.getenv('DATABASE_URL'))
-            cur = conn.cursor()
-
-            cur.execute("""
-                SELECT id, username, password, role, is_approved, status 
-                FROM users 
-                WHERE username = %s
-            """, (username,))
-
-            user_data = cur.fetchone()
-            cur.close()
-            conn.close()
-
-            if user_data:
-                return User(
-                    id=user_data[0],
-                    username=user_data[1],
-                    password=user_data[2],
-                    role=user_data[3],
-                    is_approved=user_data[4],
-                    status=user_data[5]
-                )
-            return None
-
-        except Exception as e:
-            logger.error(f"خطأ في البحث عن المستخدم: {str(e)}")
-            return None
 
 @auth_bp.route('/verify-phone', methods=['POST'])
 def verify_phone():
@@ -190,6 +191,43 @@ def verify_phone():
             "Error verifying phone number"
         )), 500
 
+@auth_bp.route('/send-verification-code', methods=['POST'])
+async def send_verification_code():
+    """إرسال رمز التحقق عبر SMS | Send verification code via SMS"""
+    try:
+        data = request.get_json()
+        phone_number = data.get('phoneNumber')
+
+        if not phone_number:
+            logger.warning("لم يتم توفير رقم الهاتف | Phone number not provided")
+            return jsonify(get_bilingual_message(
+                "يجب توفير رقم الهاتف",
+                "Phone number is required"
+            )), 400
+
+        # Send verification code using Firebase
+        result = await firebase_auth.send_verification_code(phone_number)
+
+        if not result['success']:
+            logger.warning(f"فشل في إرسال رمز التحقق: {result.get('message')}")
+            return jsonify(get_bilingual_message(
+                result['message']['ar'],
+                result['message']['en']
+            )), 400
+
+        return jsonify({
+            'success': True,
+            'message': result['message'],
+            'sessionInfo': result['session_info']
+        })
+
+    except Exception as e:
+        logger.error(f"خطأ في إرسال رمز التحقق: {str(e)}")
+        return jsonify(get_bilingual_message(
+            f"حدث خطأ في إرسال رمز التحقق: {str(e)}",
+            f"Error sending verification code: {str(e)}"
+        )), 500
+
 @auth_bp.route('/reset-password', methods=['POST'])
 def reset_password():
     """إعادة تعيين كلمة المرور | Reset Password"""
@@ -205,6 +243,21 @@ def reset_password():
                 "يجب توفير جميع البيانات المطلوبة",
                 "All required data must be provided"
             )), 400
+
+        # التحقق من الرمز باستخدام Firebase
+        try:
+            decoded_token = firebase_auth.verify_id_token(verification_id)
+            if not decoded_token:
+                return jsonify(get_bilingual_message(
+                    "جلسة التحقق غير صالحة",
+                    "Invalid verification session"
+                )), 401
+        except Exception as e:
+            logger.error(f"خطأ في التحقق من رمز الجلسة: {str(e)}")
+            return jsonify(get_bilingual_message(
+                "فشل في التحقق من جلسة التحقق",
+                "Failed to verify session"
+            )), 401
 
         conn = psycopg2.connect(os.getenv('DATABASE_URL'))
         cur = conn.cursor()
