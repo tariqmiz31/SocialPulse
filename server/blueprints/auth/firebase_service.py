@@ -1,4 +1,4 @@
-"""Firebase Authentication Service"""
+"""Firebase Authentication service"""
 import firebase_admin
 from firebase_admin import auth, credentials
 import os
@@ -130,12 +130,46 @@ class FirebaseAuthService:
             logger.error(f"خطأ في التحقق من رقم الهاتف: {str(e)}")
             return False, f"خطأ في التحقق من رقم الهاتف | Phone verification error: {str(e)}"
 
-    def verify_id_token(self, id_token: str) -> dict:
+    def verify_id_token(self, id_token: str) -> Optional[Dict[str, Any]]:
         """التحقق من صحة رمز المصادقة | Verify authentication token"""
         try:
             return auth.verify_id_token(id_token)
         except Exception as e:
             logger.error(f"خطأ في التحقق من رمز المصادقة: {str(e)}")
             return None
+
+    def link_phone_number(self, username: str, phone_number: str) -> Tuple[bool, Optional[str]]:
+        """ربط رقم الهاتف بالمستخدم | Link phone number to user"""
+        try:
+            # التحقق من تنسيق رقم الهاتف | Validate phone number format
+            if not phone_number.startswith('+'):
+                logger.warning(f"رقم هاتف بتنسيق غير صحيح: {phone_number}")
+                return False, "يجب أن يبدأ رقم الهاتف بـ + متبوعاً برمز الدولة | Phone number must start with + followed by country code"
+
+            # إنشاء أو تحديث مستخدم Firebase | Create or update Firebase user
+            try:
+                user = auth.get_user_by_phone_number(phone_number)
+                if user:
+                    # Update user display name if exists
+                    auth.update_user(
+                        user.uid,
+                        display_name=username
+                    )
+                else:
+                    # Create new user with phone number
+                    user = auth.create_user(
+                        phone_number=phone_number,
+                        display_name=username
+                    )
+                logger.info(f"تم ربط رقم الهاتف بنجاح: {phone_number}")
+                return True, None
+
+            except auth.PhoneNumberAlreadyExistsError:
+                logger.error(f"رقم الهاتف مستخدم بالفعل: {phone_number}")
+                return False, "رقم الهاتف مستخدم بالفعل | Phone number is already in use"
+
+        except Exception as e:
+            logger.error(f"خطأ في ربط رقم الهاتف: {str(e)}")
+            return False, f"خطأ في ربط رقم الهاتف | Error linking phone number: {str(e)}"
 
 firebase_auth = FirebaseAuthService()

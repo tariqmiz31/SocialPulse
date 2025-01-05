@@ -1,6 +1,6 @@
 """Initialize server package"""
 import os
-from flask import Flask, session
+from flask import Flask
 from flask_cors import CORS
 from flask_session import Session
 from datetime import timedelta
@@ -11,14 +11,14 @@ from server.config import config
 from dotenv import load_dotenv
 import socket
 import time
+import json
 
-def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 60) -> bool:
+def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
     """Wait for port to be available | انتظار حتى يصبح المنفذ متاحاً"""
     start_time = time.time()
     while time.time() - start_time < timeout:
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                sock.settimeout(1)
                 sock.bind((host, port))
                 sock.close()
                 return True
@@ -28,52 +28,68 @@ def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 60) -> bool:
 
 def create_app(testing=False):
     """Create and configure Flask application | إنشاء وتكوين تطبيق Flask"""
-    # Load environment variables first
-    load_dotenv()
-
-    # Verify required Firebase environment variables
-    required_env_vars = [
-        'FIREBASE_PROJECT_ID', 
-        'FIREBASE_PRIVATE_KEY', 
-        'FIREBASE_CLIENT_EMAIL',
-        'VITE_FIREBASE_API_KEY',
-        'VITE_FIREBASE_PROJECT_ID'
-    ]
-    missing_vars = [var for var in required_env_vars if not os.getenv(var)]
-
-    if missing_vars:
-        raise EnvironmentError(
-            f"المتغيرات البيئية المطلوبة مفقودة: {', '.join(missing_vars)} | "
-            f"Missing required environment variables: {', '.join(missing_vars)}"
-        )
-
-    # Force wait for port
-    os.environ['WAIT_FOR_PORT'] = 'true'
-
-    # Initialize logger first
-    logger = logging.getLogger('silvarium')
-    logger.setLevel(logging.INFO)
-
-    if not testing:
-        # Setup logging handlers
-        if not os.path.exists('/tmp/logs'):
-            os.makedirs('/tmp/logs')
-
-        formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
-
-        file_handler = RotatingFileHandler(
-            '/tmp/logs/silvarium.log',
-            maxBytes=1024 * 1024,
-            backupCount=5
-        )
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
-
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(formatter)
-        logger.addHandler(console_handler)
-
     try:
+        # Load environment variables first
+        load_dotenv()
+
+        # Initialize logger first
+        logger = logging.getLogger('silvarium')
+        logger.setLevel(logging.INFO)
+
+        if not testing:
+            # Setup logging handlers
+            if not os.path.exists('/tmp/logs'):
+                os.makedirs('/tmp/logs')
+
+            formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
+
+            file_handler = RotatingFileHandler(
+                '/tmp/logs/silvarium.log',
+                maxBytes=1024 * 1024,
+                backupCount=5
+            )
+            file_handler.setFormatter(formatter)
+            logger.addHandler(file_handler)
+
+            console_handler = logging.StreamHandler()
+            console_handler.setFormatter(formatter)
+            logger.addHandler(console_handler)
+
+        # Load Firebase credentials from service account file
+        service_account_path = 'attached_assets/silva-deb1c-firebase-adminsdk-g19p8-5d6dc42cd6.json'
+
+        if not os.path.exists(service_account_path):
+            logger.error("Service account file not found")
+            return None
+
+        try:
+            with open(service_account_path, 'r') as file:
+                cred_dict = json.load(file)
+
+            # Set environment variables from service account file
+            os.environ['FIREBASE_PROJECT_ID'] = cred_dict['project_id']
+            os.environ['FIREBASE_PRIVATE_KEY'] = cred_dict['private_key']
+            os.environ['FIREBASE_CLIENT_EMAIL'] = cred_dict['client_email']
+
+            logger.info(f"Loaded Firebase credentials for project: {cred_dict['project_id']}")
+        except Exception as e:
+            logger.error(f"Error loading Firebase service account: {str(e)}")
+            return None
+
+        # Verify required Firebase environment variables
+        required_env_vars = [
+            'FIREBASE_PROJECT_ID', 
+            'FIREBASE_PRIVATE_KEY', 
+            'FIREBASE_CLIENT_EMAIL',
+            'VITE_FIREBASE_API_KEY',
+            'VITE_FIREBASE_PROJECT_ID'
+        ]
+        missing_vars = [var for var in required_env_vars if not os.getenv(var)]
+
+        if missing_vars:
+            logger.error(f"Missing required environment variables: {', '.join(missing_vars)}")
+            return None
+
         # Determine environment | تحديد بيئة التشغيل
         env = os.getenv('FLASK_ENV', 'development')
         app_config = config[env]
@@ -84,10 +100,12 @@ def create_app(testing=False):
         # Configure application | تكوين التطبيق
         port = int(os.getenv('PORT', str(app_config.PORT)))
 
-        # Wait for port availability | انتظار توفر المنفذ
-        if not wait_for_port(port):
-            logger.error(f"Port {port} is not available | المنفذ {port} غير متاح")
-            return None
+        # Always wait for port in production | دائماً انتظر المنفذ في بيئة الإنتاج
+        if env == 'production' or os.getenv('WAIT_FOR_PORT', 'false').lower() == 'true':
+            if not wait_for_port(port):
+                logger.error(f"Port {port} is not available")
+                return None
+            logger.info(f"Port {port} is available")
 
         app.config.update(
             SESSION_TYPE=app_config.SESSION_TYPE,
@@ -112,22 +130,23 @@ def create_app(testing=False):
 
         # Initialize routes | إعداد المسارات
         app = setup_routes(app)
-        logger.info("تم إعداد المسارات | Routes setup complete")
+        logger.info("Routes setup complete")
 
         # Initialize authentication after routes | تهيئة المصادقة بعد المسارات
         from server.blueprints.auth import init_auth
         app = init_auth(app)
         if app:
-            logger.info("تم تهيئة المصادقة بنجاح | Authentication initialized successfully")
+            logger.info("Authentication initialized successfully")
         else:
-            logger.error("فشل في تهيئة المصادقة | Failed to initialize authentication")
+            logger.error("Failed to initialize authentication")
             return None
 
-        logger.info("تم تهيئة التطبيق بنجاح | Application initialized successfully")
+        logger.info("Application initialized successfully")
         return app
 
     except Exception as e:
-        logger.error(f"خطأ في تهيئة التطبيق: {str(e)} | Error initializing application: {str(e)}")
+        if logger:
+            logger.error(f"Error initializing application: {str(e)}")
         return None
 
 if __name__ == '__main__':

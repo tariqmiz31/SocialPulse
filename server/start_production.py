@@ -7,6 +7,7 @@ from dotenv import load_dotenv, find_dotenv
 from waitress import serve
 import socket
 import time
+import json
 
 # Add project root to Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -26,6 +27,27 @@ logger.addHandler(console_handler)
 
 # Load environment variables first
 load_dotenv(find_dotenv())
+
+# Load Firebase credentials from service account file
+service_account_path = 'attached_assets/silva-deb1c-firebase-adminsdk-g19p8-5d6dc42cd6.json'
+
+if not os.path.exists(service_account_path):
+    logger.error(f"Firebase service account file not found: {service_account_path}")
+    sys.exit(1)
+
+try:
+    with open(service_account_path, 'r') as file:
+        cred_dict = json.load(file)
+
+    # Set environment variables from service account file
+    os.environ['FIREBASE_PROJECT_ID'] = cred_dict['project_id']
+    os.environ['FIREBASE_PRIVATE_KEY'] = cred_dict['private_key']
+    os.environ['FIREBASE_CLIENT_EMAIL'] = cred_dict['client_email']
+
+    logger.info(f"Loaded Firebase credentials for project: {cred_dict['project_id']}")
+except Exception as e:
+    logger.error(f"Error loading Firebase service account: {str(e)}")
+    sys.exit(1)
 
 # Verify required Firebase environment variables
 required_env_vars = [
@@ -50,16 +72,19 @@ if missing_vars:
     logger.error("Missing required environment variables")
     sys.exit(1)
 
+# Force wait for port before app creation
+os.environ['WAIT_FOR_PORT'] = 'true'
+os.environ['FLASK_ENV'] = 'production'
+
 # Now import the app after environment setup
 from server import create_app
 
-def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 60) -> bool:
+def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
     """Wait for port availability | انتظار حتى يصبح المنفذ متاحاً"""
     start_time = time.time()
     while time.time() - start_time < timeout:
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                sock.settimeout(1)
                 sock.bind((host, port))
                 sock.close()
                 logger.info(f"Port {port} is available | المنفذ {port} متاح")
@@ -74,9 +99,6 @@ def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 60) -> bool:
 def main():
     """Main entry point | النقطة الرئيسية لبدء الخادم"""
     try:
-        # Set production mode | تعيين وضع الإنتاج
-        os.environ['FLASK_ENV'] = 'production'
-
         # Get port | الحصول على المنفذ
         port = int(os.getenv('PORT', '5000'))
 
@@ -86,6 +108,7 @@ def main():
             return 1
 
         # Create Flask app | إنشاء تطبيق Flask
+        logger.info("Creating Flask application | إنشاء تطبيق Flask")
         app = create_app()
         if not app:
             logger.error("Failed to create Flask application | فشل في إنشاء تطبيق Flask")
