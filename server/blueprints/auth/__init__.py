@@ -6,7 +6,6 @@ import logging
 import os
 import psycopg2
 from datetime import datetime, timedelta
-import traceback
 import random
 import string
 
@@ -18,8 +17,8 @@ logger.setLevel(logging.INFO)
 auth_bp = Blueprint('silvarium_auth', __name__, url_prefix='/api/auth')
 
 def generate_verification_code():
-    """Generate a 6-digit verification code | توليد رمز تحقق من 6 أرقام"""
-    return ''.join(random.choices(string.digits, k=6))
+    """Generate a 4-digit verification code | توليد رمز تحقق من 4 أرقام"""
+    return ''.join(random.choices(string.digits, k=4))
 
 def get_bilingual_message(ar_msg: str, en_msg: str) -> dict:
     """Return bilingual message format"""
@@ -277,7 +276,7 @@ def init_auth(app):
                 status VARCHAR(50) DEFAULT 'active',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 phone_number VARCHAR(20) UNIQUE,
-                verification_code VARCHAR(6),
+                verification_code VARCHAR(4),
                 verification_code_expires_at TIMESTAMP
             )
         """)

@@ -62,10 +62,14 @@ def init_firebase(logger) -> bool:
             os.environ['FIREBASE_PRIVATE_KEY'] = cred_dict['private_key']
             os.environ['FIREBASE_CLIENT_EMAIL'] = cred_dict['client_email']
 
-            # Initialize Firebase with error handling
+            # Initialize Firebase with SMS settings
             try:
                 cred = credentials.Certificate(service_account_path)
-                firebase_admin.initialize_app(cred)
+                firebase_admin.initialize_app(cred, {
+                    'auth_settings': {
+                        'sms_verification_message': 'يرجى استخدام الرقم المؤقت لاستعادة كلمة المرور: %CODE%'
+                    }
+                })
                 logger.info(f"Firebase initialized successfully for project: {cred_dict['project_id']}")
                 return True
             except Exception as firebase_error:
@@ -121,8 +125,11 @@ def create_app(testing=False):
         # Try to find an available port
         try:
             start_port = int(os.getenv('PORT', str(DEFAULT_PORT)))
-            port = find_available_port(start_port)
-            logger.info(f"Found available port: {port}")
+            if not wait_for_port(start_port):
+                port = find_available_port(start_port)
+            else:
+                port = start_port
+            logger.info(f"Using port: {port}")
         except Exception as e:
             logger.error(f"Failed to find available port: {str(e)}")
             return None

@@ -2,10 +2,14 @@
 import os
 import sys
 import logging
+import traceback
 from logging.handlers import RotatingFileHandler
 from waitress import serve
 import socket
 import time
+import json
+import firebase_admin
+from firebase_admin import credentials, auth
 
 # Add project root to Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -37,6 +41,37 @@ console_handler = logging.StreamHandler()
 console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 
+def init_firebase():
+    """Initialize Firebase with SMS configuration"""
+    try:
+        if not firebase_admin._apps:
+            service_account_path = 'attached_assets/silva-deb1c-firebase-adminsdk-g19p8-5d6dc42cd6.json'
+
+            if not os.path.exists(service_account_path):
+                logger.error("Service account file not found")
+                return False
+
+            with open(service_account_path, 'r') as file:
+                cred_dict = json.load(file)
+
+            # Set environment variables
+            os.environ['FIREBASE_PROJECT_ID'] = cred_dict['project_id']
+            os.environ['FIREBASE_PRIVATE_KEY'] = cred_dict['private_key']
+            os.environ['FIREBASE_CLIENT_EMAIL'] = cred_dict['client_email']
+
+            cred = credentials.Certificate(service_account_path)
+            firebase_admin.initialize_app(cred, {
+                'auth_settings': {
+                    'sms_verification_message': 'يرجى استخدام الرقم المؤقت لاستعادة كلمة المرور: %CODE%'
+                }
+            })
+            logger.info(f"Firebase initialized successfully for project: {cred_dict['project_id']}")
+            return True
+    except Exception as e:
+        logger.error(f"Firebase initialization error: {str(e)}")
+        logger.error(traceback.format_exc())
+        return False
+
 def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = WAIT_FOR_PORT_TIMEOUT) -> bool:
     """Wait for port availability | انتظار حتى يصبح المنفذ متاحاً"""
     start_time = time.time()
@@ -60,13 +95,22 @@ def main():
         # Set production environment
         os.environ['FLASK_ENV'] = 'production'
 
-        # Always set wait_for_port to true
+        # Always set wait_for_port to true in production
         os.environ['WAIT_FOR_PORT'] = 'true'
 
         logger.info("Starting Silvarium Social production server")
 
-        # Use configured port
-        port = int(os.getenv('PORT', str(DEFAULT_PORT)))
+        # Initialize Firebase first
+        if not init_firebase():
+            logger.error("Failed to initialize Firebase")
+            return 1
+
+        # Use configured port or default to 5000
+        try:
+            port = int(os.getenv('PORT', str(DEFAULT_PORT)))
+        except ValueError:
+            logger.warning("Invalid PORT environment variable, using default port 5000")
+            port = DEFAULT_PORT
 
         # Always wait for port availability
         if not wait_for_port(port):

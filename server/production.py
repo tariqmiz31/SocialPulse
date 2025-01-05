@@ -5,6 +5,7 @@ import time
 import socket
 import logging
 import json
+import traceback
 from logging.handlers import RotatingFileHandler
 from flask import Flask
 from flask_cors import CORS
@@ -72,6 +73,19 @@ def main() -> int:
     try:
         # Set production environment
         os.environ['FLASK_ENV'] = 'production'
+
+        # Initialize Firebase credentials from environment
+        service_account_path = 'attached_assets/silva-deb1c-firebase-adminsdk-g19p8-5d6dc42cd6.json'
+        if os.path.exists(service_account_path):
+            with open(service_account_path, 'r') as file:
+                cred_dict = json.load(file)
+                os.environ['FIREBASE_PROJECT_ID'] = cred_dict['project_id']
+                os.environ['FIREBASE_PRIVATE_KEY'] = cred_dict['private_key']
+                os.environ['FIREBASE_CLIENT_EMAIL'] = cred_dict['client_email']
+                logger.info("Firebase credentials loaded successfully")
+        else:
+            logger.error("Firebase service account file not found")
+            return 1
 
         # Always set wait_for_port to true in production
         os.environ['WAIT_FOR_PORT'] = 'true'
