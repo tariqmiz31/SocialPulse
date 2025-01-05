@@ -7,14 +7,93 @@ import os
 import psycopg2
 from datetime import datetime
 import traceback
-from .firebase_service import firebase_auth
 
-# إعداد التسجيل
+# Setup logging
 logger = logging.getLogger('silvarium_auth')
 logger.setLevel(logging.INFO)
 
-auth_bp = Blueprint('auth', __name__, url_prefix='/api/auth')
+# Create blueprint with unique name
+auth_bp = Blueprint('silvarium_auth', __name__, url_prefix='/api/auth')
 login_manager = LoginManager()
+
+def init_auth(app):
+    """تهيئة المصادقة | Initialize authentication"""
+    try:
+        # Initialize login manager if not already initialized
+        if not hasattr(app, 'login_manager'):
+            login_manager.init_app(app)
+            app.login_manager = login_manager
+            logger.info("تم تهيئة مدير تسجيل الدخول")
+
+            # Set login view
+            login_manager.login_view = 'silvarium_auth.login'
+
+            @login_manager.user_loader
+            def load_user(user_id):
+                try:
+                    conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+                    cur = conn.cursor()
+
+                    cur.execute("""
+                        SELECT id, username, password, role, is_approved, status 
+                        FROM users 
+                        WHERE id = %s
+                    """, (user_id,))
+
+                    user_data = cur.fetchone()
+                    cur.close()
+                    conn.close()
+
+                    if user_data:
+                        return User(
+                            id=user_data[0],
+                            username=user_data[1],
+                            password=user_data[2],
+                            role=user_data[3],
+                            is_approved=user_data[4],
+                            status=user_data[5]
+                        )
+                    return None
+
+                except Exception as e:
+                    logger.error(f"خطأ في تحميل المستخدم: {str(e)}")
+                    return None
+
+        # Create users table if not exists
+        conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+        cur = conn.cursor()
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id SERIAL PRIMARY KEY,
+                username VARCHAR(255) UNIQUE NOT NULL,
+                password VARCHAR(255) NOT NULL,
+                role VARCHAR(50) DEFAULT 'user',
+                is_approved BOOLEAN DEFAULT true,
+                status VARCHAR(50) DEFAULT 'active',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                phone_number VARCHAR(20) UNIQUE
+            )
+        """)
+
+        conn.commit()
+        cur.close()
+        conn.close()
+        logger.info("تم التأكد من وجود جدول المستخدمين")
+
+        # Register blueprint only if not already registered
+        if 'silvarium_auth' not in app.blueprints:
+            app.register_blueprint(auth_bp)
+            logger.info("تم تسجيل مخطط المصادقة")
+
+        return app
+
+    except Exception as e:
+        logger.error(f"خطأ في تهيئة المصادقة: {str(e)}")
+        return app
+
+# Import firebase service after blueprint creation to avoid circular imports
+from .firebase_service import firebase_auth
 
 def get_bilingual_message(ar_msg: str, en_msg: str) -> dict:
     """Return bilingual message format"""
@@ -71,83 +150,6 @@ class User:
         except Exception as e:
             logger.error(f"خطأ في البحث عن المستخدم: {str(e)}")
             return None
-
-def init_auth(app):
-    """تهيئة المصادقة"""
-    global login_manager
-
-    if hasattr(app, 'login_manager'):
-        logger.info("Login manager already initialized")
-        return app
-
-    # Initialize login manager
-    login_manager.init_app(app)
-    app.login_manager = login_manager
-    logger.info("تم تهيئة مدير تسجيل الدخول")
-
-    # Set login view
-    login_manager.login_view = 'auth.login'
-
-    @login_manager.user_loader
-    def load_user(user_id):
-        try:
-            conn = psycopg2.connect(os.getenv('DATABASE_URL'))
-            cur = conn.cursor()
-
-            cur.execute("""
-                SELECT id, username, password, role, is_approved, status 
-                FROM users 
-                WHERE id = %s
-            """, (user_id,))
-
-            user_data = cur.fetchone()
-            cur.close()
-            conn.close()
-
-            if user_data:
-                return User(
-                    id=user_data[0],
-                    username=user_data[1],
-                    password=user_data[2],
-                    role=user_data[3],
-                    is_approved=user_data[4],
-                    status=user_data[5]
-                )
-            return None
-
-        except Exception as e:
-            logger.error(f"خطأ في تحميل المستخدم: {str(e)}")
-            return None
-
-    # التأكد من وجود جدول المستخدمين
-    try:
-        conn = psycopg2.connect(os.getenv('DATABASE_URL'))
-        cur = conn.cursor()
-
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                id SERIAL PRIMARY KEY,
-                username VARCHAR(255) UNIQUE NOT NULL,
-                password VARCHAR(255) NOT NULL,
-                role VARCHAR(50) DEFAULT 'user',
-                is_approved BOOLEAN DEFAULT true,
-                status VARCHAR(50) DEFAULT 'active',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                phone_number VARCHAR(20) UNIQUE
-            )
-        """)
-
-        conn.commit()
-        cur.close()
-        conn.close()
-        logger.info("تم التأكد من وجود جدول المستخدمين")
-    except Exception as e:
-        logger.error(f"خطأ في إنشاء جدول المستخدمين: {str(e)}")
-
-    # Only register routes through blueprint registration
-    app.register_blueprint(auth_bp)
-    logger.info("تم تسجيل مخطط المصادقة")
-    return app
 
 # Define routes below
 @auth_bp.route('/login', methods=['POST'])

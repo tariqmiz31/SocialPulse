@@ -7,60 +7,37 @@ from datetime import timedelta
 import logging
 from logging.handlers import RotatingFileHandler
 from server.routes import setup_routes
-from server.blueprints.auth import auth_bp, init_auth
 from server.config import config
-import socket
-import time
-
-def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 60) -> bool:
-    """Wait until port becomes available | انتظار حتى يصبح المنفذ متاحاً"""
-    logger = logging.getLogger('silvarium')
-    start_time = time.time()
-
-    while True:
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                result = sock.connect_ex((host, port))
-                if result != 0:  # Port is available
-                    logger.info(f"Port {port} is available | المنفذ {port} متاح للاستخدام")
-                    return True
-                if time.time() - start_time >= timeout:
-                    logger.error(f"Port {port} is not available | المنفذ {port} غير متاح")
-                    return False
-                logger.info(f"Waiting for port {port}... | انتظار المنفذ {port}...")
-                time.sleep(1)
-        except Exception as e:
-            logger.error(f"Error checking port {port}: {str(e)} | خطأ في فحص المنفذ {port}: {str(e)}")
-            return False
 
 def create_app(testing=False):
     """Create and configure Flask application | إنشاء وتكوين تطبيق Flask"""
-    logger = None
+    # Initialize logger first
+    logger = logging.getLogger('silvarium')
+    logger.setLevel(logging.INFO)
+
+    if not testing:
+        # Setup logging handlers
+        if not os.path.exists('/tmp/logs'):
+            os.makedirs('/tmp/logs')
+
+        formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
+
+        file_handler = RotatingFileHandler(
+            '/tmp/logs/silvarium.log',
+            maxBytes=1024 * 1024,
+            backupCount=5
+        )
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
+
     try:
         # Determine environment | تحديد بيئة التشغيل
         env = os.getenv('FLASK_ENV', 'development')
         app_config = config[env]
-
-        # Setup logging | إعداد التسجيل
-        if not testing:
-            logger = logging.getLogger('silvarium')
-            logger.setLevel(logging.INFO)
-            formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
-
-            if not os.path.exists('/tmp/logs'):
-                os.makedirs('/tmp/logs')
-
-            file_handler = RotatingFileHandler(
-                '/tmp/logs/silvarium.log',
-                maxBytes=1024 * 1024,
-                backupCount=5
-            )
-            file_handler.setFormatter(formatter)
-            logger.addHandler(file_handler)
-
-            console_handler = logging.StreamHandler()
-            console_handler.setFormatter(formatter)
-            logger.addHandler(console_handler)
 
         # Create application | إنشاء التطبيق
         app = Flask(__name__, static_folder='../client/dist', static_url_path='/')
@@ -76,59 +53,35 @@ def create_app(testing=False):
             SECRET_KEY=app_config.SECRET_KEY,
             DEBUG=app_config.DEBUG,
             PORT=int(os.getenv('PORT', str(app_config.PORT))),
-            HOST='0.0.0.0',
-            TESTING=testing,
-            WAIT_FOR_PORT=True,  # Always enable port waiting | تمكين انتظار المنفذ دائماً
-            DEFAULT_LANGUAGE='ar'  # Set Arabic as default language | تعيين العربية كلغة افتراضية
+            HOST='0.0.0.0'
         )
 
-        # Set default language | تعيين اللغة الافتراضية
-        @app.before_request
-        def set_default_language():
-            if 'language' not in session:
-                session['language'] = app_config.DEFAULT_LANGUAGE
-
         # Setup CORS | إعداد CORS
-        CORS(app, 
-             supports_credentials=True,
-             resources={
-                 r"/api/*": {
-                     "origins": app_config.CORS_ORIGINS,
-                     "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-                     "allow_headers": ["Content-Type", "Authorization"],
-                     "expose_headers": ["Content-Range", "X-Content-Range"],
-                     "supports_credentials": True
-                 }
-             })
-
-        # Create session directory | إنشاء مجلد الجلسات
-        if not testing and not os.path.exists(app_config.SESSION_FILE_DIR):
-            os.makedirs(app_config.SESSION_FILE_DIR)
+        CORS(app, supports_credentials=True)
 
         # Setup session | إعداد الجلسة
+        if not testing and not os.path.exists(app_config.SESSION_FILE_DIR):
+            os.makedirs(app_config.SESSION_FILE_DIR)
         Session(app)
 
-        # Initialize authentication | تهيئة المصادقة
-        app = init_auth(app)
-
-        # Register blueprints | تسجيل المخططات
-        if 'auth' not in app.blueprints:
-            app.register_blueprint(auth_bp)
-            if logger:
-                logger.info('تم تسجيل مخطط المصادقة | Auth blueprint registered')
-
-        # Setup routes | إعداد المسارات
+        # Initialize routes | إعداد المسارات
         app = setup_routes(app)
+        logger.info("تم إعداد المسارات")
 
-        if logger:
-            logger.info('Application initialized successfully | تم تهيئة التطبيق بنجاح')
-            logger.info(f'Application configured to run on {app.config["HOST"]}:{app.config["PORT"]} | التطبيق مكون للعمل على {app.config["HOST"]}:{app.config["PORT"]}')
+        # Initialize authentication after routes | تهيئة المصادقة بعد المسارات
+        from server.blueprints.auth import init_auth
+        app = init_auth(app)
+        if app:
+            logger.info("تم تهيئة المصادقة")
+        else:
+            logger.error("فشل في تهيئة المصادقة")
+            return None
 
+        logger.info("تم تهيئة التطبيق بنجاح")
         return app
 
     except Exception as e:
-        if logger:
-            logger.error(f'Application initialization error: {str(e)} | خطأ في تهيئة التطبيق: {str(e)}')
+        logger.error(f"خطأ في تهيئة التطبيق: {str(e)}")
         return None
 
 if __name__ == '__main__':
