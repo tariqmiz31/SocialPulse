@@ -32,11 +32,20 @@ def create_app(testing=False):
     load_dotenv()
 
     # Verify required Firebase environment variables
-    required_env_vars = ['FIREBASE_PROJECT_ID', 'FIREBASE_PRIVATE_KEY', 'FIREBASE_CLIENT_EMAIL']
+    required_env_vars = [
+        'FIREBASE_PROJECT_ID', 
+        'FIREBASE_PRIVATE_KEY', 
+        'FIREBASE_CLIENT_EMAIL',
+        'VITE_FIREBASE_API_KEY',
+        'VITE_FIREBASE_PROJECT_ID'
+    ]
     missing_vars = [var for var in required_env_vars if not os.getenv(var)]
 
     if missing_vars:
-        raise EnvironmentError(f"Missing required environment variables: {', '.join(missing_vars)}")
+        raise EnvironmentError(
+            f"المتغيرات البيئية المطلوبة مفقودة: {', '.join(missing_vars)} | "
+            f"Missing required environment variables: {', '.join(missing_vars)}"
+        )
 
     # Initialize logger first
     logger = logging.getLogger('silvarium')

@@ -27,6 +27,9 @@ logger.addHandler(console_handler)
 # Load environment variables first
 load_dotenv()
 
+# Force wait for port
+os.environ['WAIT_FOR_PORT'] = 'true'
+
 # Verify required Firebase environment variables
 required_env_vars = ['FIREBASE_PROJECT_ID', 'FIREBASE_PRIVATE_KEY', 'FIREBASE_CLIENT_EMAIL']
 missing_vars = [var for var in required_env_vars if not os.getenv(var)]
@@ -62,7 +65,6 @@ def main():
     try:
         # Set production mode | تعيين وضع الإنتاج
         os.environ['FLASK_ENV'] = 'production'
-        os.environ['WAIT_FOR_PORT'] = 'true'
 
         # Get port | الحصول على المنفذ
         port = int(os.getenv('PORT', '5000'))
