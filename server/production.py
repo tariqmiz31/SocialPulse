@@ -9,40 +9,36 @@ from logging.handlers import RotatingFileHandler
 from flask import Flask
 from flask_cors import CORS
 from waitress import serve
-import firebase_admin
-from firebase_admin import credentials
-from dotenv import load_dotenv
 
-def setup_logging():
-    """Sets up logging with rotation | إعداد التسجيل مع التدوير"""
-    log_dir = '/tmp/logs'
-    if not os.path.exists(log_dir):
-        os.makedirs(log_dir)
+# Add project root to Python path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(current_dir)
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
-    logger = logging.getLogger('silvarium_production')
-    logger.setLevel(logging.INFO)
+# Setup logging
+logger = logging.getLogger('silvarium_production')
+logger.setLevel(logging.INFO)
 
-    formatter = logging.Formatter(
-        '%(asctime)s [%(levelname)s] %(message)s'
-    )
+# Create logs directory if it doesn't exist
+if not os.path.exists('/tmp/logs'):
+    os.makedirs('/tmp/logs')
 
-    file_handler = RotatingFileHandler(
-        f'{log_dir}/silvarium.log',
-        maxBytes=10*1024*1024,  # 10MB
-        backupCount=5
-    )
-    file_handler.setFormatter(formatter)
-    logger.addHandler(file_handler)
+formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
 
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
-    logger.addHandler(console_handler)
+file_handler = RotatingFileHandler(
+    '/tmp/logs/silvarium.log',
+    maxBytes=10*1024*1024,  # 10MB
+    backupCount=5
+)
+file_handler.setFormatter(formatter)
+logger.addHandler(file_handler)
 
-    return logger
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(formatter)
+logger.addHandler(console_handler)
 
-logger = setup_logging()
-
-def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
+def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 30) -> bool:
     """Wait until port becomes available | انتظار حتى يصبح المنفذ متاحاً"""
     start_time = time.time()
     while time.time() - start_time < timeout:
@@ -53,106 +49,62 @@ def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
                 logger.info(f"Port {port} is available | المنفذ {port} متاح")
                 return True
         except socket.error:
-            logger.info(f"Waiting for port {port}... | انتظار المنفذ {port}...")
             time.sleep(1)
 
-    logger.error(f"Port {port} is not available after timeout | المنفذ {port} غير متاح بعد انتهاء المهلة")
+    logger.error(f"Port {port} is not available | المنفذ {port} غير متاح")
     return False
 
-def init_firebase() -> bool:
-    """Initialize Firebase | تهيئة Firebase"""
-    try:
-        if not firebase_admin._apps:
-            # Load service account JSON file | تحميل ملف حساب الخدمة
-            service_account_path = 'attached_assets/silva-deb1c-firebase-adminsdk-g19p8-5d6dc42cd6.json'
-
-            if not os.path.exists(service_account_path):
-                logger.error("Service account file not found | ملف حساب الخدمة غير موجود")
-                return False
-
-            with open(service_account_path, 'r') as file:
-                cred_dict = json.load(file)
-
-            # Set environment variables from service account file
-            os.environ['FIREBASE_PROJECT_ID'] = cred_dict['project_id']
-            os.environ['FIREBASE_PRIVATE_KEY'] = cred_dict['private_key']
-            os.environ['FIREBASE_CLIENT_EMAIL'] = cred_dict['client_email']
-
-            # Log Firebase initialization
-            logger.info(f"Initializing Firebase with project: {cred_dict['project_id']}")
-            cred = credentials.Certificate(cred_dict)
-            firebase_admin.initialize_app(cred)
-            logger.info("Firebase initialized successfully | تم تهيئة Firebase بنجاح")
-
-            # Verify initialization
-            try:
-                firebase_admin.get_app()
-                logger.info("Firebase app verification successful")
-                return True
-            except ValueError:
-                logger.error("Firebase app verification failed")
-                return False
-
-        return True
-    except Exception as e:
-        logger.error(f"Firebase initialization error: {str(e)} | خطأ في تهيئة Firebase: {str(e)}")
-        return False
-
-def init_server() -> Flask:
-    """Initialize Flask server with all configurations | تهيئة خادم Flask مع جميع الإعدادات"""
-    try:
-        from server import create_app
-        app = create_app()
-        if not app:
-            logger.error("Failed to create Flask application | فشل في إنشاء تطبيق Flask")
-            return None
-
-        logger.info("Flask application created successfully")
-        return app
-    except Exception as e:
-        logger.error(f"Server initialization error: {str(e)} | خطأ في تهيئة الخادم: {str(e)}")
-        return None
+def find_available_port(start_port: int = 5000, max_attempts: int = 10) -> int:
+    """Find an available port | البحث عن منفذ متاح"""
+    for port in range(start_port, start_port + max_attempts):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.bind(('0.0.0.0', port))
+                sock.close()
+                logger.info(f"Found available port: {port}")
+                return port
+        except socket.error:
+            continue
+    raise RuntimeError(f"No available ports found between {start_port} and {start_port + max_attempts}")
 
 def main() -> int:
     """Main entry point | النقطة الرئيسية لبدء التشغيل"""
     try:
-        # Set production mode | تعيين وضع الإنتاج
+        # Set production environment
         os.environ['FLASK_ENV'] = 'production'
         os.environ['WAIT_FOR_PORT'] = 'true'
 
-        # Load environment variables | تحميل المتغيرات البيئية
-        load_dotenv()
-        logger.info("Starting Silvarium Social server | بدء تشغيل خادم Silvarium Social")
+        logger.info("Starting Silvarium Social production server")
 
-        # Check required environment variables | التحقق من المتغيرات البيئية المطلوبة
-        if not os.getenv('DATABASE_URL'):
-            logger.error("DATABASE_URL not found | لم يتم العثور على DATABASE_URL")
-            return 1
+        # Use configured port or find available one
+        try:
+            port = int(os.getenv('PORT', '5000'))
+        except ValueError:
+            logger.warning("Invalid PORT environment variable, using default port 5000")
+            port = 5000
 
-        # Initialize Firebase for SMS verification | تهيئة Firebase للتحقق عبر SMS
-        if not init_firebase():
-            logger.error("Failed to initialize Firebase | فشل في تهيئة Firebase")
-            return 1
-
-        # Get port configuration | الحصول على إعدادات المنفذ
-        port = int(os.getenv('PORT', '5000'))
-
-        # Wait for port availability | انتظار توفر المنفذ
         if not wait_for_port(port):
-            logger.error(f"Port {port} is not available | المنفذ {port} غير متاح")
-            return 1
+            logger.warning(f"Port {port} is not available, searching for available port...")
+            try:
+                port = find_available_port(5000)
+            except RuntimeError as e:
+                logger.error(str(e))
+                return 1
 
-        # Initialize server | تهيئة الخادم
-        app = init_server()
+        # Create Flask app
+        logger.info("Creating Flask application | إنشاء تطبيق Flask")
+        from server import create_app
+        app = create_app()
         if not app:
+            logger.error("Failed to create Flask application | فشل في إنشاء تطبيق Flask")
             return 1
 
-        # Signal ready | إشارة الجاهزية
+        # Signal ready
+        logger.info('Server is ready | الخادم جاهز')
         print('ready')
         sys.stdout.flush()
 
-        # Start production server | بدء خادم الإنتاج
-        logger.info(f"Starting production server on port {port}")
+        # Start server with waitress
         serve(
             app,
             host='0.0.0.0',

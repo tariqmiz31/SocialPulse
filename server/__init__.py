@@ -15,7 +15,11 @@ import json
 import firebase_admin
 from firebase_admin import credentials
 
-def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
+# Global configuration
+DEFAULT_PORT = 5000  # Changed to 5000 as it's commonly available
+WAIT_FOR_PORT_TIMEOUT = 30
+
+def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = WAIT_FOR_PORT_TIMEOUT) -> bool:
     """Wait for port to be available | انتظار حتى يصبح المنفذ متاحاً"""
     start_time = time.time()
     while time.time() - start_time < timeout:
@@ -27,6 +31,18 @@ def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
         except socket.error:
             time.sleep(1)
     return False
+
+def find_available_port(start_port: int = DEFAULT_PORT, max_attempts: int = 10) -> int:
+    """Find an available port starting from the given port | البحث عن منفذ متاح بدءاً من المنفذ المحدد"""
+    for port in range(start_port, start_port + max_attempts):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.bind(('0.0.0.0', port))
+                sock.close()
+                return port
+        except socket.error:
+            continue
+    raise RuntimeError(f"No available ports found between {start_port} and {start_port + max_attempts}")
 
 def init_firebase(logger) -> bool:
     """Initialize Firebase | تهيئة Firebase"""
@@ -46,11 +62,15 @@ def init_firebase(logger) -> bool:
             os.environ['FIREBASE_PRIVATE_KEY'] = cred_dict['private_key']
             os.environ['FIREBASE_CLIENT_EMAIL'] = cred_dict['client_email']
 
-            # Initialize Firebase
-            cred = credentials.Certificate(cred_dict)
-            firebase_admin.initialize_app(cred)
-            logger.info(f"Firebase initialized successfully for project: {cred_dict['project_id']}")
-            return True
+            # Initialize Firebase with error handling
+            try:
+                cred = credentials.Certificate(cred_dict)
+                firebase_admin.initialize_app(cred)
+                logger.info(f"Firebase initialized successfully for project: {cred_dict['project_id']}")
+                return True
+            except Exception as firebase_error:
+                logger.error(f"Firebase initialization failed: {str(firebase_error)}")
+                return False
 
         return True
     except Exception as e:
@@ -99,14 +119,22 @@ def create_app(testing=False):
         app = Flask(__name__, static_folder='../client/dist', static_url_path='/')
 
         # Configure application | تكوين التطبيق
-        port = int(os.getenv('PORT', str(app_config.PORT)))
+        try:
+            port = int(os.getenv('PORT', str(DEFAULT_PORT)))
+        except ValueError:
+            logger.warning(f"Invalid PORT environment variable, using default port {DEFAULT_PORT}")
+            port = DEFAULT_PORT
 
-        # Always wait for port | دائماً انتظر المنفذ
+        # Find available port if the specified port is not available
         if os.getenv('WAIT_FOR_PORT', 'true').lower() == 'true':
             if not wait_for_port(port):
-                logger.error(f"Port {port} is not available")
-                return None
-            logger.info(f"Port {port} is available")
+                logger.warning(f"Port {port} is not available, searching for available port...")
+                try:
+                    port = find_available_port(DEFAULT_PORT)
+                    logger.info(f"Found available port: {port}")
+                except RuntimeError as e:
+                    logger.error(str(e))
+                    return None
 
         app.config.update(
             SESSION_TYPE=app_config.SESSION_TYPE,
@@ -142,7 +170,7 @@ def create_app(testing=False):
             logger.error("Failed to initialize authentication")
             return None
 
-        logger.info("Application initialized successfully")
+        logger.info(f"Application initialized successfully on port {port}")
         return app
 
     except Exception as e:

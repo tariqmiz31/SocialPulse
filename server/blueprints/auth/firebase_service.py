@@ -6,6 +6,7 @@ import json
 import logging
 from typing import Optional, Dict, Any, Tuple
 import time
+import asyncio
 from datetime import datetime, timedelta
 
 logger = logging.getLogger('silvarium_auth')
@@ -18,30 +19,30 @@ class FirebaseAuthService:
             service_account_path = 'attached_assets/silva-deb1c-firebase-adminsdk-g19p8-5d6dc42cd6.json'
 
             if not os.path.exists(service_account_path):
+                logger.error("Service account file not found | ملف حساب الخدمة غير موجود")
                 raise ValueError("Service account file not found")
 
             with open(service_account_path, 'r') as file:
                 cred_dict = json.load(file)
 
             logger.info("جاري تهيئة Firebase بالبيانات التالية | Initializing Firebase with credentials")
-            logger.info(f"Project ID: {cred_dict['project_id']}")
-            logger.info(f"Client Email: {cred_dict['client_email']}")
+            logger.info(f"Project ID: {cred_dict.get('project_id')}")
+            logger.info(f"Client Email: {cred_dict.get('client_email')}")
 
-            # Initialize Firebase Admin SDK
-            cred = credentials.Certificate(cred_dict)
+            # Initialize Firebase Admin SDK if not already initialized
             if not firebase_admin._apps:
+                cred = credentials.Certificate(service_account_path)
                 firebase_admin.initialize_app(cred)
                 logger.info("تم تهيئة خدمة Firebase بنجاح | Firebase service initialized successfully")
+            else:
+                logger.info("Firebase already initialized | تم تهيئة Firebase مسبقاً")
 
-        except ValueError as ve:
-            logger.error(f"خطأ في تنسيق بيانات الاعتماد: {str(ve)} | Credential format error: {str(ve)}")
-            raise
         except Exception as e:
             logger.error(f"خطأ في تهيئة Firebase: {str(e)} | Firebase initialization error: {str(e)}")
             raise
 
-    async def send_verification_code(self, phone_number: str) -> Dict[str, Any]:
-        """إرسال رمز التحقق عبر SMS | Send verification code via SMS"""
+    def send_verification_code_sync(self, phone_number: str) -> Dict[str, Any]:
+        """Synchronous version of send verification code"""
         try:
             # التحقق من تنسيق رقم الهاتف | Validate phone number format
             if not phone_number.startswith('+'):
@@ -101,15 +102,6 @@ class FirebaseAuthService:
                     'en': 'Phone number is already in use'
                 }
             }
-        except auth.QuotaExceededError:
-            logger.error(f"تم تجاوز الحد الأقصى لعدد الرسائل: {phone_number}")
-            return {
-                'success': False,
-                'message': {
-                    'ar': 'تم تجاوز الحد الأقصى لعدد محاولات التحقق، يرجى المحاولة لاحقاً',
-                    'en': 'SMS quota exceeded, please try again later'
-                }
-            }
         except Exception as e:
             logger.error(f"خطأ في إرسال رمز التحقق: {str(e)}")
             return {
@@ -119,6 +111,12 @@ class FirebaseAuthService:
                     'en': 'Failed to send verification code, please try again'
                 }
             }
+
+    async def send_verification_code(self, phone_number: str) -> Dict[str, Any]:
+        """Asynchronous version of send verification code"""
+        # Use synchronous version in a thread pool to avoid blocking
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self.send_verification_code_sync, phone_number)
 
     def verify_phone_number(self, phone_number: str, verification_id: str, code: str) -> Tuple[bool, Optional[str]]:
         """التحقق من رقم الهاتف والرمز | Verify phone number and code"""
@@ -214,5 +212,10 @@ class FirebaseAuthService:
             logger.error(f"خطأ في ربط رقم الهاتف: {str(e)}")
             return False, f"خطأ في ربط رقم الهاتف | Error linking phone number: {str(e)}"
 
-# Initialize Firebase Auth Service
-firebase_auth = FirebaseAuthService()
+# Initialize Firebase Auth Service with error handling
+try:
+    firebase_auth = FirebaseAuthService()
+    logger.info("Firebase Auth Service initialized successfully")
+except Exception as e:
+    logger.error(f"Failed to initialize Firebase Auth Service: {str(e)}")
+    firebase_auth = None
