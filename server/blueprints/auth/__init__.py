@@ -8,6 +8,8 @@ import psycopg2
 from datetime import datetime, timedelta
 import random
 import string
+import time
+import traceback
 
 # Setup logging
 logger = logging.getLogger('silvarium_auth')
@@ -50,45 +52,51 @@ def send_verification_code():
         conn = psycopg2.connect(os.getenv('DATABASE_URL'))
         cur = conn.cursor()
 
-        # Store verification code in database
+        # Check if phone number exists in database
         cur.execute("""
-            UPDATE users 
-            SET verification_code = %s, 
-                verification_code_expires_at = %s 
-            WHERE phone_number = %s 
-            RETURNING id
-        """, (verification_code, expires_at, phone_number))
+            SELECT id, username FROM users 
+            WHERE phone_number = %s
+        """, (phone_number,))
 
-        user_exists = cur.fetchone() is not None
+        user = cur.fetchone()
 
-        if not user_exists:
-            # If no user exists with this phone number, create a temporary record
+        if user:
+            # Update existing user's verification code
             cur.execute("""
-                INSERT INTO users (phone_number, verification_code, verification_code_expires_at)
-                VALUES (%s, %s, %s)
-            """, (phone_number, verification_code, expires_at))
+                UPDATE users 
+                SET verification_code = %s, 
+                    verification_code_expires_at = %s 
+                WHERE id = %s
+            """, (verification_code, expires_at, user[0]))
+        else:
+            # Create temporary user record with phone number and verification code
+            temp_username = f"temp_{phone_number}_{int(time.time())}"
+            temp_password = generate_password_hash('temp_password')
+
+            cur.execute("""
+                INSERT INTO users (username, password, phone_number, verification_code, verification_code_expires_at, role, status)
+                VALUES (%s, %s, %s, %s, %s, 'user', 'pending')
+            """, (temp_username, temp_password, phone_number, verification_code, expires_at))
 
         conn.commit()
         cur.close()
         conn.close()
 
         # In a real application, you would send the SMS here
-        logger.info(f"Verification code for {phone_number}: {verification_code}")
+        logger.info(f"رمز التحقق للرقم {phone_number}: {verification_code}")
 
-        return jsonify({
-            'success': True,
-            'message': {
-                'ar': 'تم إرسال رمز التحقق بنجاح',
-                'en': 'Verification code sent successfully'
-            }
-        })
+        return jsonify(get_bilingual_message(
+            "تم إرسال رمز التحقق بنجاح",
+            "Verification code sent successfully"
+        ))
 
     except Exception as e:
         logger.error(f"خطأ في إرسال رمز التحقق: {str(e)}")
-        logger.error(traceback.format_exc())
+        if 'conn' in locals():
+            conn.close()
         return jsonify(get_bilingual_message(
-            "خطأ داخلي في الخادم",
-            "Internal server error"
+            "خطأ في إرسال رمز التحقق",
+            "Error sending verification code"
         )), 500
 
 @auth_bp.route('/verify-phone', methods=['POST'])

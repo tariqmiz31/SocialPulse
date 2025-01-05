@@ -48,28 +48,44 @@ def init_firebase():
             service_account_path = 'attached_assets/silva-deb1c-firebase-adminsdk-g19p8-5d6dc42cd6.json'
 
             if not os.path.exists(service_account_path):
-                logger.error("Service account file not found")
+                logger.error(f"Service account file not found at path: {service_account_path}")
                 return False
 
-            with open(service_account_path, 'r') as file:
-                cred_dict = json.load(file)
+            try:
+                with open(service_account_path, 'r') as file:
+                    cred_dict = json.load(file)
+                    logger.info("Successfully loaded service account file")
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse service account JSON: {str(e)}")
+                return False
+            except Exception as e:
+                logger.error(f"Error reading service account file: {str(e)}")
+                return False
 
-            # Set environment variables
-            os.environ['FIREBASE_PROJECT_ID'] = cred_dict['project_id']
-            os.environ['FIREBASE_PRIVATE_KEY'] = cred_dict['private_key']
-            os.environ['FIREBASE_CLIENT_EMAIL'] = cred_dict['client_email']
+            try:
+                # Set environment variables
+                os.environ['FIREBASE_PROJECT_ID'] = cred_dict['project_id']
+                os.environ['FIREBASE_PRIVATE_KEY'] = cred_dict['private_key']
+                os.environ['FIREBASE_CLIENT_EMAIL'] = cred_dict['client_email']
 
-            cred = credentials.Certificate(service_account_path)
-            firebase_admin.initialize_app(cred, {
-                'auth_settings': {
-                    'sms_verification_message': 'يرجى استخدام الرقم المؤقت لاستعادة كلمة المرور: %CODE%'
-                }
-            })
-            logger.info(f"Firebase initialized successfully for project: {cred_dict['project_id']}")
-            return True
+                cred = credentials.Certificate(service_account_path)
+                firebase_admin.initialize_app(cred, {
+                    'auth_settings': {
+                        'sms_verification_message': 'يرجى استخدام الرقم المؤقت لاستعادة كلمة المرور: %CODE%',
+                        'code_length': 4
+                    }
+                })
+                logger.info(f"Firebase initialized successfully for project: {cred_dict['project_id']}")
+                return True
+            except Exception as e:
+                logger.error(f"Firebase initialization error: {str(e)}\n{traceback.format_exc()}")
+                return False
+
+        logger.info("Firebase already initialized")
+        return True
+
     except Exception as e:
-        logger.error(f"Firebase initialization error: {str(e)}")
-        logger.error(traceback.format_exc())
+        logger.error(f"Unexpected error in Firebase initialization: {str(e)}\n{traceback.format_exc()}")
         return False
 
 def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = WAIT_FOR_PORT_TIMEOUT) -> bool:
@@ -100,9 +116,10 @@ def main():
 
         logger.info("Starting Silvarium Social production server")
 
-        # Initialize Firebase first
+        # Initialize Firebase first with detailed logging
+        logger.info("Initializing Firebase...")
         if not init_firebase():
-            logger.error("Failed to initialize Firebase")
+            logger.error("Failed to initialize Firebase, checking service account file...")
             return 1
 
         # Use configured port or default to 5000
@@ -154,7 +171,7 @@ def main():
         return 0
 
     except Exception as e:
-        logger.error(f"Error starting server: {str(e)} | خطأ في بدء تشغيل الخادم: {str(e)}")
+        logger.error(f"Error starting server: {str(e)}\n{traceback.format_exc()}")
         return 1
 
 if __name__ == "__main__":

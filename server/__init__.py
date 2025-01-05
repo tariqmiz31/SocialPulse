@@ -48,26 +48,34 @@ def init_firebase(logger) -> bool:
     """Initialize Firebase | تهيئة Firebase"""
     try:
         if not firebase_admin._apps:
+            # Use the service account file from attached_assets
             service_account_path = 'attached_assets/silva-deb1c-firebase-adminsdk-g19p8-5d6dc42cd6.json'
 
             if not os.path.exists(service_account_path):
-                logger.error("Firebase service account file not found | ملف حساب الخدمة غير موجود")
+                logger.error(f"Firebase service account file not found at {service_account_path}")
                 return False
 
-            with open(service_account_path, 'r') as file:
-                cred_dict = json.load(file)
+            try:
+                with open(service_account_path, 'r') as file:
+                    cred_dict = json.load(file)
+            except json.JSONDecodeError as e:
+                logger.error(f"Error parsing service account file: {str(e)}")
+                return False
+            except Exception as e:
+                logger.error(f"Error reading service account file: {str(e)}")
+                return False
 
             # Set environment variables from service account file
             os.environ['FIREBASE_PROJECT_ID'] = cred_dict['project_id']
             os.environ['FIREBASE_PRIVATE_KEY'] = cred_dict['private_key']
             os.environ['FIREBASE_CLIENT_EMAIL'] = cred_dict['client_email']
 
-            # Initialize Firebase with SMS settings
             try:
                 cred = credentials.Certificate(service_account_path)
                 firebase_admin.initialize_app(cred, {
                     'auth_settings': {
-                        'sms_verification_message': 'يرجى استخدام الرقم المؤقت لاستعادة كلمة المرور: %CODE%'
+                        'sms_verification_message': 'يرجى استخدام الرقم المؤقت لاستعادة كلمة المرور: %CODE%',
+                        'code_length': 4
                     }
                 })
                 logger.info(f"Firebase initialized successfully for project: {cred_dict['project_id']}")

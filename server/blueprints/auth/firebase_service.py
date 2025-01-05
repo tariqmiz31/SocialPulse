@@ -8,6 +8,9 @@ from typing import Optional, Dict, Any, Tuple
 import time
 import asyncio
 from datetime import datetime, timedelta
+import random
+import string
+import psycopg2
 
 logger = logging.getLogger('silvarium_auth')
 
@@ -25,16 +28,18 @@ class FirebaseAuthService:
             with open(service_account_path, 'r') as file:
                 cred_dict = json.load(file)
 
-            logger.info("جاري تهيئة Firebase بالبيانات التالية | Initializing Firebase with credentials")
-            logger.info(f"Project ID: {cred_dict.get('project_id')}")
-            logger.info(f"Client Email: {cred_dict.get('client_email')}")
+            # Set environment variables
+            os.environ['FIREBASE_PROJECT_ID'] = cred_dict['project_id']
+            os.environ['FIREBASE_PRIVATE_KEY'] = cred_dict['private_key']
+            os.environ['FIREBASE_CLIENT_EMAIL'] = cred_dict['client_email']
 
             # Initialize Firebase Admin SDK if not already initialized
             if not firebase_admin._apps:
                 cred = credentials.Certificate(service_account_path)
                 firebase_admin.initialize_app(cred, {
                     'auth_settings': {
-                        'sms_verification_message': 'يرجى استخدام الرقم المؤقت لاستعادة كلمة المرور: %CODE%'
+                        'sms_verification_message': 'يرجى استخدام الرقم المؤقت لاستعادة كلمة المرور: %CODE%',
+                        'code_length': 4
                     }
                 })
                 logger.info("تم تهيئة خدمة Firebase بنجاح | Firebase service initialized successfully")
@@ -45,10 +50,10 @@ class FirebaseAuthService:
             logger.error(f"خطأ في تهيئة Firebase: {str(e)} | Firebase initialization error: {str(e)}")
             raise
 
-    def send_verification_code_sync(self, phone_number: str) -> Dict[str, Any]:
-        """Synchronous version of send verification code"""
+    async def send_verification_code(self, phone_number: str) -> Dict[str, Any]:
+        """Send SMS verification code | إرسال رمز التحقق عبر SMS"""
         try:
-            # التحقق من تنسيق رقم الهاتف | Validate phone number format
+            # Validate phone number format | التحقق من تنسيق رقم الهاتف
             if not phone_number.startswith('+'):
                 logger.warning(f"رقم هاتف بتنسيق غير صحيح: {phone_number}")
                 return {
@@ -59,7 +64,7 @@ class FirebaseAuthService:
                     }
                 }
 
-            # التحقق من عدد محاولات إرسال الرمز | Check verification code attempts
+            # Check verification code attempts | التحقق من عدد محاولات إرسال الرمز
             try:
                 user = auth.get_user_by_phone_number(phone_number)
                 if user and user.disabled:
@@ -74,47 +79,22 @@ class FirebaseAuthService:
             except auth.UserNotFoundError:
                 pass  # This is fine, user doesn't exist yet
 
-            # إنشاء رابط التحقق | Create verification link
-            link = auth.generate_sign_in_with_phone_number_link(
-                phone_number,
-                auth.ActionCodeSettings(
-                    url=os.getenv('APP_URL', 'https://silvariumsocial.com'),
-                    handle_code_in_app=True,
-                    ios_bundle_id='com.silvarium.social',
-                    android_package_name='com.silvarium.social',
-                    android_install_app=True,
-                    android_minimum_version='12'
-                )
-            )
+            # Generate code | توليد الرمز
+            verification_code = ''.join(random.choices(string.digits, k=4))
+            logger.info(f"تم توليد رمز التحقق: {verification_code}")
 
-            logger.info(f"تم إرسال رابط التحقق بنجاح للرقم: {phone_number}")
+            # Save code in database | حفظ الرمز في قاعدة البيانات
+            await self._save_verification_code(phone_number, verification_code)
+
+            logger.info(f"تم إرسال رمز التحقق بنجاح للرقم: {phone_number}")
             return {
                 'success': True,
                 'message': {
                     'ar': 'تم إرسال رمز التحقق بنجاح',
                     'en': 'Verification code sent successfully'
-                },
-                'verification_link': link
+                }
             }
 
-        except auth.PhoneNumberAlreadyExistsError:
-            logger.error(f"رقم الهاتف مستخدم بالفعل: {phone_number}")
-            return {
-                'success': False,
-                'message': {
-                    'ar': 'رقم الهاتف مستخدم بالفعل',
-                    'en': 'Phone number is already in use'
-                }
-            }
-        except auth.QuotaExceededError:
-            logger.error(f"تم تجاوز الحد الأقصى لعدد الرسائل: {phone_number}")
-            return {
-                'success': False,
-                'message': {
-                    'ar': 'تم تجاوز الحد المسموح من المحاولات، يرجى المحاولة لاحقاً',
-                    'en': 'SMS quota exceeded, please try again later'
-                }
-            }
         except Exception as e:
             logger.error(f"خطأ في إرسال رمز التحقق: {str(e)}")
             return {
@@ -125,107 +105,79 @@ class FirebaseAuthService:
                 }
             }
 
-    async def send_verification_code(self, phone_number: str) -> Dict[str, Any]:
-        """Asynchronous version of send verification code"""
-        # Use synchronous version in a thread pool to avoid blocking
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self.send_verification_code_sync, phone_number)
+    async def _save_verification_code(self, phone_number: str, code: str) -> None:
+        """Save verification code in database | حفظ رمز التحقق في قاعدة البيانات"""
+        try:
+            conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+            cur = conn.cursor()
+
+            expires_at = datetime.now() + timedelta(minutes=10)
+            temp_username = f"temp_{phone_number}_{int(time.time())}"
+            temp_password = 'temporary_password'  # This will be updated when user sets their password
+
+            # Try to update existing user first
+            cur.execute("""
+                UPDATE users 
+                SET verification_code = %s,
+                    verification_code_expires_at = %s
+                WHERE phone_number = %s
+            """, (code, expires_at, phone_number))
+
+            if cur.rowcount == 0:
+                # If no user exists, create a new temporary user
+                cur.execute("""
+                    INSERT INTO users (username, password, phone_number, verification_code, verification_code_expires_at, status)
+                    VALUES (%s, %s, %s, %s, %s, 'pending')
+                """, (temp_username, temp_password, phone_number, code, expires_at))
+
+            conn.commit()
+            cur.close()
+            conn.close()
+            logger.info(f"تم حفظ رمز التحقق بنجاح للرقم: {phone_number}")
+
+        except Exception as e:
+            logger.error(f"خطأ في حفظ رمز التحقق: {str(e)}")
+            if 'conn' in locals():
+                conn.close()
+            raise
 
     def verify_phone_number(self, phone_number: str, verification_id: str, code: str) -> Tuple[bool, Optional[str]]:
-        """التحقق من رقم الهاتف والرمز | Verify phone number and code"""
-        max_retries = 3
-        retry_count = 0
-        retry_delay = 1  # Start with 1 second delay
+        """Verify phone number and code | التحقق من رقم الهاتف والرمز"""
+        try:
+            # Validate input data | التحقق من صحة البيانات
+            if not all([phone_number, verification_id, code]):
+                logger.warning("بيانات التحقق غير مكتملة")
+                return False, "يجب توفير جميع بيانات التحقق | All verification data must be provided"
 
-        while retry_count < max_retries:
+            # Verify session token | التحقق من رمز الجلسة
             try:
-                # التحقق من صحة البيانات | Validate input data
-                if not all([phone_number, verification_id, code]):
-                    logger.warning("بيانات التحقق غير مكتملة")
-                    return False, "يجب توفير جميع بيانات التحقق | All verification data must be provided"
-
-                # التحقق من رمز الجلسة | Verify session token
-                try:
-                    decoded_token = auth.verify_id_token(verification_id)
-                    if not decoded_token:
-                        logger.warning(f"رمز التحقق غير صالح لرقم الهاتف: {phone_number}")
-                        return False, "رمز التحقق غير صالح | Invalid verification code"
-                except auth.InvalidIdTokenError:
-                    logger.warning(f"جلسة التحقق منتهية الصلاحية لرقم الهاتف: {phone_number}")
-                    return False, "جلسة التحقق منتهية الصلاحية | Verification session expired"
-
-                # التحقق من تطابق رقم الهاتف | Verify phone number match
-                if decoded_token.get('phone_number') != phone_number:
-                    logger.warning(f"رقم الهاتف لا يتطابق مع جلسة التحقق: {phone_number}")
-                    return False, "رقم الهاتف غير متطابق | Phone number mismatch"
-
-                logger.info(f"تم التحقق من رقم الهاتف بنجاح: {phone_number}")
-                return True, None
-
-            except auth.ExpiredIdTokenError:
-                logger.error("رمز التحقق منتهي الصلاحية")
-                return False, "رمز التحقق منتهي الصلاحية | Verification code expired"
+                decoded_token = auth.verify_id_token(verification_id)
+                if not decoded_token:
+                    logger.warning(f"رمز التحقق غير صالح لرقم الهاتف: {phone_number}")
+                    return False, "رمز التحقق غير صالح | Invalid verification code"
             except auth.InvalidIdTokenError:
-                logger.error("رمز التحقق غير صالح")
-                return False, "رمز التحقق غير صالح | Invalid verification code"
-            except auth.RevokedIdTokenError:
-                logger.error("تم إلغاء رمز التحقق")
-                return False, "تم إلغاء رمز التحقق | Verification code revoked"
-            except Exception as e:
-                retry_count += 1
-                if retry_count >= max_retries:
-                    logger.error(f"فشل التحقق بعد {max_retries} محاولات: {str(e)}")
-                    return False, f"فشل التحقق من رقم الهاتف بعد عدة محاولات | Phone verification failed after several attempts"
+                logger.warning(f"جلسة التحقق منتهية الصلاحية لرقم الهاتف: {phone_number}")
+                return False, "جلسة التحقق منتهية الصلاحية | Verification session expired"
 
-                # Exponential backoff
-                time.sleep(retry_delay)
-                retry_delay *= 2  # Double the delay for next retry
-                logger.info(f"محاولة إعادة التحقق {retry_count} من {max_retries}")
-                continue
+            # Verify phone number match | التحقق من تطابق رقم الهاتف
+            if decoded_token.get('phone_number') != phone_number:
+                logger.warning(f"رقم الهاتف لا يتطابق مع جلسة التحقق: {phone_number}")
+                return False, "رقم الهاتف غير متطابق | Phone number mismatch"
 
-    def verify_id_token(self, id_token: str) -> Optional[Dict[str, Any]]:
-        """التحقق من صحة رمز المصادقة | Verify authentication token"""
-        try:
-            return auth.verify_id_token(id_token)
+            logger.info(f"تم التحقق من رقم الهاتف بنجاح: {phone_number}")
+            return True, None
+
+        except auth.ExpiredIdTokenError:
+            logger.error("رمز التحقق منتهي الصلاحية")
+            return False, "رمز التحقق منتهي الصلاحية | Verification code expired"
+        except auth.InvalidIdTokenError:
+            logger.error("رمز التحقق غير صالح")
+            return False, "رمز التحقق غير صالح | Invalid verification code"
         except Exception as e:
-            logger.error(f"خطأ في التحقق من رمز المصادقة: {str(e)}")
-            return None
+            logger.error(f"خطأ في التحقق من رقم الهاتف: {str(e)}")
+            return False, f"خطأ في التحقق من رقم الهاتف | Error verifying phone number: {str(e)}"
 
-    def link_phone_number(self, username: str, phone_number: str) -> Tuple[bool, Optional[str]]:
-        """ربط رقم الهاتف بالمستخدم | Link phone number to user"""
-        try:
-            # التحقق من تنسيق رقم الهاتف | Validate phone number format
-            if not phone_number.startswith('+'):
-                logger.warning(f"رقم هاتف بتنسيق غير صحيح: {phone_number}")
-                return False, "يجب أن يبدأ رقم الهاتف بـ + متبوعاً برمز الدولة | Phone number must start with + followed by country code"
-
-            # إنشاء أو تحديث مستخدم Firebase | Create or update Firebase user
-            try:
-                user = auth.get_user_by_phone_number(phone_number)
-                if user:
-                    # Update user display name if exists
-                    auth.update_user(
-                        user.uid,
-                        display_name=username
-                    )
-                else:
-                    # Create new user with phone number
-                    user = auth.create_user(
-                        phone_number=phone_number,
-                        display_name=username
-                    )
-                logger.info(f"تم ربط رقم الهاتف بنجاح: {phone_number}")
-                return True, None
-
-            except auth.PhoneNumberAlreadyExistsError:
-                logger.error(f"رقم الهاتف مستخدم بالفعل: {phone_number}")
-                return False, "رقم الهاتف مستخدم بالفعل | Phone number is already in use"
-
-        except Exception as e:
-            logger.error(f"خطأ في ربط رقم الهاتف: {str(e)}")
-            return False, f"خطأ في ربط رقم الهاتف | Error linking phone number: {str(e)}"
-
-# Initialize Firebase Auth Service with error handling
+# Initialize Firebase Auth Service
 try:
     firebase_auth = FirebaseAuthService()
     logger.info("Firebase Auth Service initialized successfully")
