@@ -35,24 +35,40 @@ class FirebaseAuthService:
             logger.error(f"خطأ في تهيئة Firebase: {str(e)} | Firebase initialization error: {str(e)}")
             raise
 
-    def verify_phone_number(self, phone_number: str, verification_id: str, code: str = None) -> bool:
+    def verify_phone_number(self, phone_number: str, verification_id: str, code: str = None) -> Tuple[bool, Optional[str]]:
         """التحقق من صحة رقم الهاتف والرمز | Verify phone number and code"""
         try:
             # Check if phone number is registered
             try:
                 user = auth.get_user_by_phone_number(phone_number)
                 logger.info(f"تم العثور على المستخدم برقم الهاتف: {phone_number}")
-                return True
+
+                if code and verification_id:
+                    # Verify the code if provided
+                    try:
+                        decoded_token = auth.verify_session_cookie(verification_id)
+                        if decoded_token and decoded_token.get('phone_number') == phone_number:
+                            logger.info(f"تم التحقق من الرمز بنجاح لرقم الهاتف: {phone_number}")
+                            return True, None
+                        else:
+                            logger.warning(f"فشل التحقق من الرمز لرقم الهاتف: {phone_number}")
+                            return False, "رمز التحقق غير صحيح"
+                    except auth.InvalidSessionCookieError:
+                        logger.warning(f"رمز التحقق غير صالح لرقم الهاتف: {phone_number}")
+                        return False, "رمز التحقق غير صالح"
+
+                return True, None
+
             except auth.UserNotFoundError:
                 logger.warning(f"لم يتم العثور على مستخدم برقم الهاتف: {phone_number}")
-                return False
+                return False, "رقم الهاتف غير مسجل"
             except Exception as e:
                 logger.error(f"خطأ في البحث عن المستخدم برقم الهاتف: {str(e)}")
-                return False
+                return False, str(e)
 
         except Exception as e:
             logger.error(f"خطأ في التحقق من رقم الهاتف: {str(e)} | Phone verification error: {str(e)}")
-            return False
+            return False, str(e)
 
     def get_user_by_phone(self, phone_number: str) -> Optional[Dict[str, Any]]:
         """الحصول على معلومات المستخدم برقم الهاتف | Get user by phone number"""
