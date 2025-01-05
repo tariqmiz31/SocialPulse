@@ -2,7 +2,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useLocation } from "wouter";
-import { useEffect } from "react"; 
+import { useEffect, useState } from "react"; 
 import { 
   Card, 
   CardContent,
@@ -21,10 +21,9 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
-import { useState } from "react";
 import { Languages, Loader2 } from "lucide-react";
-import { auth } from "@/lib/firebase";
-import { RecaptchaVerifier, signInWithPhoneNumber } from "firebase/auth";
+import { setupRecaptcha, sendVerificationCode, verifyCode } from "@/lib/firebase";
+import type { ConfirmationResult } from "firebase/auth";
 
 // Translations | الترجمات
 const translations = {
@@ -132,12 +131,10 @@ export default function ResetPassword() {
   const [_, setLocation] = useLocation();
   const { toast } = useToast();
   const [step, setStep] = useState<ResetStep>('phone');
-  const [verificationId, setVerificationId] = useState<string>("");
   const [language, setLanguage] = useState<'ar' | 'en'>('ar');
   const [isLoading, setIsLoading] = useState(false);
   const t = translations[language];
 
-  // Form schemas with translations
   const phoneSchema = z.object({
     username: z.string().min(1, t.errors.usernameRequired),
     phoneNumber: z.string()
@@ -157,7 +154,6 @@ export default function ResetPassword() {
     path: ["confirmPassword"],
   });
 
-  // Form instances
   const phoneForm = useForm({
     resolver: zodResolver(phoneSchema),
     defaultValues: {
@@ -181,47 +177,6 @@ export default function ResetPassword() {
     },
   });
 
-  // Firebase reCAPTCHA setup
-  useEffect(() => {
-    if (step === 'phone') {
-      const setupRecaptcha = async () => {
-        try {
-          if (window.recaptchaVerifier) {
-            await window.recaptchaVerifier.clear();
-            window.recaptchaVerifier = null;
-          }
-
-          const verifier = new RecaptchaVerifier(auth, 'send-code-button', {
-            'size': 'invisible',
-            'callback': () => {
-              console.log('reCAPTCHA verified');
-            },
-            'expired-callback': () => {
-              toast({
-                variant: "destructive",
-                title: t.error.title,
-                description: t.errors.recaptchaError,
-              });
-              window.recaptchaVerifier = null;
-            }
-          });
-
-          await verifier.render();
-          window.recaptchaVerifier = verifier;
-        } catch (error) {
-          console.error('Error setting up reCAPTCHA:', error);
-          toast({
-            variant: "destructive",
-            title: t.error.title,
-            description: t.errors.recaptchaError,
-          });
-        }
-      };
-      setupRecaptcha();
-    }
-  }, [step, language, toast, t]);
-
-  // Handle bilingual messages from the server
   const handleBilingualMessage = (response: any) => {
     if (response.message && typeof response.message === 'object') {
       return language === 'ar' ? response.message.ar : response.message.en;
@@ -229,21 +184,16 @@ export default function ResetPassword() {
     return response.message || t.errors.unknownError;
   };
 
-  // Form submission handlers
   const onSendCode = async (data: { username: string; phoneNumber: string }) => {
     try {
       setIsLoading(true);
       const phoneNumber = data.phoneNumber;
-      const appVerifier = window.recaptchaVerifier;
 
-      if (!appVerifier) {
-        throw new Error(t.errors.recaptchaError);
-      }
+      const recaptchaVerifier = await setupRecaptcha('send-code-button');
 
-      const confirmationResult = await signInWithPhoneNumber(auth, phoneNumber, appVerifier);
-      setVerificationId(confirmationResult.verificationId);
+      await sendVerificationCode(phoneNumber, recaptchaVerifier);
+
       setStep('verify');
-
       toast({
         title: t.verification.codeSent,
         description: t.verification.codeSentDesc,
@@ -256,7 +206,6 @@ export default function ResetPassword() {
         description: error.message || t.errors.unknownError,
       });
 
-      // Reset reCAPTCHA on error
       if (window.recaptchaVerifier) {
         await window.recaptchaVerifier.clear();
         window.recaptchaVerifier = null;
@@ -269,6 +218,10 @@ export default function ResetPassword() {
   const onVerifyCode = async (data: { code: string }) => {
     try {
       setIsLoading(true);
+
+      const result = await verifyCode(data.code);
+      const idToken = await result.user.getIdToken();
+
       const response = await fetch('/api/auth/verify-phone', {
         method: 'POST',
         headers: {
@@ -276,21 +229,20 @@ export default function ResetPassword() {
         },
         body: JSON.stringify({
           phoneNumber: phoneForm.getValues('phoneNumber'),
-          code: data.code,
-          verificationId
+          verificationId: idToken
         }),
       });
 
-      const result = await response.json();
+      const apiResult = await response.json();
 
       if (!response.ok) {
-        throw new Error(handleBilingualMessage(result));
+        throw new Error(apiResult.message?.[language] || apiResult.message);
       }
 
       setStep('reset');
       toast({
         title: t.verification.success,
-        description: handleBilingualMessage(result),
+        description: apiResult.message?.[language] || apiResult.message,
       });
     } catch (error: any) {
       toast({
@@ -314,7 +266,7 @@ export default function ResetPassword() {
         body: JSON.stringify({
           username: phoneForm.getValues('username'),
           password: data.password,
-          verificationId
+          verificationId: await auth.currentUser?.getIdToken() // Added this line
         }),
       });
 
@@ -329,7 +281,6 @@ export default function ResetPassword() {
         description: handleBilingualMessage(result),
       });
 
-      // Redirect after successful password reset
       setTimeout(() => setLocation("/"), 2000);
     } catch (error: any) {
       toast({

@@ -9,6 +9,22 @@ from logging.handlers import RotatingFileHandler
 from server.routes import setup_routes
 from server.config import config
 from dotenv import load_dotenv
+import socket
+import time
+
+def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 60) -> bool:
+    """Wait for port to be available | انتظار حتى يصبح المنفذ متاحاً"""
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.settimeout(1)
+                sock.bind((host, port))
+                sock.close()
+                return True
+        except socket.error:
+            time.sleep(1)
+    return False
 
 def create_app(testing=False):
     """Create and configure Flask application | إنشاء وتكوين تطبيق Flask"""
@@ -47,6 +63,8 @@ def create_app(testing=False):
         app = Flask(__name__, static_folder='../client/dist', static_url_path='/')
 
         # Configure application | تكوين التطبيق
+        port = int(os.getenv('PORT', str(app_config.PORT)))
+
         app.config.update(
             SESSION_TYPE=app_config.SESSION_TYPE,
             SESSION_FILE_DIR=app_config.SESSION_FILE_DIR,
@@ -56,10 +74,16 @@ def create_app(testing=False):
             PERMANENT_SESSION_LIFETIME=timedelta(seconds=app_config.PERMANENT_SESSION_LIFETIME),
             SECRET_KEY=app_config.SECRET_KEY,
             DEBUG=app_config.DEBUG,
-            PORT=int(os.getenv('PORT', str(app_config.PORT))),
-            HOST='0.0.0.0',
-            WAIT_FOR_PORT=True  # Enable port waiting
+            PORT=port,
+            HOST='0.0.0.0'
         )
+
+        # Wait for port if enabled | انتظار المنفذ إذا كان مفعلاً
+        if os.getenv('WAIT_FOR_PORT', 'false').lower() == 'true':
+            if not wait_for_port(port):
+                logger.error(f"المنفذ {port} غير متاح بعد انتهاء المهلة")
+                return None
+            logger.info(f"المنفذ {port} متاح")
 
         # Setup CORS | إعداد CORS
         CORS(app, supports_credentials=True)

@@ -1,9 +1,10 @@
 import { initializeApp } from "firebase/app";
-import { getAuth, RecaptchaVerifier, type Persistence, browserLocalPersistence } from "firebase/auth";
+import { getAuth, RecaptchaVerifier, signInWithPhoneNumber, type PhoneAuthProvider } from "firebase/auth";
 
 declare global {
   interface Window {
     recaptchaVerifier: RecaptchaVerifier | null;
+    confirmationResult: any;
   }
 }
 
@@ -18,9 +19,6 @@ const firebaseConfig = {
 export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 
-// Enable local persistence with proper type
-auth.setPersistence(browserLocalPersistence);
-
 // Default language to Arabic
 auth.languageCode = 'ar';
 
@@ -28,7 +26,7 @@ export async function setupRecaptcha(buttonId: string) {
   try {
     // Clear any existing reCAPTCHA instances
     if (window.recaptchaVerifier) {
-      window.recaptchaVerifier.clear();
+      await window.recaptchaVerifier.clear();
       window.recaptchaVerifier = null;
     }
 
@@ -44,10 +42,36 @@ export async function setupRecaptcha(buttonId: string) {
       }
     });
 
+    await recaptchaVerifier.render();
     window.recaptchaVerifier = recaptchaVerifier;
     return recaptchaVerifier;
   } catch (error) {
     console.error('Error setting up reCAPTCHA:', error);
+    throw error;
+  }
+}
+
+export async function sendVerificationCode(phoneNumber: string, recaptchaVerifier: RecaptchaVerifier) {
+  try {
+    const confirmationResult = await signInWithPhoneNumber(auth, phoneNumber, recaptchaVerifier);
+    window.confirmationResult = confirmationResult;
+    return confirmationResult;
+  } catch (error) {
+    console.error('Error sending verification code:', error);
+    throw error;
+  }
+}
+
+export async function verifyCode(code: string) {
+  if (!window.confirmationResult) {
+    throw new Error('No verification code was sent');
+  }
+
+  try {
+    const result = await window.confirmationResult.confirm(code);
+    return result;
+  } catch (error) {
+    console.error('Error confirming verification code:', error);
     throw error;
   }
 }

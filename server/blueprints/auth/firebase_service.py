@@ -12,21 +12,19 @@ class FirebaseAuthService:
     def __init__(self):
         """Initialize Firebase Auth Service"""
         try:
-            # Load the service account JSON file
-            service_account_path = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
-                'attached_assets',
-                'silva-deb1c-firebase-adminsdk-g19p8-2ab855fd52.json'
-            )
+            # Load credentials from environment variables
+            cred = credentials.Certificate({
+                "type": "service_account",
+                "project_id": os.getenv('FIREBASE_PROJECT_ID'),
+                "private_key": os.getenv('FIREBASE_PRIVATE_KEY').replace('\\n', '\n'),
+                "client_email": os.getenv('FIREBASE_CLIENT_EMAIL'),
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+                "client_x509_cert_url": f"https://www.googleapis.com/robot/v1/metadata/x509/{os.getenv('FIREBASE_CLIENT_EMAIL', '').replace('@', '%40')}"
+            })
 
-            if not os.path.exists(service_account_path):
-                raise FileNotFoundError("ملف حساب خدمة Firebase غير موجود | Firebase service account file not found")
-
-            with open(service_account_path, 'r') as f:
-                service_account = json.load(f)
-
-            cred = credentials.Certificate(service_account)
-
+            # Initialize Firebase Admin SDK with credentials
             if not firebase_admin._apps:
                 firebase_admin.initialize_app(cred)
                 logger.info("تم تهيئة خدمة Firebase بنجاح | Firebase service initialized successfully")
@@ -35,71 +33,49 @@ class FirebaseAuthService:
             logger.error(f"خطأ في تهيئة Firebase: {str(e)} | Firebase initialization error: {str(e)}")
             raise
 
-    def verify_phone_number(self, phone_number: str, verification_id: str, code: str = None) -> Tuple[bool, Optional[str]]:
-        """التحقق من صحة رقم الهاتف والرمز | Verify phone number and code"""
+    def verify_phone_number(self, phone_number: str, verification_id: str, code: str) -> Tuple[bool, Optional[str]]:
+        """التحقق من رقم الهاتف والرمز | Verify phone number and code"""
         try:
-            # Check if phone number is registered
+            # First, verify the ID token from the client
             try:
-                user = auth.get_user_by_phone_number(phone_number)
-                logger.info(f"تم العثور على المستخدم برقم الهاتف: {phone_number}")
+                decoded_token = auth.verify_id_token(verification_id)
+                if not decoded_token:
+                    logger.warning(f"رمز التحقق غير صالح لرقم الهاتف: {phone_number}")
+                    return False, "رمز التحقق غير صالح | Invalid verification code"
+            except auth.InvalidIdTokenError:
+                logger.warning(f"جلسة التحقق منتهية الصلاحية لرقم الهاتف: {phone_number}")
+                return False, "جلسة التحقق منتهية الصلاحية | Verification session expired"
 
-                if code and verification_id:
-                    # Verify the code if provided
-                    try:
-                        decoded_token = auth.verify_session_cookie(verification_id)
-                        if decoded_token and decoded_token.get('phone_number') == phone_number:
-                            logger.info(f"تم التحقق من الرمز بنجاح لرقم الهاتف: {phone_number}")
-                            return True, None
-                        else:
-                            logger.warning(f"فشل التحقق من الرمز لرقم الهاتف: {phone_number}")
-                            return False, "رمز التحقق غير صحيح"
-                    except auth.InvalidSessionCookieError:
-                        logger.warning(f"رمز التحقق غير صالح لرقم الهاتف: {phone_number}")
-                        return False, "رمز التحقق غير صالح"
+            # Check if the phone number matches
+            if decoded_token.get('phone_number') != phone_number:
+                logger.warning(f"رقم الهاتف لا يتطابق مع جلسة التحقق: {phone_number}")
+                return False, "رقم الهاتف غير متطابق | Phone number mismatch"
 
-                return True, None
-
-            except auth.UserNotFoundError:
-                logger.warning(f"لم يتم العثور على مستخدم برقم الهاتف: {phone_number}")
-                return False, "رقم الهاتف غير مسجل"
-            except Exception as e:
-                logger.error(f"خطأ في البحث عن المستخدم برقم الهاتف: {str(e)}")
-                return False, str(e)
+            # If verification is successful, return true
+            logger.info(f"تم التحقق من رقم الهاتف بنجاح: {phone_number}")
+            return True, None
 
         except Exception as e:
             logger.error(f"خطأ في التحقق من رقم الهاتف: {str(e)} | Phone verification error: {str(e)}")
-            return False, str(e)
+            return False, f"خطأ في التحقق من رقم الهاتف | Phone verification error: {str(e)}"
 
-    def link_phone_number(self, username: str, phone_number: str) -> Tuple[bool, Optional[str]]:
-        """ربط رقم الهاتف بالمستخدم | Link phone number to user"""
+    def create_custom_token(self, phone_number: str) -> Optional[str]:
+        """إنشاء رمز مخصص للمستخدم | Create custom token for user"""
         try:
-            # Update user phone number in Firebase
-            try:
-                user = auth.get_user_by_phone_number(phone_number)
-                if user:
-                    logger.warning(f"رقم الهاتف مستخدم بالفعل: {phone_number}")
-                    return False, "رقم الهاتف مستخدم بالفعل"
-            except auth.UserNotFoundError:
-                pass  # This is good, phone number is not used
-
-            # Create or update user in Firebase
-            try:
-                user = auth.create_user(
-                    phone_number=phone_number,
-                    display_name=username
-                )
-                logger.info(f"تم ربط رقم الهاتف بالمستخدم بنجاح: {username} - {phone_number}")
-                return True, None
-            except auth.PhoneNumberAlreadyExistsError:
-                logger.warning(f"رقم الهاتف مستخدم بالفعل: {phone_number}")
-                return False, "رقم الهاتف مستخدم بالفعل"
-            except Exception as e:
-                logger.error(f"خطأ في إنشاء مستخدم Firebase: {str(e)}")
-                return False, str(e)
-
+            custom_token = auth.create_custom_token(phone_number)
+            return custom_token.decode('utf-8')
         except Exception as e:
-            logger.error(f"خطأ في ربط رقم الهاتف: {str(e)} | Error linking phone number: {str(e)}")
-            return False, str(e)
+            logger.error(f"خطأ في إنشاء الرمز المخصص: {str(e)} | Error creating custom token: {str(e)}")
+            return None
+
+    def verify_custom_token(self, custom_token: str) -> Optional[Dict[str, Any]]:
+        """التحقق من صحة الرمز المخصص | Verify custom token"""
+        try:
+            decoded_token = auth.verify_id_token(custom_token)
+            return decoded_token
+        except Exception as e:
+            logger.error(f"خطأ في التحقق من الرمز المخصص: {str(e)} | Error verifying custom token: {str(e)}")
+            return None
 
     def get_user_by_phone(self, phone_number: str) -> Optional[Dict[str, Any]]:
         """الحصول على معلومات المستخدم برقم الهاتف | Get user by phone number"""
@@ -108,7 +84,6 @@ class FirebaseAuthService:
             return {
                 'uid': user.uid,
                 'phone_number': user.phone_number,
-                'display_name': user.display_name,
                 'provider_data': user.provider_data
             }
         except auth.UserNotFoundError:
@@ -116,15 +91,6 @@ class FirebaseAuthService:
             return None
         except Exception as e:
             logger.error(f"خطأ في جلب بيانات المستخدم: {str(e)} | Error fetching user data: {str(e)}")
-            return None
-
-    def verify_id_token(self, id_token: str) -> Optional[Dict[str, Any]]:
-        """التحقق من رمز Firebase وإرجاع معلومات المستخدم | Verify Firebase ID token and return user info"""
-        try:
-            decoded_token = auth.verify_id_token(id_token)
-            return decoded_token
-        except Exception as e:
-            logger.error(f"خطأ في التحقق من الرمز: {str(e)} | Token verification error: {str(e)}")
             return None
 
 firebase_auth = FirebaseAuthService()

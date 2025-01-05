@@ -14,6 +14,29 @@ project_root = os.path.dirname(current_dir)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
+# Setup logging first
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
+
+# Add console handler
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(formatter)
+logger.addHandler(console_handler)
+
+# Load environment variables first
+load_dotenv()
+
+# Verify required Firebase environment variables
+required_env_vars = ['FIREBASE_PROJECT_ID', 'FIREBASE_PRIVATE_KEY', 'FIREBASE_CLIENT_EMAIL']
+missing_vars = [var for var in required_env_vars if not os.getenv(var)]
+
+if missing_vars:
+    logger.error(f"المتغيرات البيئية المطلوبة مفقودة: {', '.join(missing_vars)}")
+    logger.error("Missing required environment variables")
+    sys.exit(1)
+
+# Now import the app after environment setup
 from server import create_app
 
 def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 60) -> bool:
@@ -23,15 +46,13 @@ def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 60) -> bool:
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                 sock.settimeout(1)
-                result = sock.connect_ex((host, port))
-                if result != 0:  # Port is available
-                    print(f"Port {port} is available | المنفذ {port} متاح")
-                    return True
-                print(f"Waiting for port {port}... | انتظار المنفذ {port}...")
-                time.sleep(1)
-        except Exception as e:
-            print(f"Error checking port {port}: {str(e)} | خطأ في فحص المنفذ {port}: {str(e)}")
-            return False
+                sock.bind((host, port))  # Try to bind to the port
+                sock.close()  # Close immediately if successful
+                print(f"Port {port} is available | المنفذ {port} متاح")
+                return True
+        except socket.error:
+            print(f"Waiting for port {port}... | انتظار المنفذ {port}...")
+            time.sleep(1)
 
     print(f"Port {port} is not available after timeout | المنفذ {port} غير متاح بعد انتهاء المهلة")
     return False
@@ -41,26 +62,24 @@ def main():
     try:
         # Set production mode | تعيين وضع الإنتاج
         os.environ['FLASK_ENV'] = 'production'
-        os.environ['WAIT_FOR_PORT'] = 'true'  # Enable port waiting | تمكين انتظار المنفذ
-
-        # Load environment variables | تحميل المتغيرات البيئية
-        load_dotenv()
-
-        # Create Flask app | إنشاء تطبيق Flask
-        app = create_app()
-        if not app:
-            print("Failed to create Flask application | فشل في إنشاء تطبيق Flask", file=sys.stderr)
-            return 1
+        os.environ['WAIT_FOR_PORT'] = 'true'
 
         # Get port | الحصول على المنفذ
         port = int(os.getenv('PORT', '5000'))
 
         # Wait for port availability | انتظار توفر المنفذ
         if not wait_for_port(port):
-            print(f"Port {port} is not available | المنفذ {port} غير متاح", file=sys.stderr)
+            logger.error(f"Port {port} is not available | المنفذ {port} غير متاح")
+            return 1
+
+        # Create Flask app | إنشاء تطبيق Flask
+        app = create_app()
+        if not app:
+            logger.error("Failed to create Flask application | فشل في إنشاء تطبيق Flask")
             return 1
 
         # Signal ready | إشارة الجاهزية
+        logger.info('Server is ready | الخادم جاهز')
         print('ready')
         sys.stdout.flush()
 
@@ -79,7 +98,7 @@ def main():
         return 0
 
     except Exception as e:
-        print(f"Error starting server: {str(e)} | خطأ في بدء تشغيل الخادم: {str(e)}", file=sys.stderr)
+        logger.error(f"Error starting server: {str(e)} | خطأ في بدء تشغيل الخادم: {str(e)}")
         return 1
 
 if __name__ == "__main__":
