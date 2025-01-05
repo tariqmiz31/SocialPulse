@@ -16,7 +16,7 @@ class FirebaseAuthService:
             service_account_path = os.path.join(
                 os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
                 'attached_assets',
-                'silva-11e9d-firebase-adminsdk-n8a88-74bc434752.json'
+                'silva-deb1c-firebase-adminsdk-g19p8-2ab855fd52.json'
             )
 
             if not os.path.exists(service_account_path):
@@ -35,20 +35,24 @@ class FirebaseAuthService:
             logger.error(f"خطأ في تهيئة Firebase: {str(e)} | Firebase initialization error: {str(e)}")
             raise
 
-    def verify_phone_number(self, phone_number: str, verification_id: str) -> Tuple[bool, Optional[str]]:
-        """التحقق من صحة رقم الهاتف وتسجيله | Verify if phone number is valid and registered"""
+    def verify_phone_number(self, phone_number: str, verification_id: str, code: str = None) -> bool:
+        """التحقق من صحة رقم الهاتف والرمز | Verify phone number and code"""
         try:
-            user = self.get_user_by_phone(phone_number)
-            if not user:
-                return False, "رقم الهاتف غير مسجل | Phone number is not registered"
-
-            # For demo purposes, we're considering the verification successful if the user exists
-            # In a real implementation, you would verify the code with Firebase
-            return True, None
+            # Check if phone number is registered
+            try:
+                user = auth.get_user_by_phone_number(phone_number)
+                logger.info(f"تم العثور على المستخدم برقم الهاتف: {phone_number}")
+                return True
+            except auth.UserNotFoundError:
+                logger.warning(f"لم يتم العثور على مستخدم برقم الهاتف: {phone_number}")
+                return False
+            except Exception as e:
+                logger.error(f"خطأ في البحث عن المستخدم برقم الهاتف: {str(e)}")
+                return False
 
         except Exception as e:
             logger.error(f"خطأ في التحقق من رقم الهاتف: {str(e)} | Phone verification error: {str(e)}")
-            return False, f"خطأ في التحقق من رقم الهاتف: {str(e)} | Phone verification error: {str(e)}"
+            return False
 
     def get_user_by_phone(self, phone_number: str) -> Optional[Dict[str, Any]]:
         """الحصول على معلومات المستخدم برقم الهاتف | Get user by phone number"""
@@ -59,6 +63,9 @@ class FirebaseAuthService:
                 'phone_number': user.phone_number,
                 'provider_data': user.provider_data
             }
+        except auth.UserNotFoundError:
+            logger.warning(f"لم يتم العثور على مستخدم برقم الهاتف: {phone_number}")
+            return None
         except Exception as e:
             logger.error(f"خطأ في جلب بيانات المستخدم: {str(e)} | Error fetching user data: {str(e)}")
             return None

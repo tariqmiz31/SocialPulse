@@ -34,10 +34,10 @@ function App() {
           </div>
         }>
           <Switch>
-            {/* Always accessible routes */}
+            {/* دائماً متاح | Always accessible */}
             <Route path="/reset-password" component={ResetPassword} />
 
-            {/* Auth-protected routes */}
+            {/* المسارات المحمية | Protected routes */}
             {!user ? (
               <Route path="*" component={AuthPage} />
             ) : (

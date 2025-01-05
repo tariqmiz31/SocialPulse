@@ -101,9 +101,6 @@ def create_app(testing=False):
                  }
              })
 
-        # Setup authentication | إعداد المصادقة
-        app = init_auth(app)
-
         # Create session directory | إنشاء مجلد الجلسات
         if not testing and not os.path.exists(app_config.SESSION_FILE_DIR):
             os.makedirs(app_config.SESSION_FILE_DIR)
@@ -111,10 +108,18 @@ def create_app(testing=False):
         # Setup session | إعداد الجلسة
         Session(app)
 
+        # Initialize authentication | تهيئة المصادقة
+        app = init_auth(app)
+
+        # Register blueprints | تسجيل المخططات
+        if 'auth' not in app.blueprints:
+            app.register_blueprint(auth_bp)
+            if logger:
+                logger.info('تم تسجيل مخطط المصادقة | Auth blueprint registered')
+
         # Setup routes | إعداد المسارات
         app = setup_routes(app)
 
-        # Log successful initialization | تسجيل نجاح التهيئة
         if logger:
             logger.info('Application initialized successfully | تم تهيئة التطبيق بنجاح')
             logger.info(f'Application configured to run on {app.config["HOST"]}:{app.config["PORT"]} | التطبيق مكون للعمل على {app.config["HOST"]}:{app.config["PORT"]}')

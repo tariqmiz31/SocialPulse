@@ -76,12 +76,14 @@ def init_auth(app):
     """تهيئة المصادقة"""
     global login_manager
 
-    # Check if login manager is already initialized
-    if not hasattr(app, 'login_manager'):
-        login_manager.init_app(app)
-        app.login_manager = login_manager
+    if hasattr(app, 'login_manager'):
+        logger.info("Login manager already initialized")
+        return app
 
-        logger.info("تم تهيئة مدير تسجيل الدخول")
+    # Initialize login manager
+    login_manager.init_app(app)
+    app.login_manager = login_manager
+    logger.info("تم تهيئة مدير تسجيل الدخول")
 
     # Set login view
     login_manager.login_view = 'auth.login'
@@ -142,13 +144,12 @@ def init_auth(app):
     except Exception as e:
         logger.error(f"خطأ في إنشاء جدول المستخدمين: {str(e)}")
 
-    # Only register the blueprint if it hasn't been registered yet
-    if 'auth' not in app.blueprints:
-        app.register_blueprint(auth_bp)
-        logger.info("تم تسجيل مخطط المصادقة")
-
+    # Only register routes through blueprint registration
+    app.register_blueprint(auth_bp)
+    logger.info("تم تسجيل مخطط المصادقة")
     return app
 
+# Define routes below
 @auth_bp.route('/login', methods=['POST'])
 def login():
     try:
