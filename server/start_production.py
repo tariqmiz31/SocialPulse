@@ -18,16 +18,17 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 # Now we can import from server package
-from server import create_app, DEFAULT_PORT, WAIT_FOR_PORT_TIMEOUT
+from server import create_app
 
 # Setup logging first
 logger = logging.getLogger('silvarium_production')
 logger.setLevel(logging.INFO)
 
-formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
-
+# Ensure logs directory exists
 if not os.path.exists('/tmp/logs'):
     os.makedirs('/tmp/logs')
+
+formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
 
 file_handler = RotatingFileHandler(
     '/tmp/logs/silvarium.log',
@@ -41,37 +42,7 @@ console_handler = logging.StreamHandler()
 console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 
-def check_firebase_prerequisites() -> bool:
-    """Check if all Firebase prerequisites are met"""
-    try:
-        service_account_path = 'attached_assets/silva-deb1c-firebase-adminsdk-g19p8-5d6dc42cd6.json'
-
-        if not os.path.exists(service_account_path):
-            logger.error(f"Service account file not found at: {service_account_path}")
-            return False
-
-        try:
-            with open(service_account_path, 'r') as file:
-                cred_dict = json.load(file)
-                logger.info("Successfully loaded service account file")
-
-                # Set environment variables
-                os.environ['FIREBASE_PROJECT_ID'] = cred_dict['project_id']
-                os.environ['FIREBASE_PRIVATE_KEY'] = cred_dict['private_key']
-                os.environ['FIREBASE_CLIENT_EMAIL'] = cred_dict['client_email']
-
-                return True
-
-        except (IOError, json.JSONDecodeError) as e:
-            logger.error(f"Error reading service account file: {str(e)}")
-            return False
-
-    except Exception as e:
-        logger.error(f"Error checking Firebase prerequisites: {str(e)}")
-        logger.error(traceback.format_exc())
-        return False
-
-def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = WAIT_FOR_PORT_TIMEOUT) -> bool:
+def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 30) -> bool:
     """Wait for port availability"""
     start_time = time.time()
     while time.time() - start_time < timeout:
@@ -91,17 +62,12 @@ def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = WAIT_FOR_PORT
 def main():
     """Main entry point"""
     try:
-        # Set production environment and enable port waiting
+        # Set production environment
         os.environ['FLASK_ENV'] = 'production'
         os.environ['WAIT_FOR_PORT'] = 'true'
 
         logger.info("Starting Silvarium Social production server")
 
-        # Check Firebase prerequisites first
-        logger.info("Checking Firebase prerequisites...")
-        if not check_firebase_prerequisites():
-            logger.error("Failed to meet Firebase prerequisites - exiting")
-            return 1
 
         # Use configured port or default to 5000
         try:
