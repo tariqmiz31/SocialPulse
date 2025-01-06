@@ -11,9 +11,14 @@ import string
 import time
 import traceback
 
-# Setup logging
-logger = logging.getLogger('silvarium_auth')
-logger.setLevel(logging.INFO)
+# Import SMS service at the top of the file
+try:
+    from .sms_service import sms_service
+    logger = logging.getLogger('silvarium_auth')
+    logger.setLevel(logging.INFO)
+except Exception as e:
+    logger.error(f"Error importing SMS service: {str(e)}")
+    sms_service = None
 
 # Create blueprint with unique name
 auth_bp = Blueprint('silvarium_auth', __name__, url_prefix='/api/auth')
@@ -31,8 +36,9 @@ def get_bilingual_message(ar_msg: str, en_msg: str) -> dict:
         }
     }
 
+# Update the send_verification_code route
 @auth_bp.route('/send-verification-code', methods=['POST'])
-def send_verification_code():
+async def send_verification_code():
     """إرسال رمز التحقق عبر SMS | Send verification code via SMS"""
     try:
         data = request.get_json()
@@ -47,23 +53,29 @@ def send_verification_code():
                 "Phone number is required"
             )), 400
 
+        # Check rate limit
+        if not await sms_service.check_rate_limit(phone_number):
+            logger.warning(f"تم تجاوز الحد المسموح لإرسال الرموز: {phone_number}")
+            return jsonify(get_bilingual_message(
+                "تم تجاوز الحد المسموح من المحاولات، يرجى المحاولة لاحقاً",
+                "Rate limit exceeded, please try again later"
+            )), 429
+
         # Generate verification code
         verification_code = generate_verification_code()
-        expires_at = datetime.now() + timedelta(minutes=10)  # Code expires in 10 minutes
+        expires_at = datetime.now() + timedelta(minutes=10)
 
-        logger.info(f"Generated verification code for {phone_number}")
-
+        # Save code in database
         conn = psycopg2.connect(os.getenv('DATABASE_URL'))
         cur = conn.cursor()
 
-        # Check if phone number exists in database
+        # Check if phone number exists
         cur.execute("""
-            SELECT id, username FROM users 
+            SELECT id FROM users 
             WHERE phone_number = %s
         """, (phone_number,))
 
         user = cur.fetchone()
-        logger.info(f"Found existing user for phone number {phone_number}: {user is not None}")
 
         if user:
             # Update existing user's verification code
@@ -73,9 +85,8 @@ def send_verification_code():
                     verification_code_expires_at = %s 
                 WHERE id = %s
             """, (verification_code, expires_at, user[0]))
-            logger.info(f"Updated verification code for existing user: {user[0]}")
         else:
-            # Create temporary user record with phone number and verification code
+            # Create temporary user record
             temp_username = f"temp_{phone_number}_{int(time.time())}"
             temp_password = generate_password_hash('temp_password')
 
@@ -83,14 +94,18 @@ def send_verification_code():
                 INSERT INTO users (username, password, phone_number, verification_code, verification_code_expires_at, role, status)
                 VALUES (%s, %s, %s, %s, %s, 'user', 'pending')
             """, (temp_username, temp_password, phone_number, verification_code, expires_at))
-            logger.info(f"Created temporary user for phone number: {phone_number}")
 
         conn.commit()
         cur.close()
         conn.close()
 
-        # In a real application, you would send the SMS here
-        logger.info(f"رمز التحقق للرقم {phone_number}: {verification_code}")
+        # Send verification code
+        success, error = await sms_service.send_verification_code(phone_number, verification_code)
+        if not success:
+            return jsonify(get_bilingual_message(
+                "فشل في إرسال رمز التحقق",
+                f"Failed to send verification code: {error}"
+            )), 500
 
         return jsonify(get_bilingual_message(
             "تم إرسال رمز التحقق بنجاح",
@@ -103,13 +118,14 @@ def send_verification_code():
         if 'conn' in locals():
             conn.close()
         return jsonify(get_bilingual_message(
-            "خطأ في إرسال رمز التحقق",
+            "حدث خطأ في إرسال رمز التحقق",
             "Error sending verification code"
         )), 500
 
+# Update verify-phone route
 @auth_bp.route('/verify-phone', methods=['POST'])
-def verify_phone():
-    """التحقق من رقم الهاتف"""
+async def verify_phone():
+    """التحقق من رقم الهاتف | Verify phone number"""
     try:
         data = request.get_json()
         phone_number = data.get('phoneNumber')
@@ -122,51 +138,25 @@ def verify_phone():
                 "Phone number and verification code are required"
             )), 400
 
-        conn = psycopg2.connect(os.getenv('DATABASE_URL'))
-        cur = conn.cursor()
-
-        # Check verification code
-        cur.execute("""
-            SELECT id, verification_code, verification_code_expires_at 
-            FROM users 
-            WHERE phone_number = %s
-        """, (phone_number,))
-
-        result = cur.fetchone()
-
-        if not result:
-            cur.close()
-            conn.close()
+        # Verify code
+        success, error = await sms_service.verify_code(phone_number, code)
+        if not success:
             return jsonify(get_bilingual_message(
-                "لم يتم العثور على رمز تحقق لهذا الرقم",
-                "No verification code found for this number"
-            )), 404
-
-        user_id, stored_code, expires_at = result
-
-        if datetime.now() > expires_at:
-            cur.close()
-            conn.close()
-            return jsonify(get_bilingual_message(
-                "انتهت صلاحية رمز التحقق",
-                "Verification code has expired"
-            )), 400
-
-        if code != stored_code:
-            cur.close()
-            conn.close()
-            return jsonify(get_bilingual_message(
-                "رمز التحقق غير صحيح",
-                "Invalid verification code"
+                error,
+                "Verification failed"
             )), 400
 
         # Clear verification code after successful verification
+        conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+        cur = conn.cursor()
+
         cur.execute("""
             UPDATE users 
             SET verification_code = NULL, 
-                verification_code_expires_at = NULL 
-            WHERE id = %s
-        """, (user_id,))
+                verification_code_expires_at = NULL,
+                status = 'active'
+            WHERE phone_number = %s
+        """, (phone_number,))
 
         conn.commit()
         cur.close()
@@ -236,6 +226,39 @@ class User:
             logger.error(f"خطأ في البحث عن المستخدم: {str(e)}")
             return None
 
+def init_verification_tables() -> bool:
+    """Initialize verification related tables | تهيئة جداول التحقق"""
+    try:
+        conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+        cur = conn.cursor()
+
+        # Create verification_attempts table
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS verification_attempts (
+                id SERIAL PRIMARY KEY,
+                phone_number VARCHAR(20) NOT NULL,
+                attempt_time TIMESTAMP NOT NULL
+            )
+        """)
+
+        # Add verification columns to users table if they don't exist
+        cur.execute("""
+            ALTER TABLE users 
+            ADD COLUMN IF NOT EXISTS phone_number VARCHAR(20) UNIQUE,
+            ADD COLUMN IF NOT EXISTS verification_code VARCHAR(4),
+            ADD COLUMN IF NOT EXISTS verification_code_expires_at TIMESTAMP
+        """)
+
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+
+    except Exception as e:
+        logger.error(f"خطأ في تهيئة جداول التحقق: {str(e)}")
+        logger.error(traceback.format_exc())
+        return False
+
 def init_auth(app):
     """تهيئة المصادقة | Initialize authentication"""
     try:
@@ -281,6 +304,11 @@ def init_auth(app):
         # Create users table if not exists
         conn = psycopg2.connect(os.getenv('DATABASE_URL'))
         cur = conn.cursor()
+
+        # Initialize verification tables before creating the users table.
+        if not init_verification_tables():
+            raise Exception("Failed to initialize verification tables.")
+
 
         cur.execute("""
             CREATE TABLE IF NOT EXISTS users (

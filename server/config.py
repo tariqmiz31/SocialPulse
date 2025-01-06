@@ -9,7 +9,7 @@ class Config:
     SECRET_KEY = os.getenv('SECRET_KEY', 'silvarium-social-default-key')
     DATABASE_URL = os.getenv('DATABASE_URL')
     DEBUG = False
-    PORT = int(os.getenv('PORT', '8080'))  # Using port 8080 as default
+    PORT = int(os.getenv('PORT', '5000'))  # Using port 5000 as default
     HOST = '0.0.0.0'
 
     # إعدادات الجلسة | Session Settings
@@ -28,6 +28,11 @@ class Config:
     WAIT_FOR_PORT = True  # Always wait for port in all environments
     WAIT_FOR_PORT_TIMEOUT = 60  # Increased timeout to ensure server readiness
 
+    # إعدادات التحقق عبر الرسائل | SMS Verification Settings
+    SMS_CODE_LENGTH = 4
+    SMS_CODE_EXPIRY = 600  # 10 minutes
+    SMS_MAX_ATTEMPTS = 5  # Maximum verification attempts per hour
+
     # إعدادات اللغة | Language Settings
     DEFAULT_LANGUAGE = 'ar'  # Arabic as default language
     SUPPORTED_LANGUAGES = ['ar', 'en']
@@ -42,6 +47,9 @@ class ProductionConfig(Config):
         'https://*.repl.dev',
         os.getenv('APP_URL', 'https://silvariumsocial.com')
     ]
+    # Override port waiting settings for production
+    WAIT_FOR_PORT = True
+    WAIT_FOR_PORT_TIMEOUT = 120  # 2 minutes timeout for production
 
 class DevelopmentConfig(Config):
     """تكوين بيئة التطوير | Development Environment Configuration"""
@@ -49,8 +57,8 @@ class DevelopmentConfig(Config):
     DEBUG = True
     SESSION_COOKIE_SECURE = False
     CORS_ORIGINS = [
-        'http://localhost:8080',
-        'https://localhost:8080'
+        'http://localhost:5000',
+        'https://localhost:5000'
     ]
 
 config = {

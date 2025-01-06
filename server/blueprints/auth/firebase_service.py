@@ -23,7 +23,7 @@ class FirebaseAuthService:
 
             if not os.path.exists(service_account_path):
                 logger.error("Service account file not found | ملف حساب الخدمة غير موجود")
-                raise ValueError("Service account file not found")
+                return
 
             with open(service_account_path, 'r') as file:
                 cred_dict = json.load(file)
@@ -36,19 +36,13 @@ class FirebaseAuthService:
             # Initialize Firebase Admin SDK if not already initialized
             if not firebase_admin._apps:
                 cred = credentials.Certificate(service_account_path)
-                firebase_admin.initialize_app(cred, {
-                    'auth_settings': {
-                        'sms_verification_message': 'يرجى استخدام الرقم المؤقت لاستعادة كلمة المرور: %CODE%',
-                        'code_length': 4
-                    }
-                })
+                firebase_admin.initialize_app(cred)
                 logger.info("تم تهيئة خدمة Firebase بنجاح | Firebase service initialized successfully")
             else:
                 logger.info("Firebase already initialized | تم تهيئة Firebase مسبقاً")
 
         except Exception as e:
             logger.error(f"خطأ في تهيئة Firebase: {str(e)} | Firebase initialization error: {str(e)}")
-            raise
 
     async def send_verification_code(self, phone_number: str) -> Dict[str, Any]:
         """Send SMS verification code | إرسال رمز التحقق عبر SMS"""
@@ -61,17 +55,6 @@ class FirebaseAuthService:
                     'message': {
                         'ar': 'تم تجاوز الحد المسموح من المحاولات، يرجى المحاولة لاحقاً',
                         'en': 'Rate limit exceeded, please try again later'
-                    }
-                }
-
-            # Validate phone number format | التحقق من تنسيق رقم الهاتف
-            if not phone_number.startswith('+'):
-                logger.warning(f"رقم هاتف بتنسيق غير صحيح: {phone_number}")
-                return {
-                    'success': False,
-                    'message': {
-                        'ar': 'يجب أن يبدأ رقم الهاتف بـ + متبوعاً برمز الدولة',
-                        'en': 'Phone number must start with + followed by country code'
                     }
                 }
 
@@ -99,8 +82,8 @@ class FirebaseAuthService:
             return {
                 'success': False,
                 'message': {
-                    'ar': 'فشل في إرسال رمز التحقق، يرجى المحاولة مرة أخرى',
-                    'en': 'Failed to send verification code, please try again'
+                    'ar': 'فشل في إرسال رمز التحقق',
+                    'en': 'Failed to send verification code'
                 }
             }
 
@@ -143,15 +126,6 @@ class FirebaseAuthService:
         try:
             conn = psycopg2.connect(os.getenv('DATABASE_URL'))
             cur = conn.cursor()
-
-            # Create verification_attempts table if not exists
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS verification_attempts (
-                    id SERIAL PRIMARY KEY,
-                    phone_number VARCHAR(20) NOT NULL,
-                    attempt_time TIMESTAMP NOT NULL
-                )
-            """)
 
             # Update or insert verification code
             expires_at = datetime.now() + timedelta(minutes=10)

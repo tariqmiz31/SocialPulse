@@ -43,53 +43,52 @@ console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 
 def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 30) -> bool:
-    """Wait for port availability"""
+    """Wait for port availability | انتظار جاهزية المنفذ"""
     start_time = time.time()
     while time.time() - start_time < timeout:
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                 sock.bind((host, port))
                 sock.close()
-                logger.info(f"Port {port} is available")
+                logger.info(f"المنفذ {port} متاح | Port {port} is available")
                 return True
         except socket.error:
-            logger.info(f"Waiting for port {port}...")
+            logger.info(f"انتظار المنفذ {port}... | Waiting for port {port}...")
             time.sleep(1)
 
-    logger.error(f"Port {port} is not available after {timeout} seconds")
+    logger.error(f"المنفذ {port} غير متاح بعد {timeout} ثانية")
     return False
 
 def main():
-    """Main entry point"""
+    """نقطة البداية الرئيسية | Main entry point"""
     try:
-        # Set production environment
+        # Set production environment and enable port waiting
         os.environ['FLASK_ENV'] = 'production'
         os.environ['WAIT_FOR_PORT'] = 'true'
 
-        logger.info("Starting Silvarium Social production server")
-
+        logger.info("بدء تشغيل خادم سيلفاريوم الاجتماعي | Starting Silvarium Social production server")
 
         # Use configured port or default to 5000
         try:
             port = int(os.getenv('PORT', '5000'))
         except ValueError:
-            logger.warning("Invalid PORT environment variable, using default port 5000")
+            logger.warning("قيمة PORT غير صالحة، استخدام المنفذ الافتراضي 5000")
             port = 5000
 
         # Wait for port availability
         if not wait_for_port(port):
-            logger.error(f"Port {port} is not available - exiting")
+            logger.error(f"المنفذ {port} غير متاح - إنهاء التطبيق")
             return 1
 
         # Create Flask app
-        logger.info("Creating Flask application")
+        logger.info("إنشاء تطبيق Flask")
         app = create_app()
         if not app:
-            logger.error("Failed to create Flask application")
+            logger.error("فشل في إنشاء تطبيق Flask")
             return 1
 
         # Signal ready
-        logger.info('Server is ready')
+        logger.info('الخادم جاهز | Server is ready')
         print('ready')
         sys.stdout.flush()
 
@@ -108,7 +107,7 @@ def main():
         return 0
 
     except Exception as e:
-        logger.error(f"Error starting server: {str(e)}")
+        logger.error(f"خطأ في بدء الخادم: {str(e)}")
         logger.error(traceback.format_exc())
         return 1
 
