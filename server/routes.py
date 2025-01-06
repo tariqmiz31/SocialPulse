@@ -15,7 +15,19 @@ def setup_routes(app: Flask):
         """خدمة الملفات الثابتة للتطبيق"""
         if path and os.path.exists(os.path.join(app.static_folder, path)):
             return send_from_directory(app.static_folder, path)
-        return send_from_directory(app.static_folder, 'index.html')
+
+        # Check if index.html exists in static folder
+        index_path = os.path.join(app.static_folder, 'index.html')
+        if os.path.exists(index_path):
+            return send_from_directory(app.static_folder, 'index.html')
+        else:
+            # Return a simple message if index.html doesn't exist yet
+            return jsonify({
+                'message': {
+                    'ar': 'التطبيق قيد التطوير',
+                    'en': 'Application is under development'
+                }
+            })
 
     # معالجة الأخطاء
     @app.errorhandler(404)
@@ -28,7 +40,17 @@ def setup_routes(app: Flask):
                     'en': 'Path not found'
                 }
             }), 404
-        return send_from_directory(app.static_folder, 'index.html')
+
+        index_path = os.path.join(app.static_folder, 'index.html')
+        if os.path.exists(index_path):
+            return send_from_directory(app.static_folder, 'index.html')
+        else:
+            return jsonify({
+                'message': {
+                    'ar': 'الصفحة غير موجودة',
+                    'en': 'Page not found'
+                }
+            }), 404
 
     @app.errorhandler(500)
     def internal_error(error):

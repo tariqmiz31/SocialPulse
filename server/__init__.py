@@ -57,7 +57,7 @@ def init_firebase(logger) -> bool:
                 logger.error(f"Error reading service account file: {str(e)}")
                 return False
 
-            # Set environment variables from service account file
+            # Set environment variables
             os.environ['FIREBASE_PROJECT_ID'] = cred_dict['project_id']
             os.environ['FIREBASE_PRIVATE_KEY'] = cred_dict['private_key']
             os.environ['FIREBASE_CLIENT_EMAIL'] = cred_dict['client_email']
@@ -127,8 +127,9 @@ def create_app(testing=False):
         env = os.getenv('FLASK_ENV', 'development')
         app_config = config[env]
 
-        # Create Flask application
-        app = Flask(__name__, static_folder='../client/dist', static_url_path='/')
+        # Create Flask application with correct static folder path
+        static_folder = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'client', 'dist'))
+        app = Flask(__name__, static_folder=static_folder, static_url_path='/')
 
         # Configure port waiting
         port = int(os.getenv('PORT', str(DEFAULT_PORT)))
