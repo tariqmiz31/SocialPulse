@@ -53,13 +53,13 @@ def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 30) -> bool:
             time.sleep(1)
             logger.info(f"انتظار المنفذ {port}... | Waiting for port {port}...")
 
-    logger.error(f"المنفذ {port} غير متاح بعد {timeout} ثانية")
+    logger.error(f"المنفذ {port} غير متاح بعد {timeout} ثانية | Port {port} not available after {timeout} seconds")
     return False
 
 def main() -> int:
     """Main entry point | نقطة الدخول الرئيسية"""
     try:
-        # Set production environment and wait for port
+        # Set production environment and enable port waiting
         os.environ['FLASK_ENV'] = 'production'
         os.environ['WAIT_FOR_PORT'] = 'true'
 
@@ -77,7 +77,7 @@ def main() -> int:
             logger.error(f"المنفذ {port} غير متاح - إنهاء التطبيق")
             return 1
 
-        # Create Flask app with all the settings initialized
+        # Create Flask app
         logger.info("إنشاء تطبيق Flask")
         from server import create_app
         app = create_app()

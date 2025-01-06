@@ -92,7 +92,15 @@ export function SMSVerification({ onVerificationComplete, onCancel, action = 've
 
   const handleVerifyCode = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (verificationCode.length !== 4) return;
+
+    if (verificationCode.length !== 4) {
+      toast({
+        variant: "destructive",
+        title: "خطأ في الرمز",
+        description: "يجب إدخال 4 أرقام للتحقق",
+      });
+      return;
+    }
 
     setIsLoading(true);
 
@@ -175,7 +183,7 @@ export function SMSVerification({ onVerificationComplete, onCancel, action = 've
       {step === "verify" && (
         <form onSubmit={handleVerifyCode} className="space-y-4">
           <div className="space-y-2">
-            <Label>رمز التحقق</Label>
+            <Label>رمز التحقق (4 أرقام)</Label>
             <div className="flex justify-center my-4">
               <OTPInputGroup
                 maxLength={4}

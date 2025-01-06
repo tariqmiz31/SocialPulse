@@ -27,6 +27,9 @@ class Config:
     SMS_CODE_LENGTH = 4
     SMS_CODE_EXPIRY = 600  # 10 minutes
     SMS_MAX_ATTEMPTS = 5  # Maximum verification attempts per hour
+    SMS_PROVIDER_API_KEY = os.getenv('SMS_API_KEY', '')
+    SMS_PROVIDER_API_URL = os.getenv('SMS_API_URL', '')
+    SMS_SENDER_ID = os.getenv('SMS_SENDER_ID', 'Silvarium')
 
     # إعدادات اللغة | Language Settings
     DEFAULT_LANGUAGE = 'ar'  # Arabic as default language

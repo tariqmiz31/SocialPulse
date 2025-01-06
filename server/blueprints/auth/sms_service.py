@@ -3,46 +3,65 @@ import os
 import logging
 from datetime import datetime, timedelta
 import psycopg2
-from typing import Tuple, Optional, Dict, Any
-import aiohttp
-import json
+from typing import Tuple, Optional
+import random
+import string
 
 logger = logging.getLogger('silvarium_auth')
 
 class SMSService:
     def __init__(self):
         """Initialize SMS Service"""
-        self.api_url = os.getenv('SMS_API_URL', 'https://api.example.com/sms')  # Replace with actual SMS provider
-        self.api_key = os.getenv('SMS_API_KEY', '')
-        self.sender_id = os.getenv('SMS_SENDER_ID', 'Silvarium')
         self.max_attempts = int(os.getenv('SMS_MAX_ATTEMPTS', '5'))
         self.code_expiry = int(os.getenv('SMS_CODE_EXPIRY', '600'))  # 10 minutes
 
-    async def send_verification_code(self, phone_number: str, code: str) -> Tuple[bool, Optional[str]]:
+    def generate_verification_code(self) -> str:
+        """Generate a 4-digit verification code | توليد رمز تحقق من 4 أرقام"""
+        return ''.join(random.choices(string.digits, k=4))
+
+    def validate_saudi_phone(self, phone_number: str) -> bool:
+        """Validate Saudi phone number format | التحقق من صيغة رقم الهاتف السعودي"""
+        # Remove spaces and dashes
+        clean_number = phone_number.replace(' ', '').replace('-', '')
+        # Must start with +966 followed by 9 digits
+        return clean_number.startswith('+966') and len(clean_number) == 13 and clean_number[4:].isdigit()
+
+    async def send_verification_code(self, phone_number: str) -> Tuple[bool, Optional[str]]:
         """Send verification code via SMS"""
         try:
-            # For development, just log the code
-            logger.info(f"رمز التحقق للرقم {phone_number}: {code}")
-            return True, None
+            if not self.validate_saudi_phone(phone_number):
+                return False, "رقم الهاتف غير صحيح. يجب أن يبدأ بـ +966 ويتكون من 13 رقم"
 
-            # In production, uncomment and configure with your SMS provider
-            """
-            async with aiohttp.ClientSession() as session:
-                payload = {
-                    'to': phone_number,
-                    'message': f'رمز التحقق الخاص بك هو: {code}',
-                    'sender': self.sender_id
-                }
-                headers = {
-                    'Authorization': f'Bearer {self.api_key}',
-                    'Content-Type': 'application/json'
-                }
-                async with session.post(self.api_url, json=payload, headers=headers) as response:
-                    if response.status == 200:
-                        return True, None
-                    error_data = await response.text()
-                    return False, f"Error sending SMS: {error_data}"
-            """
+            verification_code = self.generate_verification_code()
+
+            # For development, just log the code
+            logger.info(f"رمز التحقق للرقم {phone_number}: {verification_code}")
+
+            # Save the code in database
+            conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+            cur = conn.cursor()
+
+            expires_at = datetime.now() + timedelta(minutes=10)
+            cur.execute("""
+                UPDATE users 
+                SET verification_code = %s,
+                    verification_code_expires_at = %s
+                WHERE phone_number = %s
+            """, (verification_code, expires_at, phone_number))
+
+            if cur.rowcount == 0:
+                # If no user exists with this phone number, create a temporary one
+                temp_username = f"temp_{phone_number}_{int(datetime.now().timestamp())}"
+                cur.execute("""
+                    INSERT INTO users (username, phone_number, verification_code, verification_code_expires_at, status)
+                    VALUES (%s, %s, %s, %s, 'pending')
+                """, (temp_username, phone_number, verification_code, expires_at))
+
+            conn.commit()
+            cur.close()
+            conn.close()
+
+            return True, None
 
         except Exception as e:
             logger.error(f"خطأ في إرسال رسالة SMS: {str(e)}")
@@ -62,8 +81,8 @@ class SMSService:
                 AND attempt_time > NOW() - INTERVAL '1 hour'
             """, (phone_number,))
 
-            count = cur.fetchone()[0]
-            
+            count = cur.fetchone()[0] if cur.fetchone() else 0
+
             # Insert new attempt
             cur.execute("""
                 INSERT INTO verification_attempts (phone_number, attempt_time)
@@ -83,6 +102,12 @@ class SMSService:
     async def verify_code(self, phone_number: str, code: str) -> Tuple[bool, Optional[str]]:
         """Verify SMS code"""
         try:
+            if len(code) != 4 or not code.isdigit():
+                return False, "رمز التحقق يجب أن يكون 4 أرقام"
+
+            if not self.validate_saudi_phone(phone_number):
+                return False, "رقم الهاتف غير صحيح"
+
             conn = psycopg2.connect(os.getenv('DATABASE_URL'))
             cur = conn.cursor()
 
