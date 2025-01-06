@@ -17,8 +17,8 @@ from firebase_admin import credentials
 
 # Global configuration
 DEFAULT_PORT = 5000
-WAIT_FOR_PORT_TIMEOUT = 30
-WAIT_FOR_PORT = True  # Always wait for port in production
+WAIT_FOR_PORT_TIMEOUT = 60  # Increased timeout for production
+WAIT_FOR_PORT = True  # Always wait for port
 
 def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = WAIT_FOR_PORT_TIMEOUT) -> bool:
     """Wait for port to be available"""

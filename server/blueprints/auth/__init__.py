@@ -36,15 +36,15 @@ def get_bilingual_message(ar_msg: str, en_msg: str) -> dict:
         }
     }
 
-# Update the send_verification_code route
 @auth_bp.route('/send-verification-code', methods=['POST'])
 async def send_verification_code():
     """إرسال رمز التحقق عبر SMS | Send verification code via SMS"""
     try:
         data = request.get_json()
         phone_number = data.get('phoneNumber')
+        action = data.get('action', 'verify')  # 'verify' or 'reset'
 
-        logger.info(f"Received verification code request for phone number: {phone_number}")
+        logger.info(f"Received verification code request for phone number: {phone_number}, action: {action}")
 
         if not phone_number:
             logger.warning("لم يتم توفير رقم الهاتف | Phone number not provided")
@@ -71,7 +71,7 @@ async def send_verification_code():
 
         # Check if phone number exists
         cur.execute("""
-            SELECT id FROM users 
+            SELECT id, status FROM users 
             WHERE phone_number = %s
         """, (phone_number,))
 
@@ -79,12 +79,19 @@ async def send_verification_code():
 
         if user:
             # Update existing user's verification code
+            user_id, user_status = user
+            if action == 'verify' and user_status == 'active':
+                return jsonify(get_bilingual_message(
+                    "رقم الهاتف مسجل مسبقاً",
+                    "Phone number is already verified"
+                )), 400
+
             cur.execute("""
                 UPDATE users 
                 SET verification_code = %s, 
                     verification_code_expires_at = %s 
                 WHERE id = %s
-            """, (verification_code, expires_at, user[0]))
+            """, (verification_code, expires_at, user_id))
         else:
             # Create temporary user record
             temp_username = f"temp_{phone_number}_{int(time.time())}"
@@ -122,7 +129,6 @@ async def send_verification_code():
             "Error sending verification code"
         )), 500
 
-# Update verify-phone route
 @auth_bp.route('/verify-phone', methods=['POST'])
 async def verify_phone():
     """التحقق من رقم الهاتف | Verify phone number"""
@@ -130,6 +136,7 @@ async def verify_phone():
         data = request.get_json()
         phone_number = data.get('phoneNumber')
         code = data.get('code')
+        action = data.get('action', 'verify')  # 'verify' or 'reset'
 
         if not all([phone_number, code]):
             logger.warning("بيانات غير مكتملة في طلب التحقق من رقم الهاتف")
@@ -150,13 +157,33 @@ async def verify_phone():
         conn = psycopg2.connect(os.getenv('DATABASE_URL'))
         cur = conn.cursor()
 
-        cur.execute("""
-            UPDATE users 
-            SET verification_code = NULL, 
-                verification_code_expires_at = NULL,
-                status = 'active'
-            WHERE phone_number = %s
-        """, (phone_number,))
+        # Update user status based on action
+        if action == 'verify':
+            cur.execute("""
+                UPDATE users 
+                SET verification_code = NULL, 
+                    verification_code_expires_at = NULL,
+                    status = 'active'
+                WHERE phone_number = %s
+                RETURNING id
+            """, (phone_number,))
+        else:
+            cur.execute("""
+                UPDATE users 
+                SET verification_code = NULL, 
+                    verification_code_expires_at = NULL
+                WHERE phone_number = %s
+                RETURNING id
+            """, (phone_number,))
+
+        user_id = cur.fetchone()
+        if not user_id:
+            cur.close()
+            conn.close()
+            return jsonify(get_bilingual_message(
+                "لم يتم العثور على المستخدم",
+                "User not found"
+            )), 404
 
         conn.commit()
         cur.close()

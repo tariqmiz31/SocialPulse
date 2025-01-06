@@ -42,7 +42,7 @@ console_handler = logging.StreamHandler()
 console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 
-def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 30) -> bool:
+def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 60) -> bool:
     """Wait for port availability | انتظار جاهزية المنفذ"""
     start_time = time.time()
     while time.time() - start_time < timeout:
@@ -64,7 +64,7 @@ def main():
     try:
         # Set production environment and enable port waiting
         os.environ['FLASK_ENV'] = 'production'
-        os.environ['WAIT_FOR_PORT'] = 'true'
+        os.environ['WAIT_FOR_PORT'] = 'true'  # Always wait for port in production
 
         logger.info("بدء تشغيل خادم سيلفاريوم الاجتماعي | Starting Silvarium Social production server")
 
@@ -75,8 +75,8 @@ def main():
             logger.warning("قيمة PORT غير صالحة، استخدام المنفذ الافتراضي 5000")
             port = 5000
 
-        # Wait for port availability
-        if not wait_for_port(port):
+        # Wait for port availability with increased timeout
+        if not wait_for_port(port, timeout=60):
             logger.error(f"المنفذ {port} غير متاح - إنهاء التطبيق")
             return 1
 
@@ -86,6 +86,13 @@ def main():
         if not app:
             logger.error("فشل في إنشاء تطبيق Flask")
             return 1
+
+        # Initialize SMS verification tables
+        from server.blueprints.auth import init_verification_tables
+        if not init_verification_tables():
+            logger.error("فشل في تهيئة جداول التحقق")
+            return 1
+        logger.info("تم تهيئة جداول التحقق بنجاح")
 
         # Signal ready
         logger.info('الخادم جاهز | Server is ready')

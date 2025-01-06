@@ -18,24 +18,17 @@ class FirebaseAuthService:
     def __init__(self):
         """Initialize Firebase Auth Service"""
         try:
-            # Load service account JSON file
-            service_account_path = 'attached_assets/silva-deb1c-firebase-adminsdk-g19p8-5d6dc42cd6.json'
-
-            if not os.path.exists(service_account_path):
-                logger.error("Service account file not found | ملف حساب الخدمة غير موجود")
-                return
-
-            with open(service_account_path, 'r') as file:
-                cred_dict = json.load(file)
-
-            # Set environment variables
-            os.environ['FIREBASE_PROJECT_ID'] = cred_dict['project_id']
-            os.environ['FIREBASE_PRIVATE_KEY'] = cred_dict['private_key']
-            os.environ['FIREBASE_CLIENT_EMAIL'] = cred_dict['client_email']
+            # Load service account JSON from environment variables
+            cred_dict = {
+                "type": "service_account",
+                "project_id": os.getenv('FIREBASE_PROJECT_ID'),
+                "private_key": os.getenv('FIREBASE_PRIVATE_KEY'),
+                "client_email": os.getenv('FIREBASE_CLIENT_EMAIL'),
+            }
 
             # Initialize Firebase Admin SDK if not already initialized
             if not firebase_admin._apps:
-                cred = credentials.Certificate(service_account_path)
+                cred = credentials.Certificate(cred_dict)
                 firebase_admin.initialize_app(cred)
                 logger.info("تم تهيئة خدمة Firebase بنجاح | Firebase service initialized successfully")
             else:
@@ -47,6 +40,17 @@ class FirebaseAuthService:
     async def send_verification_code(self, phone_number: str) -> Dict[str, Any]:
         """Send SMS verification code | إرسال رمز التحقق عبر SMS"""
         try:
+            # Validate Saudi phone number
+            if not phone_number.startswith('+966') or len(phone_number) != 13:
+                logger.warning(f"رقم هاتف غير صالح: {phone_number}")
+                return {
+                    'success': False,
+                    'message': {
+                        'ar': 'رقم الهاتف غير صالح، يجب أن يبدأ بـ +966',
+                        'en': 'Invalid phone number, must start with +966'
+                    }
+                }
+
             # Rate limiting check
             if not await self._check_rate_limit(phone_number):
                 logger.warning(f"تم تجاوز الحد المسموح لإرسال الرموز: {phone_number}")
@@ -65,7 +69,7 @@ class FirebaseAuthService:
             # Save code in database | حفظ الرمز في قاعدة البيانات
             await self._save_verification_code(phone_number, verification_code)
 
-            # Here you would integrate with your SMS service to actually send the code
+            # Here we would integrate with Firebase Phone Auth
             # For development, we'll log the code
             logger.info(f"رمز التحقق للرقم {phone_number}: {verification_code}")
 
