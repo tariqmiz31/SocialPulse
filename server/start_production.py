@@ -41,118 +41,89 @@ console_handler = logging.StreamHandler()
 console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 
-def init_firebase():
-    """Initialize Firebase with SMS configuration"""
+def check_firebase_prerequisites() -> bool:
+    """Check if all Firebase prerequisites are met"""
     try:
-        if not firebase_admin._apps:
-            service_account_path = 'attached_assets/silva-deb1c-firebase-adminsdk-g19p8-5d6dc42cd6.json'
+        service_account_path = 'attached_assets/silva-deb1c-firebase-adminsdk-g19p8-5d6dc42cd6.json'
 
-            if not os.path.exists(service_account_path):
-                logger.error(f"Service account file not found at path: {service_account_path}")
-                return False
+        if not os.path.exists(service_account_path):
+            logger.error(f"Service account file not found at: {service_account_path}")
+            return False
 
-            try:
-                with open(service_account_path, 'r') as file:
-                    cred_dict = json.load(file)
-                    logger.info("Successfully loaded service account file")
-            except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse service account JSON: {str(e)}")
-                return False
-            except Exception as e:
-                logger.error(f"Error reading service account file: {str(e)}")
-                return False
+        try:
+            with open(service_account_path, 'r') as file:
+                cred_dict = json.load(file)
+                logger.info("Successfully loaded service account file")
 
-            try:
                 # Set environment variables
                 os.environ['FIREBASE_PROJECT_ID'] = cred_dict['project_id']
                 os.environ['FIREBASE_PRIVATE_KEY'] = cred_dict['private_key']
                 os.environ['FIREBASE_CLIENT_EMAIL'] = cred_dict['client_email']
 
-                cred = credentials.Certificate(service_account_path)
-                firebase_admin.initialize_app(cred, {
-                    'auth_settings': {
-                        'sms_verification_message': 'يرجى استخدام الرقم المؤقت لاستعادة كلمة المرور: %CODE%',
-                        'code_length': 4
-                    }
-                })
-                logger.info(f"Firebase initialized successfully for project: {cred_dict['project_id']}")
                 return True
-            except Exception as e:
-                logger.error(f"Firebase initialization error: {str(e)}\n{traceback.format_exc()}")
-                return False
 
-        logger.info("Firebase already initialized")
-        return True
+        except (IOError, json.JSONDecodeError) as e:
+            logger.error(f"Error reading service account file: {str(e)}")
+            return False
 
     except Exception as e:
-        logger.error(f"Unexpected error in Firebase initialization: {str(e)}\n{traceback.format_exc()}")
+        logger.error(f"Error checking Firebase prerequisites: {str(e)}")
+        logger.error(traceback.format_exc())
         return False
 
 def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = WAIT_FOR_PORT_TIMEOUT) -> bool:
-    """Wait for port availability | انتظار حتى يصبح المنفذ متاحاً"""
+    """Wait for port availability"""
     start_time = time.time()
     while time.time() - start_time < timeout:
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                 sock.bind((host, port))
                 sock.close()
-                logger.info(f"Port {port} is available | المنفذ {port} متاح")
+                logger.info(f"Port {port} is available")
                 return True
         except socket.error:
-            logger.info(f"Waiting for port {port}... | انتظار المنفذ {port}...")
+            logger.info(f"Waiting for port {port}...")
             time.sleep(1)
 
-    logger.error(f"Port {port} is not available | المنفذ {port} غير متاح")
+    logger.error(f"Port {port} is not available after {timeout} seconds")
     return False
 
 def main():
-    """Main entry point | النقطة الرئيسية لبدء الخادم"""
+    """Main entry point"""
     try:
-        # Set production environment
+        # Set production environment and enable port waiting
         os.environ['FLASK_ENV'] = 'production'
-
-        # Always set wait_for_port to true in production
         os.environ['WAIT_FOR_PORT'] = 'true'
 
         logger.info("Starting Silvarium Social production server")
 
-        # Initialize Firebase first with detailed logging
-        logger.info("Initializing Firebase...")
-        if not init_firebase():
-            logger.error("Failed to initialize Firebase, checking service account file...")
+        # Check Firebase prerequisites first
+        logger.info("Checking Firebase prerequisites...")
+        if not check_firebase_prerequisites():
+            logger.error("Failed to meet Firebase prerequisites - exiting")
             return 1
 
         # Use configured port or default to 5000
         try:
-            port = int(os.getenv('PORT', str(DEFAULT_PORT)))
+            port = int(os.getenv('PORT', '5000'))
         except ValueError:
             logger.warning("Invalid PORT environment variable, using default port 5000")
-            port = DEFAULT_PORT
+            port = 5000
 
-        # Always wait for port availability
+        # Wait for port availability
         if not wait_for_port(port):
-            logger.warning(f"Port {port} is not available, trying to find another port...")
-            try:
-                for test_port in range(port + 1, port + 10):
-                    if wait_for_port(test_port):
-                        port = test_port
-                        break
-                else:
-                    logger.error("No available ports found")
-                    return 1
-            except Exception as e:
-                logger.error(f"Error finding available port: {str(e)}")
-                return 1
+            logger.error(f"Port {port} is not available - exiting")
+            return 1
 
         # Create Flask app
-        logger.info("Creating Flask application | إنشاء تطبيق Flask")
+        logger.info("Creating Flask application")
         app = create_app()
         if not app:
-            logger.error("Failed to create Flask application | فشل في إنشاء تطبيق Flask")
+            logger.error("Failed to create Flask application")
             return 1
 
         # Signal ready
-        logger.info('Server is ready | الخادم جاهز')
+        logger.info('Server is ready')
         print('ready')
         sys.stdout.flush()
 
@@ -171,7 +142,8 @@ def main():
         return 0
 
     except Exception as e:
-        logger.error(f"Error starting server: {str(e)}\n{traceback.format_exc()}")
+        logger.error(f"Error starting server: {str(e)}")
+        logger.error(traceback.format_exc())
         return 1
 
 if __name__ == "__main__":

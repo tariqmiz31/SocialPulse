@@ -16,11 +16,15 @@ import firebase_admin
 from firebase_admin import credentials
 
 # Global configuration
-DEFAULT_PORT = 5000  # Changed to 5000 as it's commonly available
+DEFAULT_PORT = 5000
 WAIT_FOR_PORT_TIMEOUT = 30
+WAIT_FOR_PORT = os.getenv('WAIT_FOR_PORT', 'true').lower() == 'true'
 
 def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = WAIT_FOR_PORT_TIMEOUT) -> bool:
-    """Wait for port to be available | انتظار حتى يصبح المنفذ متاحاً"""
+    """Wait for port to be available"""
+    if not WAIT_FOR_PORT:
+        return True
+
     start_time = time.time()
     while time.time() - start_time < timeout:
         try:
@@ -32,20 +36,8 @@ def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = WAIT_FOR_PORT
             time.sleep(1)
     return False
 
-def find_available_port(start_port: int = DEFAULT_PORT, max_attempts: int = 10) -> int:
-    """Find an available port starting from the given port | البحث عن منفذ متاح بدءاً من المنفذ المحدد"""
-    for port in range(start_port, start_port + max_attempts):
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                sock.bind(('0.0.0.0', port))
-                sock.close()
-                return port
-        except socket.error:
-            continue
-    raise RuntimeError(f"No available ports found between {start_port} and {start_port + max_attempts}")
-
 def init_firebase(logger) -> bool:
-    """Initialize Firebase | تهيئة Firebase"""
+    """Initialize Firebase"""
     try:
         if not firebase_admin._apps:
             # Use the service account file from attached_assets
@@ -90,12 +82,15 @@ def init_firebase(logger) -> bool:
         return False
 
 def create_app(testing=False):
-    """Create and configure Flask application | إنشاء وتكوين تطبيق Flask"""
+    """Create and configure Flask application"""
     try:
         # Load environment variables first
         load_dotenv()
 
-        # Initialize logger first
+        # Set port waiting configuration
+        os.environ['WAIT_FOR_PORT'] = 'true'
+
+        # Initialize logger
         logger = logging.getLogger('silvarium')
         logger.setLevel(logging.INFO)
 
@@ -118,28 +113,27 @@ def create_app(testing=False):
             console_handler.setFormatter(formatter)
             logger.addHandler(console_handler)
 
-        # Initialize Firebase first
-        if not init_firebase(logger):
-            logger.error("Failed to initialize Firebase")
+        # Initialize Firebase
+        try:
+            if not init_firebase(logger):
+                logger.error("فشل في تهيئة Firebase")
+                return None
+
+        except Exception as firebase_error:
+            logger.error(f"خطأ في تهيئة Firebase: {str(firebase_error)}")
             return None
 
-        # Determine environment | تحديد بيئة التشغيل
+        # Determine environment
         env = os.getenv('FLASK_ENV', 'development')
         app_config = config[env]
 
-        # Create application | إنشاء التطبيق
+        # Create Flask application
         app = Flask(__name__, static_folder='../client/dist', static_url_path='/')
 
-        # Try to find an available port
-        try:
-            start_port = int(os.getenv('PORT', str(DEFAULT_PORT)))
-            if not wait_for_port(start_port):
-                port = find_available_port(start_port)
-            else:
-                port = start_port
-            logger.info(f"Using port: {port}")
-        except Exception as e:
-            logger.error(f"Failed to find available port: {str(e)}")
+        # Configure port waiting
+        port = int(os.getenv('PORT', str(DEFAULT_PORT)))
+        if not wait_for_port(port):
+            logger.error(f"المنفذ {port} غير متاح بعد {WAIT_FOR_PORT_TIMEOUT} ثانية")
             return None
 
         app.config.update(
@@ -155,33 +149,33 @@ def create_app(testing=False):
             HOST='0.0.0.0'
         )
 
-        # Setup CORS | إعداد CORS
+        # Setup CORS
         CORS(app, supports_credentials=True)
 
-        # Setup session | إعداد الجلسة
+        # Setup session
         if not testing and not os.path.exists(app_config.SESSION_FILE_DIR):
             os.makedirs(app_config.SESSION_FILE_DIR)
         Session(app)
 
-        # Initialize routes | إعداد المسارات
+        # Initialize routes
         app = setup_routes(app)
-        logger.info("Routes setup complete")
+        logger.info("تم إعداد المسارات بنجاح")
 
-        # Initialize authentication after routes | تهيئة المصادقة بعد المسارات
+        # Initialize authentication
         from server.blueprints.auth import init_auth
         app = init_auth(app)
         if app:
-            logger.info("Authentication initialized successfully")
+            logger.info("تم تهيئة المصادقة بنجاح")
         else:
-            logger.error("Failed to initialize authentication")
+            logger.error("فشل في تهيئة المصادقة")
             return None
 
-        logger.info(f"Application initialized successfully on port {port}")
+        logger.info(f"تم تهيئة التطبيق بنجاح على المنفذ {port}")
         return app
 
     except Exception as e:
         if 'logger' in locals():
-            logger.error(f"Error initializing application: {str(e)}")
+            logger.error(f"خطأ في تهيئة التطبيق: {str(e)}")
         return None
 
 if __name__ == '__main__':

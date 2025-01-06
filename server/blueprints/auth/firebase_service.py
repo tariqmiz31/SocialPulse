@@ -53,6 +53,17 @@ class FirebaseAuthService:
     async def send_verification_code(self, phone_number: str) -> Dict[str, Any]:
         """Send SMS verification code | إرسال رمز التحقق عبر SMS"""
         try:
+            # Rate limiting check
+            if not await self._check_rate_limit(phone_number):
+                logger.warning(f"تم تجاوز الحد المسموح لإرسال الرموز: {phone_number}")
+                return {
+                    'success': False,
+                    'message': {
+                        'ar': 'تم تجاوز الحد المسموح من المحاولات، يرجى المحاولة لاحقاً',
+                        'en': 'Rate limit exceeded, please try again later'
+                    }
+                }
+
             # Validate phone number format | التحقق من تنسيق رقم الهاتف
             if not phone_number.startswith('+'):
                 logger.warning(f"رقم هاتف بتنسيق غير صحيح: {phone_number}")
@@ -64,21 +75,6 @@ class FirebaseAuthService:
                     }
                 }
 
-            # Check verification code attempts | التحقق من عدد محاولات إرسال الرمز
-            try:
-                user = auth.get_user_by_phone_number(phone_number)
-                if user and user.disabled:
-                    logger.warning(f"الحساب معطل لرقم الهاتف: {phone_number}")
-                    return {
-                        'success': False,
-                        'message': {
-                            'ar': 'هذا الحساب معطل، يرجى الاتصال بالدعم',
-                            'en': 'This account is disabled, please contact support'
-                        }
-                    }
-            except auth.UserNotFoundError:
-                pass  # This is fine, user doesn't exist yet
-
             # Generate code | توليد الرمز
             verification_code = ''.join(random.choices(string.digits, k=4))
             logger.info(f"تم توليد رمز التحقق: {verification_code}")
@@ -86,7 +82,10 @@ class FirebaseAuthService:
             # Save code in database | حفظ الرمز في قاعدة البيانات
             await self._save_verification_code(phone_number, verification_code)
 
-            logger.info(f"تم إرسال رمز التحقق بنجاح للرقم: {phone_number}")
+            # Here you would integrate with your SMS service to actually send the code
+            # For development, we'll log the code
+            logger.info(f"رمز التحقق للرقم {phone_number}: {verification_code}")
+
             return {
                 'success': True,
                 'message': {
@@ -105,17 +104,57 @@ class FirebaseAuthService:
                 }
             }
 
+    async def _check_rate_limit(self, phone_number: str) -> bool:
+        """Check rate limit for SMS sending | التحقق من حد الإرسال"""
+        try:
+            conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+            cur = conn.cursor()
+
+            # Get number of attempts in the last hour
+            cur.execute("""
+                SELECT COUNT(*) 
+                FROM verification_attempts 
+                WHERE phone_number = %s 
+                AND attempt_time > NOW() - INTERVAL '1 hour'
+            """, (phone_number,))
+
+            count = cur.fetchone()[0]
+
+            # Insert new attempt
+            cur.execute("""
+                INSERT INTO verification_attempts (phone_number, attempt_time)
+                VALUES (%s, NOW())
+            """, (phone_number,))
+
+            conn.commit()
+            cur.close()
+            conn.close()
+
+            # Allow maximum 5 attempts per hour
+            return count < 5
+
+        except Exception as e:
+            logger.error(f"خطأ في التحقق من حد الإرسال: {str(e)}")
+            # In case of error, allow the attempt
+            return True
+
     async def _save_verification_code(self, phone_number: str, code: str) -> None:
         """Save verification code in database | حفظ رمز التحقق في قاعدة البيانات"""
         try:
             conn = psycopg2.connect(os.getenv('DATABASE_URL'))
             cur = conn.cursor()
 
-            expires_at = datetime.now() + timedelta(minutes=10)
-            temp_username = f"temp_{phone_number}_{int(time.time())}"
-            temp_password = 'temporary_password'  # This will be updated when user sets their password
+            # Create verification_attempts table if not exists
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS verification_attempts (
+                    id SERIAL PRIMARY KEY,
+                    phone_number VARCHAR(20) NOT NULL,
+                    attempt_time TIMESTAMP NOT NULL
+                )
+            """)
 
-            # Try to update existing user first
+            # Update or insert verification code
+            expires_at = datetime.now() + timedelta(minutes=10)
             cur.execute("""
                 UPDATE users 
                 SET verification_code = %s,
@@ -124,11 +163,12 @@ class FirebaseAuthService:
             """, (code, expires_at, phone_number))
 
             if cur.rowcount == 0:
-                # If no user exists, create a new temporary user
+                # If no user exists, create a temporary user
+                temp_username = f"temp_{phone_number}_{int(time.time())}"
                 cur.execute("""
-                    INSERT INTO users (username, password, phone_number, verification_code, verification_code_expires_at, status)
-                    VALUES (%s, %s, %s, %s, %s, 'pending')
-                """, (temp_username, temp_password, phone_number, code, expires_at))
+                    INSERT INTO users (username, phone_number, verification_code, verification_code_expires_at, status)
+                    VALUES (%s, %s, %s, %s, 'pending')
+                """, (temp_username, phone_number, code, expires_at))
 
             conn.commit()
             cur.close()
@@ -141,41 +181,38 @@ class FirebaseAuthService:
                 conn.close()
             raise
 
-    def verify_phone_number(self, phone_number: str, verification_id: str, code: str) -> Tuple[bool, Optional[str]]:
-        """Verify phone number and code | التحقق من رقم الهاتف والرمز"""
+    async def verify_code(self, phone_number: str, code: str) -> Tuple[bool, Optional[str]]:
+        """Verify SMS code | التحقق من رمز SMS"""
         try:
-            # Validate input data | التحقق من صحة البيانات
-            if not all([phone_number, verification_id, code]):
-                logger.warning("بيانات التحقق غير مكتملة")
-                return False, "يجب توفير جميع بيانات التحقق | All verification data must be provided"
+            conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+            cur = conn.cursor()
 
-            # Verify session token | التحقق من رمز الجلسة
-            try:
-                decoded_token = auth.verify_id_token(verification_id)
-                if not decoded_token:
-                    logger.warning(f"رمز التحقق غير صالح لرقم الهاتف: {phone_number}")
-                    return False, "رمز التحقق غير صالح | Invalid verification code"
-            except auth.InvalidIdTokenError:
-                logger.warning(f"جلسة التحقق منتهية الصلاحية لرقم الهاتف: {phone_number}")
-                return False, "جلسة التحقق منتهية الصلاحية | Verification session expired"
+            cur.execute("""
+                SELECT verification_code, verification_code_expires_at
+                FROM users
+                WHERE phone_number = %s
+            """, (phone_number,))
 
-            # Verify phone number match | التحقق من تطابق رقم الهاتف
-            if decoded_token.get('phone_number') != phone_number:
-                logger.warning(f"رقم الهاتف لا يتطابق مع جلسة التحقق: {phone_number}")
-                return False, "رقم الهاتف غير متطابق | Phone number mismatch"
+            result = cur.fetchone()
+            cur.close()
+            conn.close()
 
-            logger.info(f"تم التحقق من رقم الهاتف بنجاح: {phone_number}")
+            if not result:
+                return False, "رقم الهاتف غير مسجل | Phone number not registered"
+
+            stored_code, expires_at = result
+
+            if datetime.now() > expires_at:
+                return False, "انتهت صلاحية الرمز | Code expired"
+
+            if code != stored_code:
+                return False, "رمز التحقق غير صحيح | Invalid verification code"
+
             return True, None
 
-        except auth.ExpiredIdTokenError:
-            logger.error("رمز التحقق منتهي الصلاحية")
-            return False, "رمز التحقق منتهي الصلاحية | Verification code expired"
-        except auth.InvalidIdTokenError:
-            logger.error("رمز التحقق غير صالح")
-            return False, "رمز التحقق غير صالح | Invalid verification code"
         except Exception as e:
-            logger.error(f"خطأ في التحقق من رقم الهاتف: {str(e)}")
-            return False, f"خطأ في التحقق من رقم الهاتف | Error verifying phone number: {str(e)}"
+            logger.error(f"خطأ في التحقق من الرمز: {str(e)}")
+            return False, f"خطأ في التحقق من الرمز | Error verifying code: {str(e)}"
 
 # Initialize Firebase Auth Service
 try:

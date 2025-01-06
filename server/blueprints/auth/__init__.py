@@ -38,6 +38,8 @@ def send_verification_code():
         data = request.get_json()
         phone_number = data.get('phoneNumber')
 
+        logger.info(f"Received verification code request for phone number: {phone_number}")
+
         if not phone_number:
             logger.warning("لم يتم توفير رقم الهاتف | Phone number not provided")
             return jsonify(get_bilingual_message(
@@ -49,6 +51,8 @@ def send_verification_code():
         verification_code = generate_verification_code()
         expires_at = datetime.now() + timedelta(minutes=10)  # Code expires in 10 minutes
 
+        logger.info(f"Generated verification code for {phone_number}")
+
         conn = psycopg2.connect(os.getenv('DATABASE_URL'))
         cur = conn.cursor()
 
@@ -59,6 +63,7 @@ def send_verification_code():
         """, (phone_number,))
 
         user = cur.fetchone()
+        logger.info(f"Found existing user for phone number {phone_number}: {user is not None}")
 
         if user:
             # Update existing user's verification code
@@ -68,6 +73,7 @@ def send_verification_code():
                     verification_code_expires_at = %s 
                 WHERE id = %s
             """, (verification_code, expires_at, user[0]))
+            logger.info(f"Updated verification code for existing user: {user[0]}")
         else:
             # Create temporary user record with phone number and verification code
             temp_username = f"temp_{phone_number}_{int(time.time())}"
@@ -77,6 +83,7 @@ def send_verification_code():
                 INSERT INTO users (username, password, phone_number, verification_code, verification_code_expires_at, role, status)
                 VALUES (%s, %s, %s, %s, %s, 'user', 'pending')
             """, (temp_username, temp_password, phone_number, verification_code, expires_at))
+            logger.info(f"Created temporary user for phone number: {phone_number}")
 
         conn.commit()
         cur.close()
@@ -92,6 +99,7 @@ def send_verification_code():
 
     except Exception as e:
         logger.error(f"خطأ في إرسال رمز التحقق: {str(e)}")
+        logger.error(traceback.format_exc())
         if 'conn' in locals():
             conn.close()
         return jsonify(get_bilingual_message(
