@@ -119,7 +119,8 @@ export function registerRoutes(app: Express): Server {
     res.json({
       status: "running",
       timestamp: new Date().toISOString(),
-      environment: process.env.NODE_ENV
+      environment: process.env.NODE_ENV,
+      auth_method: "email_verification_only" // Added to document that we only use email verification
     });
   });
 
