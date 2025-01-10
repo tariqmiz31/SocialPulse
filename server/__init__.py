@@ -2,13 +2,14 @@
 import os
 from flask import Flask
 from flask_cors import CORS
+from flask_mail import Mail
 from flask_session import Session
 from datetime import timedelta
 import logging
 import socket
 import time
 from logging.handlers import RotatingFileHandler
-from server.routes import setup_routes
+from server.routes import register_routes  # Changed from setup_routes to register_routes
 from server.config import config
 from dotenv import load_dotenv
 
@@ -33,6 +34,9 @@ def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
 
     logger.error(f"المنفذ {port} غير متاح بعد {timeout} ثانية")
     return False
+
+# Initialize Flask-Mail
+mail = Mail()
 
 def create_app(testing=False):
     """Create and configure Flask application"""
@@ -59,10 +63,7 @@ def create_app(testing=False):
 
         # Initialize authentication and email service
         try:
-            # Import and initialize email service first
-            from server.blueprints.auth.email_service import email_service
             from server.blueprints.auth import init_verification_tables
-
             if not init_verification_tables():
                 logger.error("فشل في تهيئة جداول التحقق")
                 return None
@@ -102,7 +103,13 @@ def create_app(testing=False):
             PORT=port,
             HOST='0.0.0.0',
             WAIT_FOR_PORT=True,  # Always wait for port
-            WAIT_FOR_PORT_TIMEOUT=120  # 2 minutes timeout
+            WAIT_FOR_PORT_TIMEOUT=120,  # 2 minutes timeout
+            MAIL_SERVER='smtp.gmail.com',
+            MAIL_PORT=587,
+            MAIL_USE_TLS=True,
+            MAIL_USERNAME=os.getenv('MAIL_USERNAME'),
+            MAIL_PASSWORD=os.getenv('MAIL_PASSWORD'),
+            MAIL_DEFAULT_SENDER=os.getenv('MAIL_USERNAME')
         )
 
         # Setup CORS
@@ -113,12 +120,12 @@ def create_app(testing=False):
             os.makedirs(app_config.SESSION_FILE_DIR)
         Session(app)
 
-        # Initialize email service
-        email_service.init_mail(app)
+        # Initialize Flask-Mail with app
+        mail.init_app(app)
         logger.info("تم تهيئة خدمة البريد الإلكتروني بنجاح")
 
         # Initialize routes
-        app = setup_routes(app)
+        app = register_routes(app)  # Changed from setup_routes to register_routes
         logger.info("تم إعداد المسارات بنجاح")
 
         # Initialize authentication

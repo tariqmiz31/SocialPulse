@@ -13,8 +13,6 @@ export const users = pgTable("users", {
   status: text("status", { enum: ["active", "pending", "blocked"] }).notNull().default("pending"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
-  verification_code: text("verification_code"),
-  verification_code_expires_at: timestamp("verification_code_expires_at"),
 });
 
 export const insertUserSchema = createInsertSchema(users);
@@ -26,25 +24,25 @@ export const verificationCodes = pgTable("verification_codes", {
   id: serial("id").primaryKey(),
   userId: serial("user_id").references(() => users.id),
   code: text("code").notNull(),
-  type: text("type", { enum: ["reset_password", "email_verification"] }).notNull(),
+  type: text("type", { enum: ["reset_password", "email_verification", "role_change"] }).notNull(),
   expiresAt: timestamp("expires_at").notNull(),
   verified: boolean("verified").default(false),
   createdAt: timestamp("created_at").defaultNow(),
 });
+
+export const insertVerificationCodeSchema = createInsertSchema(verificationCodes, {
+  type: z.enum(["reset_password", "email_verification", "role_change"]),
+});
+
+export const selectVerificationCodeSchema = createSelectSchema(verificationCodes);
+export type InsertVerificationCode = typeof verificationCodes.$inferInsert;
+export type SelectVerificationCode = typeof verificationCodes.$inferSelect;
 
 export const verificationAttempts = pgTable("verification_attempts", {
   id: serial("id").primaryKey(),
   email: text("email").notNull(),
   attemptTime: timestamp("attempt_time").defaultNow(),
 });
-
-export const insertVerificationCodeSchema = createInsertSchema(verificationCodes, {
-  type: z.enum(["reset_password", "email_verification"]),
-});
-
-export const selectVerificationCodeSchema = createSelectSchema(verificationCodes);
-export type InsertVerificationCode = typeof verificationCodes.$inferInsert;
-export type SelectVerificationCode = typeof verificationCodes.$inferSelect;
 
 export const socialPlatforms = pgTable("social_platforms", {
   id: serial("id").primaryKey(),

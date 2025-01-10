@@ -11,6 +11,7 @@ from flask_mail import Mail, Message
 from flask import Flask, send_from_directory, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
+from server.routes import register_routes
 
 # تحميل المتغيرات البيئية
 load_dotenv()
@@ -108,8 +109,7 @@ def create_app():
             delattr(get_db, 'db')
 
     # تسجيل المسارات
-    from server.routes import register_routes
-    register_routes(app)
+    app = register_routes(app)
 
     return app
 
@@ -144,7 +144,6 @@ def find_available_port(start_port=5000, max_attempts=10):
             except socket.error:
                 continue
     raise RuntimeError("لم يتم العثور على منفذ متاح")
-
 
 if __name__ == "__main__":
     app, port = main()
