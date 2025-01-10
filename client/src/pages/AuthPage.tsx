@@ -9,6 +9,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { useToast } from "@/hooks/use-toast";
 import { useUser } from "@/hooks/use-user";
 import { useLocation } from "wouter";
+import { LockKeyhole } from "lucide-react";
 
 const schema = z.object({
   username: z.string().min(3, "اسم المستخدم يجب أن يكون 3 أحرف على الأقل"),
@@ -101,16 +102,19 @@ export default function AuthPage() {
               <Button type="submit" className="w-full">
                 {isLogin ? "دخول" : "تسجيل"}
               </Button>
+
               {isLogin && (
                 <Button
                   type="button"
-                  variant="link"
-                  className="w-full"
+                  variant="outline"
+                  className="w-full flex items-center justify-center gap-2 mt-2"
                   onClick={handleResetPassword}
                 >
+                  <LockKeyhole className="h-4 w-4" />
                   نسيت كلمة المرور؟
                 </Button>
               )}
+
               <Button
                 type="button"
                 variant="link"

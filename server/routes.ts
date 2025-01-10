@@ -3,6 +3,10 @@ import { createServer, type Server } from "http";
 import { db } from "@db";
 import { users } from "@db/schema";
 import { eq } from "drizzle-orm";
+import helmet from "helmet";
+import cors from "cors";
+import compression from "compression";
+import rateLimit from "express-rate-limit";
 
 // وظيفة مساعدة للتحقق من صلاحيات المشرف
 const isAdmin = (req: any, res: any, next: any) => {
@@ -43,18 +47,13 @@ export function registerRoutes(app: Express): Server {
 
   // تكوين تحديد معدل الطلبات
   const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 100,
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100, // limit each IP to 100 requests per windowMs
     message: "تم تجاوز عدد الطلبات المسموح به. يرجى المحاولة مرة أخرى لاحقاً."
   });
 
   app.use("/api", limiter);
 
-  // إعداد المصادقة
-  setupAuth(app);
-
-  // تمكين وسائط المراقبة
-  app.use(performanceMonitor);
 
   // نقاط نهاية لوحة الإشراف
   app.get("/api/admin/users", isAdmin, async (_req, res) => {
@@ -117,33 +116,12 @@ export function registerRoutes(app: Express): Server {
 
   // نقطة نهاية الحالة الأساسية
   app.get("/api/status", (_req, res) => {
-    try {
-      res.json({
-        status: "running",
-        timestamp: new Date().toISOString(),
-        environment: process.env.NODE_ENV
-      });
-    } catch (error) {
-      logger.error('Error in status endpoint:', error);
-      res.status(500).json({ error: 'خطأ في الخادم' });
-    }
+    res.json({
+      status: "running",
+      timestamp: new Date().toISOString(),
+      environment: process.env.NODE_ENV
+    });
   });
-
-  // نقاط نهاية المراقبة
-  app.get("/api/metrics", metricsHandler);
-  app.get("/api/health", async (_req, res) => {
-    try {
-      const healthData = await getHealthData();
-      res.json(healthData);
-    } catch (error) {
-      logger.error('Error in health endpoint:', error);
-      res.status(500).json({ error: 'فشل في الحصول على بيانات الصحة' });
-    }
-  });
-
-  // مراقبة النظام والأخطاء
-  app.use(errorTracker);
-  app.use(apiMonitor);
 
   const httpServer = createServer(app);
   return httpServer;
