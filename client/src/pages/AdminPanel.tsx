@@ -34,7 +34,6 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-  DialogFooter,
   DialogDescription,
 } from "@/components/ui/dialog";
 import { EmailVerification } from "@/components/ui/email-verification";
@@ -84,6 +83,9 @@ export default function AdminPanel() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [isAddUserOpen, setIsAddUserOpen] = useState(false);
+  const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
+  const [isVerificationDialogOpen, setIsVerificationDialogOpen] = useState(false);
+  const [roleChangeAction, setRoleChangeAction] = useState<'promote' | 'demote' | null>(null);
 
   const form = useForm<NewUser>({
     resolver: zodResolver(newUserSchema),
@@ -102,18 +104,20 @@ export default function AdminPanel() {
     mutationFn: async ({
       userId,
       action,
-      verificationStep = 'initial'
+      verificationStep = 'initial',
+      email
     }: {
       userId: number;
       action: "approve" | "block" | "unblock" | "delete" | "promote" | "demote";
       verificationStep?: 'initial' | 'email_verified';
+      email?: string;
     }) => {
       const response = await fetch(`/api/admin/users/${userId}/${action}`, {
         method: "POST",
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ verificationStep }),
+        body: JSON.stringify({ verificationStep, email }),
         credentials: "include",
       });
 
@@ -129,6 +133,9 @@ export default function AdminPanel() {
         title: "نجاح",
         description: data.message
       });
+      setIsVerificationDialogOpen(false);
+      setSelectedUserId(null);
+      setRoleChangeAction(null);
     },
     onError: (error: Error) => {
       toast({
@@ -178,6 +185,23 @@ export default function AdminPanel() {
     addUser.mutate(data);
   };
 
+  const handleVerificationComplete = (email: string) => {
+    if (selectedUserId && roleChangeAction) {
+      updateUserStatus.mutate({
+        userId: selectedUserId,
+        action: roleChangeAction,
+        verificationStep: 'email_verified',
+        email
+      });
+    }
+  };
+
+  const handleRoleChange = (userId: number, action: 'promote' | 'demote') => {
+    setSelectedUserId(userId);
+    setRoleChangeAction(action);
+    setIsVerificationDialogOpen(true);
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -191,6 +215,30 @@ export default function AdminPanel() {
 
   return (
     <div className="container mx-auto py-8">
+      <Dialog open={isVerificationDialogOpen} onOpenChange={setIsVerificationDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>تأكيد تغيير الصلاحيات</DialogTitle>
+            <DialogDescription>
+              لتغيير صلاحيات المستخدم، يرجى إكمال عملية التحقق من البريد الإلكتروني.
+            </DialogDescription>
+          </DialogHeader>
+          <EmailVerification
+            onVerificationComplete={handleVerificationComplete}
+            onCancel={() => {
+              setIsVerificationDialogOpen(false);
+              setSelectedUserId(null);
+              setRoleChangeAction(null);
+            }}
+            action="role_change"
+            additionalInfo={{
+              userId: selectedUserId || undefined,
+              roleAction: roleChangeAction || undefined
+            }}
+          />
+        </DialogContent>
+      </Dialog>
+
       <Tabs defaultValue="pending" className="space-y-6">
         <CardHeader className="flex flex-row items-center justify-between">
           <div className="flex items-center space-x-4">
@@ -403,38 +451,17 @@ export default function AdminPanel() {
                         )}
                         {user.username !== 'Tariq' && (
                           <>
-                            <Dialog>
-                              <DialogTrigger asChild>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                >
-                                  <Shield className="h-4 w-4 ml-2" />
-                                  {user.role === "admin" ? "إلغاء الإشراف" : "ترقية لمشرف"}
-                                </Button>
-                              </DialogTrigger>
-                              <DialogContent>
-                                <DialogHeader>
-                                  <DialogTitle>تأكيد تغيير الصلاحيات</DialogTitle>
-                                  <DialogDescription>
-                                    {user.role === "admin" 
-                                      ? "هل أنت متأكد من رغبتك في إلغاء صلاحيات الإشراف؟"
-                                      : "لتغيير صلاحيات المستخدم إلى مشرف، يرجى إكمال عملية التحقق متعددة المراحل."}
-                                  </DialogDescription>
-                                </DialogHeader>
-                                <EmailVerification
-                                  onVerificationComplete={(email) => {
-                                    updateUserStatus.mutate({
-                                      userId: user.id,
-                                      action: user.role === "admin" ? "demote" : "promote",
-                                      verificationStep: 'email_verified'
-                                    });
-                                  }}
-                                  action="role_change"
-                                  username={user.username}
-                                />
-                              </DialogContent>
-                            </Dialog>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleRoleChange(
+                                user.id,
+                                user.role === "admin" ? "demote" : "promote"
+                              )}
+                            >
+                              <Shield className="h-4 w-4 ml-2" />
+                              {user.role === "admin" ? "إلغاء الإشراف" : "ترقية لمشرف"}
+                            </Button>
                             <AlertDialog>
                               <AlertDialogTrigger asChild>
                                 <Button

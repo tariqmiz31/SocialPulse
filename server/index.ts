@@ -25,6 +25,7 @@ const waitForPort = (port: number, host: string = '0.0.0.0', timeout: number = 6
         logger.info(`Port ${port} is available | المنفذ ${port} متاح`);
         // After port is available, signal ready
         console.log('ready');
+        process.stdout.flush();
         resolve(true);
       });
 
@@ -50,17 +51,16 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
-// Security Headers with configuration for Firebase and development
+// Security Headers with configuration for development
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
-      defaultSrc: ["'self'", "https://*.firebaseapp.com"],
-      connectSrc: ["'self'", "https://*.firebaseapp.com", "https://*.firebase.com"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "https://*.firebaseapp.com", "https://*.gstatic.com"],
+      defaultSrc: ["'self'"],
+      connectSrc: ["'self'", process.env.NODE_ENV === 'development' ? "*" : undefined].filter(Boolean),
+      scriptSrc: ["'self'", "'unsafe-inline'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
-      fontSrc: ["'self'", "https://*.gstatic.com"],
-      imgSrc: ["'self'", "data:", "blob:", "https://*.google.com"],
-      frameSrc: ["'self'", "https://*.firebaseapp.com"],
+      imgSrc: ["'self'", "data:", "blob:"],
+      frameSrc: ["'self'"],
       objectSrc: ["'none'"],
       upgradeInsecureRequests: []
     }
@@ -70,14 +70,15 @@ app.use(helmet({
 // Enable compression
 app.use(compression());
 
-// Configure CORS for development
-const corsOptions = {
-  origin: process.env.NODE_ENV === 'production' 
-    ? [process.env.APP_URL].filter(Boolean)
-    : ['http://localhost:5000', 'http://0.0.0.0:5000'],
+// Configure CORS
+const allowedOrigins = process.env.NODE_ENV === 'production' 
+  ? [process.env.APP_URL].filter(Boolean) as string[]
+  : ['http://localhost:5000', 'http://0.0.0.0:5000'];
+
+app.use(cors({
+  origin: allowedOrigins,
   credentials: true
-};
-app.use(cors(corsOptions));
+}));
 
 // Add performance monitoring
 app.use(performanceMonitor);

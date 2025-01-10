@@ -159,6 +159,14 @@ def modify_user(user_id, action):
                     """, (new_role, user_id))
 
                     updated_user = cursor.fetchone()
+
+                    # Add role change history
+                    cursor.execute("""
+                        INSERT INTO role_change_history 
+                        (user_id, admin_id, old_role, new_role, verification_id, created_at)
+                        VALUES (%s, %s, %s, %s, %s, NOW())
+                    """, (user_id, request.user.id, user[3], new_role, verification[0]))
+
                     db.commit()
 
                     # إرسال إشعار للمستخدم

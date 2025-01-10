@@ -43,6 +43,13 @@ def create_app(testing=False):
         # Load environment variables first
         load_dotenv()
 
+        # Check required environment variables
+        required_vars = ['MAIL_USERNAME', 'MAIL_PASSWORD', 'DATABASE_URL']
+        missing_vars = [var for var in required_vars if not os.getenv(var)]
+        if missing_vars:
+            logger.error(f"المتغيرات البيئية التالية مفقودة: {', '.join(missing_vars)}")
+            return None
+
         # Setup logging handlers
         if not testing and not os.path.exists('/tmp/logs'):
             os.makedirs('/tmp/logs')
@@ -85,7 +92,10 @@ def create_app(testing=False):
             MAIL_USE_TLS=True,
             MAIL_USERNAME=os.getenv('MAIL_USERNAME'),
             MAIL_PASSWORD=os.getenv('MAIL_PASSWORD'),
-            MAIL_DEFAULT_SENDER=os.getenv('MAIL_USERNAME')
+            MAIL_DEFAULT_SENDER=os.getenv('MAIL_USERNAME'),
+            SESSION_TYPE='filesystem',
+            SESSION_PERMANENT=True,
+            PERMANENT_SESSION_LIFETIME=timedelta(days=31)
         )
 
         # Setup CORS
@@ -98,11 +108,16 @@ def create_app(testing=False):
         # Initialize database connection
         from server.database import init_db
         db = init_db(app)
+        if not db:
+            logger.error("فشل في تهيئة قاعدة البيانات")
+            return None
+        logger.info("تم تهيئة قاعدة البيانات بنجاح")
 
         # Register blueprints after initializing mail
         from server.blueprints.admin import admin_bp, init_mail
         init_mail(mail)  # Pass mail instance to admin blueprint
         app.register_blueprint(admin_bp)
+        logger.info("تم تسجيل المسارات الإدارية بنجاح")
 
         # Initialize routes
         app = register_routes(app)
@@ -111,6 +126,9 @@ def create_app(testing=False):
         # Create admin user if needed
         from server.start import create_admin_user
         create_admin_user()
+
+        # Signal ready to workflow
+        print('ready')
 
         logger.info(f"تم تهيئة التطبيق بنجاح على المنفذ {app.config['PORT']}")
         return app

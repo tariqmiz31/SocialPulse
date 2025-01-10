@@ -4,6 +4,8 @@ import sys
 import logging
 from waitress import serve
 from prometheus_client import start_http_server
+import socket
+import time
 
 # Add project root to Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -14,18 +16,35 @@ if project_root not in sys.path:
 # Now we can import from server package
 from server import create_app, logger
 
+def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
+    """Wait for port availability"""
+    start_time = time.time()
+    while True:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.bind((host, port))
+                return True
+        except socket.error:
+            if time.time() - start_time >= timeout:
+                return False
+            time.sleep(1)
+
 def main():
     """نقطة البداية الرئيسية | Main entry point"""
     try:
         # Explicitly set production mode
         os.environ['FLASK_ENV'] = 'production'
-        os.environ['PORT'] = '5000'
 
         logger.info("بدء تشغيل خادم سيلفاريوم الاجتماعي | Starting Silvarium Social production server")
 
         # Use fixed port for production
         port = 5000
         logger.info(f"تم تحديد المنفذ: {port}")
+
+        # Wait for port availability
+        if not wait_for_port(port):
+            logger.error(f"المنفذ {port} غير متاح بعد {120} ثانية")
+            return 1
 
         # Start metrics server
         metrics_port = port + 1

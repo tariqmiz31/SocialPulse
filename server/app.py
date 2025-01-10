@@ -12,6 +12,7 @@ from flask import Flask, send_from_directory, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
 from server.routes import register_routes
+import sys
 
 # تحميل المتغيرات البيئية
 load_dotenv()
@@ -25,15 +26,19 @@ mail = Mail()
 def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
     """Wait for port availability"""
     start_time = time.time()
+    logger.info(f"بدء انتظار المنفذ {port}...")
     while True:
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                 sock.bind((host, port))
+                logger.info(f"المنفذ {port} متاح")
                 return True
         except socket.error:
             if time.time() - start_time >= timeout:
+                logger.error(f"المنفذ {port} غير متاح بعد {timeout} ثانية")
                 return False
             time.sleep(1)
+            logger.debug(f"انتظار المنفذ {port}...")
 
 def create_app():
     """إنشاء تطبيق Flask"""
@@ -112,15 +117,16 @@ def create_app():
 def main():
     """الدالة الرئيسية لبدء الخادم"""
     try:
-        # تحديد المنفذ المتاح
+        # تحديد المنفذ
         port = int(os.getenv('PORT', '5000'))
+        logger.info(f"بدء تهيئة الخادم على المنفذ {port}")
 
         # انتظار توفر المنفذ
         if not wait_for_port(port):
-            logger.error(f"المنفذ {port} غير متاح")
+            logger.error(f"فشل في انتظار المنفذ {port}")
             return None, None
 
-        logger.info(f"تم العثور على منفذ متاح: {port}")
+        logger.info(f"المنفذ {port} جاهز للاستخدام")
 
         # بدء خادم المقاييس
         metrics_port = port + 1
@@ -129,9 +135,15 @@ def main():
 
         # إنشاء التطبيق
         app = create_app()
+        if not app:
+            logger.error("فشل في إنشاء تطبيق Flask")
+            return None, None
+
+        logger.info("تم إنشاء تطبيق Flask بنجاح")
 
         # Ready signal for workflow
         print('ready')
+        sys.stdout.flush()
 
         return app, port
 

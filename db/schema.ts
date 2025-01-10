@@ -38,6 +38,16 @@ export const selectVerificationCodeSchema = createSelectSchema(verificationCodes
 export type InsertVerificationCode = typeof verificationCodes.$inferInsert;
 export type SelectVerificationCode = typeof verificationCodes.$inferSelect;
 
+export const roleChangeHistory = pgTable("role_change_history", {
+  id: serial("id").primaryKey(),
+  userId: serial("user_id").references(() => users.id),
+  adminId: serial("admin_id").references(() => users.id),
+  oldRole: text("old_role").notNull(),
+  newRole: text("new_role").notNull(),
+  verificationId: serial("verification_id").references(() => verificationCodes.id),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 export const verificationAttempts = pgTable("verification_attempts", {
   id: serial("id").primaryKey(),
   email: text("email").notNull(),
