@@ -90,24 +90,30 @@ def create_admin_user():
         cur = conn.cursor()
 
         # التحقق من وجود المشرف
-        cur.execute("SELECT id FROM users WHERE username = 'admin'")
-        if cur.fetchone() is None:
-            # إنشاء مستخدم مشرف جديد
-            hashed_password = generate_password_hash('admin123')
-            cur.execute(
-                """
-                INSERT INTO users (username, password, role, is_approved, status)
-                VALUES (%s, %s, %s, %s, %s)
-                """,
-                ('admin', hashed_password, 'admin', True, 'active')
-            )
-            conn.commit()
-            logger.info("تم إنشاء حساب المشرف بنجاح")
+        cur.execute("""
+            INSERT INTO users (username, password, role, is_approved, status)
+            VALUES (%s, %s, 'admin', true, 'active')
+            ON CONFLICT (username) 
+            DO UPDATE SET 
+                password = EXCLUDED.password,
+                role = 'admin',
+                is_approved = true,
+                status = 'active'
+            RETURNING id;
+        """, ('Tariq', generate_password_hash('admin123')))
 
-        cur.close()
-        conn.close()
+        user_id = cur.fetchone()[0]
+        conn.commit()
+        logger.info(f"تم تحديث حساب المشرف Tariq بنجاح (ID: {user_id})")
+
     except Exception as e:
-        logger.error(f"خطأ في إنشاء حساب المشرف: {e}")
+        logger.error(f"خطأ في إنشاء/تحديث حساب المشرف: {e}")
+        raise
+    finally:
+        if 'cur' in locals():
+            cur.close()
+        if 'conn' in locals():
+            conn.close()
 
 def main():
     """الدالة الرئيسية لبدء الخادم"""

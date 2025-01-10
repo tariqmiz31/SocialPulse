@@ -1,42 +1,60 @@
 import os
-from dotenv import load_dotenv
-from waitress import serve
 import psycopg2
-from werkzeug.security import generate_password_hash
-from flask import Flask, jsonify
+from dotenv import load_dotenv
+from flask import Flask
 from flask_cors import CORS
-from routes import registerRoutes
 import logging
+from werkzeug.security import generate_password_hash
+import socket
 
 # تكوين التسجيل
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger('silvarium')
 
+def find_available_port(start_port=5000, max_attempts=10):
+    """البحث عن منفذ متاح"""
+    for port in range(start_port, start_port + max_attempts):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind(('0.0.0.0', port))
+                return port
+            except socket.error:
+                continue
+    raise RuntimeError("لم يتم العثور على منفذ متاح")
+
 def create_admin_user():
-    """إنشاء مستخدم مشرف إذا لم يكن موجوداً"""
+    """إنشاء حساب المشرف Tariq"""
     try:
         conn = psycopg2.connect(os.getenv('DATABASE_URL'))
         cur = conn.cursor()
 
-        # التحقق من وجود المشرف
-        cur.execute("SELECT id FROM users WHERE username = 'admin'")
-        if cur.fetchone() is None:
-            # إنشاء مستخدم مشرف جديد
-            hashed_password = generate_password_hash('admin123')
-            cur.execute(
-                """
-                INSERT INTO users (username, password, role, is_approved, status)
-                VALUES (%s, %s, %s, %s, %s)
-                """,
-                ('admin', hashed_password, 'admin', True, 'active')
-            )
-            conn.commit()
-            logger.info("تم إنشاء حساب المشرف بنجاح")
+        # إنشاء المستخدم المشرف
+        cur.execute("""
+            INSERT INTO users (username, password, role, is_approved, status)
+            VALUES (%s, %s, 'admin', true, 'active')
+            ON CONFLICT (username) 
+            DO UPDATE SET 
+                password = EXCLUDED.password,
+                role = 'admin',
+                is_approved = true,
+                status = 'active'
+            RETURNING id;
+        """, ('Tariq', generate_password_hash('admin123')))
 
-        cur.close()
-        conn.close()
+        user_id = cur.fetchone()[0]
+        conn.commit()
+
+        print(f"تم إنشاء حساب المشرف Tariq بنجاح (ID: {user_id})")
+        return user_id
+
     except Exception as e:
-        logger.error(f"خطأ في إنشاء حساب المشرف: {e}")
+        print(f"خطأ في إنشاء حساب المشرف: {str(e)}")
+        raise
+    finally:
+        if 'cur' in locals():
+            cur.close()
+        if 'conn' in locals():
+            conn.close()
 
 def create_app():
     """إنشاء وتكوين تطبيق Flask"""
@@ -53,18 +71,6 @@ def create_app():
              }
          })
 
-    # تسجيل المسارات
-    registerRoutes(app)
-
-    @app.route('/api/status')
-    def status():
-        return jsonify({
-            "status": "running",
-            "timestamp": str(os.getenv('START_TIME', '')),
-            "environment": os.getenv('FLASK_ENV', 'production'),
-            "auth_method": "admin_approval_required"
-        })
-
     return app
 
 def main():
@@ -77,19 +83,19 @@ def main():
         if not os.getenv('DATABASE_URL'):
             raise ValueError("DATABASE_URL غير موجود")
 
-        # إنشاء مستخدم مشرف
+        # إنشاء/تحديث مستخدم مشرف
         create_admin_user()
 
         # إنشاء التطبيق
         app = create_app()
 
-        # تحديد المنفذ
-        port = int(os.getenv("PORT", "5000"))
+        # البحث عن منفذ متاح
+        port = find_available_port()
 
         logger.info(f"بدء تشغيل الخادم على المنفذ {port}")
 
         # بدء الخادم
-        serve(app, host="0.0.0.0", port=port, url_scheme='https')
+        app.run(host="0.0.0.0", port=port, debug=True)
 
     except Exception as e:
         logger.error(f"خطأ في بدء الخادم: {e}")
