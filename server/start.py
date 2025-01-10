@@ -1,7 +1,7 @@
 import os
 import psycopg2
 from dotenv import load_dotenv
-from flask import Flask, request, send_from_directory
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 import logging
 from werkzeug.security import generate_password_hash
@@ -9,10 +9,14 @@ import socket
 import prometheus_client
 from prometheus_client import Counter, Histogram
 import time
+from logging.handlers import RotatingFileHandler
+from flask_mail import Mail, Message
 
 # تكوين التسجيل
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger('silvarium')
+
+mail = Mail()
 
 def create_admin_user():
     """إنشاء حساب المشرف Tariq"""
@@ -36,21 +40,50 @@ def create_admin_user():
         user_id = cur.fetchone()[0]
         conn.commit()
 
-        print(f"تم إنشاء حساب المشرف Tariq بنجاح (ID: {user_id})")
+        logger.info(f"تم إنشاء حساب المشرف Tariq بنجاح (ID: {user_id})")
         return user_id
 
     except Exception as e:
-        print(f"خطأ في إنشاء حساب المشرف: {str(e)}")
+        logger.error(f"خطأ في إنشاء حساب المشرف: {str(e)}")
         raise
     finally:
-        if 'cur' in locals():
+        if cur:
             cur.close()
-        if 'conn' in locals():
+        if conn:
             conn.close()
 
 def create_app():
     """إنشاء وتكوين تطبيق Flask"""
     app = Flask(__name__, static_folder='../client/dist', static_url_path='/')
+
+    # تكوين البريد الإلكتروني
+    app.config.update(
+        MAIL_SERVER='smtp.gmail.com',
+        MAIL_PORT=587,
+        MAIL_USE_TLS=True,
+        MAIL_USERNAME=os.getenv('MAIL_USERNAME', 'silvariumsa@gmail.com'),
+        MAIL_PASSWORD=os.getenv('MAIL_PASSWORD', 'rtbkamqrxsptmbrl'),
+        MAIL_DEFAULT_SENDER='silvariumsa@gmail.com'
+    )
+
+    # تهيئة Flask-Mail
+    mail.init_app(app)
+
+    # إعداد ملف السجل
+    if not os.path.exists('logs'):
+        os.makedirs('logs')
+
+    file_handler = RotatingFileHandler(
+        'logs/silvarium.log',
+        maxBytes=10240,
+        backupCount=10
+    )
+    file_handler.setFormatter(logging.Formatter(
+        '%(asctime)s %(levelname)s: %(message)s'
+    ))
+    file_handler.setLevel(logging.INFO)
+    app.logger.addHandler(file_handler)
+    app.logger.setLevel(logging.INFO)
 
     # تكوين CORS
     CORS(app, 
@@ -87,13 +120,9 @@ def create_app():
         ).inc()
         return response
 
-    # Serve static files and handle frontend routing
-    @app.route('/', defaults={'path': ''})
-    @app.route('/<path:path>')
-    def serve(path):
-        if path and os.path.exists(os.path.join(app.static_folder, path)):
-            return send_from_directory(app.static_folder, path)
-        return send_from_directory(app.static_folder, 'index.html')
+    # تكوين نقاط النهاية
+    from server.routes import register_routes
+    register_routes(app)
 
     return app
 
@@ -112,6 +141,7 @@ def main():
 
         # إنشاء التطبيق
         app = create_app()
+        app.logger.info('تم بدء تشغيل سيلفاريوم سوشيال')
 
         # تحديد المنفذ
         port = int(os.getenv('PORT', 5000))
@@ -119,7 +149,7 @@ def main():
         # بدء خادم المقاييس
         metrics_port = port + 1
         prometheus_client.start_http_server(metrics_port)
-        logger.info(f"تم بدء خادم المقاييس على المنفذ {metrics_port}")
+        app.logger.info(f"تم بدء خادم المقاييس على المنفذ {metrics_port}")
 
         # Ready signal for workflow
         print('ready')

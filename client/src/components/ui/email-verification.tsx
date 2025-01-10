@@ -10,13 +10,18 @@ interface EmailVerificationProps {
   onCancel?: () => void;
   action?: 'verify' | 'reset' | 'role_change';
   username?: string;
+  additionalInfo?: {
+    userId?: number;
+    roleAction?: 'promote' | 'demote';
+  };
 }
 
 export function EmailVerification({ 
   onVerificationComplete, 
   onCancel, 
   action = 'verify',
-  username
+  username,
+  additionalInfo
 }: EmailVerificationProps) {
   const [email, setEmail] = useState("");
   const [verificationCode, setVerificationCode] = useState("");
@@ -44,10 +49,20 @@ export function EmailVerification({
     setIsLoading(true);
 
     try {
-      const response = await fetch('/api/auth/send-verification-code', {
+      const endpoint = action === 'role_change' 
+        ? `/api/admin/users/${additionalInfo?.userId}/${additionalInfo?.roleAction}`
+        : '/api/auth/send-verification-code';
+
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, action, username }),
+        body: JSON.stringify({ 
+          email, 
+          action,
+          username,
+          verificationStep: 'initial'
+        }),
+        credentials: 'include'
       });
 
       const data = await response.json();
@@ -88,15 +103,21 @@ export function EmailVerification({
     setIsLoading(true);
 
     try {
-      const response = await fetch('/api/auth/verify-email', {
+      const endpoint = action === 'role_change'
+        ? `/api/admin/users/${additionalInfo?.userId}/${additionalInfo?.roleAction}`
+        : '/api/auth/verify-email';
+
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           email,
           code: verificationCode,
           action,
-          username
+          username,
+          verificationStep: 'email_sent'
         }),
+        credentials: 'include'
       });
 
       const data = await response.json();

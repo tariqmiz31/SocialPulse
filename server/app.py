@@ -21,16 +21,11 @@ logger = logging.getLogger('silvarium')
 
 mail = Mail()
 
-def find_available_port(start_port=5000, max_attempts=10):
-    """البحث عن منفذ متاح"""
-    for port in range(start_port, start_port + max_attempts):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            try:
-                s.bind(('0.0.0.0', port))
-                return port
-            except socket.error:
-                continue
-    raise RuntimeError("لم يتم العثور على منفذ متاح")
+def get_db():
+    """إنشاء اتصال بقاعدة البيانات"""
+    if not hasattr(get_db, 'db'):
+        get_db.db = psycopg2.connect(os.getenv('DATABASE_URL'))
+    return get_db.db
 
 def create_app():
     """إنشاء تطبيق Flask"""
@@ -41,13 +36,16 @@ def create_app():
         MAIL_SERVER='smtp.gmail.com',
         MAIL_PORT=587,
         MAIL_USE_TLS=True,
-        MAIL_USERNAME=os.getenv('MAIL_USERNAME', 'silvariumsa@gmail.com'),
-        MAIL_PASSWORD=os.getenv('MAIL_PASSWORD', 'rtbkamqrxsptmbrl'),
-        MAIL_DEFAULT_SENDER='silvariumsa@gmail.com'
+        MAIL_USERNAME=os.getenv('MAIL_USERNAME'),
+        MAIL_PASSWORD=os.getenv('MAIL_PASSWORD'),
+        MAIL_DEFAULT_SENDER=os.getenv('MAIL_USERNAME')
     )
 
     # تهيئة Flask-Mail
     mail.init_app(app)
+
+    # إضافة اتصال قاعدة البيانات للتطبيق
+    app.db = get_db()
 
     # تكوين CORS
     CORS(app, 
@@ -84,6 +82,7 @@ def create_app():
     @app.before_request
     def before_request():
         request.start_time = time.time()
+        request.db = get_db()
 
     @app.after_request
     def after_request(response):
@@ -101,12 +100,16 @@ def create_app():
         ).inc()
         return response
 
-    @app.route('/', defaults={'path': ''})
-    @app.route('/<path:path>')
-    def serve(path):
-        if path and os.path.exists(os.path.join(app.static_folder, path)):
-            return send_from_directory(app.static_folder, path)
-        return send_from_directory(app.static_folder, 'index.html')
+    @app.teardown_appcontext
+    def teardown_db(exception):
+        db = getattr(get_db, 'db', None)
+        if db is not None:
+            db.close()
+            delattr(get_db, 'db')
+
+    # تسجيل المسارات
+    from server.routes import register_routes
+    register_routes(app)
 
     return app
 
@@ -130,6 +133,18 @@ def main():
     except Exception as e:
         logger.error(f"خطأ في بدء الخادم: {e}")
         raise
+
+def find_available_port(start_port=5000, max_attempts=10):
+    """البحث عن منفذ متاح"""
+    for port in range(start_port, start_port + max_attempts):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind(('0.0.0.0', port))
+                return port
+            except socket.error:
+                continue
+    raise RuntimeError("لم يتم العثور على منفذ متاح")
+
 
 if __name__ == "__main__":
     app, port = main()
