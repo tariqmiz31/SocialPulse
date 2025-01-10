@@ -1,22 +1,26 @@
+"""Main server startup script"""
 import os
+import sys
 import psycopg2
 from dotenv import load_dotenv
-from flask import Flask, request, jsonify
+from flask import Flask
 from flask_cors import CORS
+from flask_mail import Mail
 import logging
 from werkzeug.security import generate_password_hash
-import socket
 import prometheus_client
 from prometheus_client import Counter, Histogram
 import time
 from logging.handlers import RotatingFileHandler
-from flask_mail import Mail, Message
+from server.blueprints.admin import admin_bp
 
-# تكوين التسجيل
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger('silvarium')
+# Add project root to Python path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(current_dir)
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
-mail = Mail()
+from server import create_app, logger
 
 def create_admin_user():
     """إنشاء حساب المشرف Tariq"""
@@ -47,119 +51,113 @@ def create_admin_user():
         logger.error(f"خطأ في إنشاء حساب المشرف: {str(e)}")
         raise
     finally:
-        if cur:
+        if 'cur' in locals():
             cur.close()
-        if conn:
+        if 'conn' in locals():
             conn.close()
 
-def create_app():
-    """إنشاء وتكوين تطبيق Flask"""
-    app = Flask(__name__, static_folder='../client/dist', static_url_path='/')
-
-    # تكوين البريد الإلكتروني
-    app.config.update(
-        MAIL_SERVER='smtp.gmail.com',
-        MAIL_PORT=587,
-        MAIL_USE_TLS=True,
-        MAIL_USERNAME=os.getenv('MAIL_USERNAME', 'silvariumsa@gmail.com'),
-        MAIL_PASSWORD=os.getenv('MAIL_PASSWORD', 'rtbkamqrxsptmbrl'),
-        MAIL_DEFAULT_SENDER='silvariumsa@gmail.com'
-    )
-
-    # تهيئة Flask-Mail
-    mail.init_app(app)
-
-    # إعداد ملف السجل
-    if not os.path.exists('logs'):
-        os.makedirs('logs')
-
-    file_handler = RotatingFileHandler(
-        'logs/silvarium.log',
-        maxBytes=10240,
-        backupCount=10
-    )
-    file_handler.setFormatter(logging.Formatter(
-        '%(asctime)s %(levelname)s: %(message)s'
-    ))
-    file_handler.setLevel(logging.INFO)
-    app.logger.addHandler(file_handler)
-    app.logger.setLevel(logging.INFO)
-
-    # تكوين CORS
-    CORS(app, 
-         supports_credentials=True,
-         resources={
-             r"/api/*": {
-                 "origins": ["http://localhost:5000", "https://*.repl.co", "https://*.repl.dev"],
-                 "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-                 "allow_headers": ["Content-Type", "Authorization"]
-             }
-         })
-
-    # تكوين Prometheus
-    REQUEST_COUNT = Counter('request_count', 'Total number of requests', ['method', 'endpoint', 'status'])
-    REQUEST_LATENCY = Histogram('request_latency_seconds', 'Request latency in seconds', ['method', 'endpoint'])
-
-    @app.before_request
-    def before_request():
-        request.start_time = time.time()
-
-    @app.after_request
-    def after_request(response):
-        if hasattr(request, 'start_time'):
-            duration = time.time() - request.start_time
-            REQUEST_LATENCY.labels(
-                method=request.method,
-                endpoint=request.path
-            ).observe(duration)
-
-        REQUEST_COUNT.labels(
-            method=request.method,
-            endpoint=request.path,
-            status=response.status_code
-        ).inc()
-        return response
-
-    # تكوين نقاط النهاية
-    from server.routes import register_routes
-    register_routes(app)
-
-    return app
-
 def main():
-    """الدالة الرئيسية لبدء الخادم"""
+    """نقطة البداية الرئيسية | Main entry point"""
     try:
         # تحميل متغيرات البيئة
         load_dotenv()
 
-        # التحقق من متغيرات البيئة المطلوبة
-        if not os.getenv('DATABASE_URL'):
-            raise ValueError("DATABASE_URL غير موجود")
+        # Create Flask application
+        app = create_app()
+        if not app:
+            logger.error("فشل في إنشاء تطبيق Flask")
+            return 1
+
+        # Register admin blueprint
+        app.register_blueprint(admin_bp)
+
+        # تكوين البريد الإلكتروني
+        app.config.update(
+            MAIL_SERVER='smtp.gmail.com',
+            MAIL_PORT=587,
+            MAIL_USE_TLS=True,
+            MAIL_USERNAME=os.getenv('MAIL_USERNAME'),
+            MAIL_PASSWORD=os.getenv('MAIL_PASSWORD'),
+            MAIL_DEFAULT_SENDER=os.getenv('MAIL_USERNAME')
+        )
+
+        # تهيئة Flask-Mail
+        mail = Mail(app)
+        mail.init_app(app)
+
+
+        # إعداد ملف السجل
+        if not os.path.exists('logs'):
+            os.makedirs('logs')
+
+        file_handler = RotatingFileHandler(
+            'logs/silvarium.log',
+            maxBytes=10240,
+            backupCount=10
+        )
+        file_handler.setFormatter(logging.Formatter(
+            '%(asctime)s %(levelname)s: %(message)s'
+        ))
+        file_handler.setLevel(logging.INFO)
+        app.logger.addHandler(file_handler)
+        app.logger.setLevel(logging.INFO)
+
+        # تكوين CORS
+        CORS(app,
+             supports_credentials=True,
+             resources={
+                 r"/api/*": {
+                     "origins": ["http://localhost:5000", "https://*.repl.co", "https://*.repl.dev"],
+                     "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+                     "allow_headers": ["Content-Type", "Authorization"]
+                 }
+             })
+
+        # تكوين Prometheus
+        REQUEST_COUNT = Counter('request_count', 'Total number of requests', ['method', 'endpoint', 'status'])
+        REQUEST_LATENCY = Histogram('request_latency_seconds', 'Request latency in seconds', ['method', 'endpoint'])
+
+        @app.before_request
+        def before_request():
+            request.start_time = time.time()
+
+        @app.after_request
+        def after_request(response):
+            if hasattr(request, 'start_time'):
+                duration = time.time() - request.start_time
+                REQUEST_LATENCY.labels(
+                    method=request.method,
+                    endpoint=request.path
+                ).observe(duration)
+
+            REQUEST_COUNT.labels(
+                method=request.method,
+                endpoint=request.path,
+                status=response.status_code
+            ).inc()
+            return response
+
+        # تكوين نقاط النهاية
+        from server.routes import register_routes
+        register_routes(app)
 
         # إنشاء/تحديث مستخدم مشرف
         create_admin_user()
 
-        # إنشاء التطبيق
-        app = create_app()
-        app.logger.info('تم بدء تشغيل سيلفاريوم سوشيال')
 
-        # تحديد المنفذ
-        port = int(os.getenv('PORT', 5000))
-
-        # بدء خادم المقاييس
-        metrics_port = port + 1
-        prometheus_client.start_http_server(metrics_port)
-        app.logger.info(f"تم بدء خادم المقاييس على المنفذ {metrics_port}")
-
-        # Ready signal for workflow
+        # Signal ready
+        logger.info('الخادم جاهز | Server is ready')
         print('ready')
+        sys.stdout.flush()
 
-        # بدء الخادم
-        app.run(host="0.0.0.0", port=port, debug=True)
+        # Start server
+        port = app.config['PORT']
+        app.run(host='0.0.0.0', port=port)
+        return 0
 
     except Exception as e:
-        logger.error(f"خطأ في بدء الخادم: {e}")
-        raise
+        logger.error(f"خطأ في بدء الخادم: {str(e)}")
+        return 1
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

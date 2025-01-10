@@ -22,11 +22,18 @@ logger = logging.getLogger('silvarium')
 
 mail = Mail()
 
-def get_db():
-    """إنشاء اتصال بقاعدة البيانات"""
-    if not hasattr(get_db, 'db'):
-        get_db.db = psycopg2.connect(os.getenv('DATABASE_URL'))
-    return get_db.db
+def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
+    """Wait for port availability"""
+    start_time = time.time()
+    while True:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.bind((host, port))
+                return True
+        except socket.error:
+            if time.time() - start_time >= timeout:
+                return False
+            time.sleep(1)
 
 def create_app():
     """إنشاء تطبيق Flask"""
@@ -44,9 +51,6 @@ def create_app():
 
     # تهيئة Flask-Mail
     mail.init_app(app)
-
-    # إضافة اتصال قاعدة البيانات للتطبيق
-    app.db = get_db()
 
     # تكوين CORS
     CORS(app, 
@@ -83,7 +87,6 @@ def create_app():
     @app.before_request
     def before_request():
         request.start_time = time.time()
-        request.db = get_db()
 
     @app.after_request
     def after_request(response):
@@ -101,13 +104,6 @@ def create_app():
         ).inc()
         return response
 
-    @app.teardown_appcontext
-    def teardown_db(exception):
-        db = getattr(get_db, 'db', None)
-        if db is not None:
-            db.close()
-            delattr(get_db, 'db')
-
     # تسجيل المسارات
     app = register_routes(app)
 
@@ -116,11 +112,14 @@ def create_app():
 def main():
     """الدالة الرئيسية لبدء الخادم"""
     try:
-        # إنشاء التطبيق
-        app = create_app()
-
         # تحديد المنفذ المتاح
-        port = find_available_port()
+        port = int(os.getenv('PORT', '5000'))
+
+        # انتظار توفر المنفذ
+        if not wait_for_port(port):
+            logger.error(f"المنفذ {port} غير متاح")
+            return None, None
+
         logger.info(f"تم العثور على منفذ متاح: {port}")
 
         # بدء خادم المقاييس
@@ -128,23 +127,19 @@ def main():
         prometheus_client.start_http_server(metrics_port)
         logger.info(f"تم بدء خادم المقاييس على المنفذ {metrics_port}")
 
+        # إنشاء التطبيق
+        app = create_app()
+
+        # Ready signal for workflow
+        print('ready')
+
         return app, port
 
     except Exception as e:
-        logger.error(f"خطأ في بدء الخادم: {e}")
-        raise
-
-def find_available_port(start_port=5000, max_attempts=10):
-    """البحث عن منفذ متاح"""
-    for port in range(start_port, start_port + max_attempts):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            try:
-                s.bind(('0.0.0.0', port))
-                return port
-            except socket.error:
-                continue
-    raise RuntimeError("لم يتم العثور على منفذ متاح")
+        logger.error(f"خطأ في بدء الخادم: {str(e)}")
+        return None, None
 
 if __name__ == "__main__":
     app, port = main()
-    app.run(host="0.0.0.0", port=port, debug=True)
+    if app and port:
+        app.run(host="0.0.0.0", port=port, debug=True)

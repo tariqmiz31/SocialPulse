@@ -3,14 +3,13 @@ import os
 from flask import Flask
 from flask_cors import CORS
 from flask_mail import Mail
-from flask_session import Session
 from datetime import timedelta
 import logging
 import socket
 import time
 from logging.handlers import RotatingFileHandler
-from server.routes import register_routes  # Changed from setup_routes to register_routes
-from server.config import config
+from server.routes import register_routes
+from server.blueprints.admin import admin_bp
 from dotenv import load_dotenv
 
 # Setup logging
@@ -61,28 +60,12 @@ def create_app(testing=False):
             console_handler.setFormatter(formatter)
             logger.addHandler(console_handler)
 
-        # Initialize authentication and email service
-        try:
-            from server.blueprints.auth import init_verification_tables
-            if not init_verification_tables():
-                logger.error("فشل في تهيئة جداول التحقق")
-                return None
-            logger.info("تم تهيئة جداول التحقق بنجاح")
-
-        except Exception as e:
-            logger.error(f"خطأ في تهيئة النظام: {str(e)}")
-            return None
-
-        # Determine environment
-        env = os.getenv('FLASK_ENV', 'development')
-        app_config = config[env]
-
         # Get port from environment or config
         port = int(os.getenv('PORT', '5000'))
 
         # Always wait for port in production mode
-        if app_config.WAIT_FOR_PORT and not testing:
-            if not wait_for_port(port, timeout=app_config.WAIT_FOR_PORT_TIMEOUT):
+        if not testing:
+            if not wait_for_port(port):
                 logger.error("فشل في انتظار المنفذ")
                 return None
             logger.info("تم تأكيد توفر المنفذ بنجاح")
@@ -91,15 +74,11 @@ def create_app(testing=False):
         static_folder = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'client', 'dist'))
         app = Flask(__name__, static_folder=static_folder, static_url_path='/')
 
+        # Register admin blueprint
+        app.register_blueprint(admin_bp)
+
         app.config.update(
-            SESSION_TYPE=app_config.SESSION_TYPE,
-            SESSION_FILE_DIR=app_config.SESSION_FILE_DIR,
-            SESSION_COOKIE_SECURE=app_config.SESSION_COOKIE_SECURE,
-            SESSION_COOKIE_HTTPONLY=app_config.SESSION_COOKIE_HTTPONLY,
-            SESSION_COOKIE_SAMESITE=app_config.SESSION_COOKIE_SAMESITE,
-            PERMANENT_SESSION_LIFETIME=timedelta(seconds=app_config.PERMANENT_SESSION_LIFETIME),
-            SECRET_KEY=app_config.SECRET_KEY,
-            DEBUG=app_config.DEBUG,
+            DEBUG=os.getenv('FLASK_ENV') == 'development',
             PORT=port,
             HOST='0.0.0.0',
             WAIT_FOR_PORT=True,  # Always wait for port
@@ -115,34 +94,23 @@ def create_app(testing=False):
         # Setup CORS
         CORS(app, supports_credentials=True)
 
-        # Setup session
-        if not testing and not os.path.exists(app_config.SESSION_FILE_DIR):
-            os.makedirs(app_config.SESSION_FILE_DIR)
-        Session(app)
-
-        # Initialize Flask-Mail with app
+        # Initialize Flask-Mail
         mail.init_app(app)
         logger.info("تم تهيئة خدمة البريد الإلكتروني بنجاح")
 
         # Initialize routes
-        app = register_routes(app)  # Changed from setup_routes to register_routes
+        app = register_routes(app)
         logger.info("تم إعداد المسارات بنجاح")
 
-        # Initialize authentication
-        from server.blueprints.auth import init_auth
-        app = init_auth(app)
-        if app:
-            logger.info("تم تهيئة المصادقة بنجاح")
-        else:
-            logger.error("فشل في تهيئة المصادقة")
-            return None
+        # Create admin user if needed
+        from server.start import create_admin_user
+        create_admin_user()
 
         logger.info(f"تم تهيئة التطبيق بنجاح على المنفذ {app.config['PORT']}")
         return app
 
     except Exception as e:
-        if 'logger' in locals():
-            logger.error(f"خطأ في تهيئة التطبيق: {str(e)}")
+        logger.error(f"خطأ في تهيئة التطبيق: {str(e)}")
         return None
 
 if __name__ == '__main__':
