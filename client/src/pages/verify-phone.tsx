@@ -1,30 +1,15 @@
+// This page has been deprecated as we now only use email verification
+// Please use verify-email.tsx instead
+import { useEffect } from "react";
 import { useLocation } from "wouter";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { EmailVerification } from "@/components/ui/email-verification";
 
-export default function VerifyEmailPage() {
+export default function VerifyPhonePage() {
   const [, setLocation] = useLocation();
 
-  const handleVerificationComplete = (email: string) => {
-    // بعد نجاح التحقق، انتقل إلى الصفحة الرئيسية أو لوحة التحكم
-    setLocation("/");
-  };
+  useEffect(() => {
+    // Redirect to email verification page
+    setLocation("/verify-email");
+  }, [setLocation]);
 
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle className="text-center">
-            التحقق من البريد الإلكتروني
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <EmailVerification
-            onVerificationComplete={handleVerificationComplete}
-            action="verify"
-          />
-        </CardContent>
-      </Card>
-    </div>
-  );
+  return null; // No need to render anything as we're redirecting
 }

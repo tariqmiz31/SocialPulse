@@ -6,28 +6,37 @@ export const users = pgTable("users", {
   id: serial("id").primaryKey(),
   username: text("username").unique().notNull(),
   password: text("password").notNull(),
-  phoneNumber: text("phone_number"),
+  email: text("email").unique(),
+  emailVerified: boolean("email_verified").default(false),
   role: text("role", { enum: ["admin", "user"] }).notNull().default("user"),
   isApproved: boolean("is_approved").notNull().default(false),
   status: text("status", { enum: ["active", "pending", "blocked"] }).notNull().default("pending"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
+  verification_code: text("verification_code"),
+  verification_code_expires_at: timestamp("verification_code_expires_at"),
 });
 
 export const verificationCodes = pgTable("verification_codes", {
   id: serial("id").primaryKey(),
   userId: serial("user_id").references(() => users.id),
   code: text("code").notNull(),
-  type: text("type", { enum: ["reset_password", "phone_verification"] }).notNull(),
+  type: text("type", { enum: ["reset_password", "email_verification"] }).notNull(),
   expiresAt: timestamp("expires_at").notNull(),
   verified: boolean("verified").default(false),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+export const verificationAttempts = pgTable("verification_attempts", {
+  id: serial("id").primaryKey(),
+  email: text("email").notNull(),
+  attemptTime: timestamp("attempt_time").defaultNow(),
+});
+
 export const insertUserSchema = createInsertSchema(users, {
   role: z.enum(["admin", "user"]),
   status: z.enum(["active", "pending", "blocked"]),
-  phoneNumber: z.string().optional(),
+  email: z.string().email().optional(),
 });
 
 export const selectUserSchema = createSelectSchema(users);
@@ -35,13 +44,14 @@ export type InsertUser = typeof users.$inferInsert;
 export type SelectUser = typeof users.$inferSelect;
 
 export const insertVerificationCodeSchema = createInsertSchema(verificationCodes, {
-  type: z.enum(["reset_password", "phone_verification"]),
+  type: z.enum(["reset_password", "email_verification"]),
 });
 
 export const selectVerificationCodeSchema = createSelectSchema(verificationCodes);
 export type InsertVerificationCode = typeof verificationCodes.$inferInsert;
 export type SelectVerificationCode = typeof verificationCodes.$inferSelect;
 
+// Keep the rest of the schemas unchanged as they are not related to authentication
 export const socialPlatforms = pgTable("social_platforms", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
@@ -116,10 +126,11 @@ export const selectPlatformConnectionSchema = createSelectSchema(platformConnect
 export type InsertPlatformConnection = typeof platformConnections.$inferInsert;
 export type SelectPlatformConnection = typeof platformConnections.$inferSelect;
 
+// Keep analytics and posts tables unchanged as they are not related to authentication
 export const posts = pgTable("posts", {
   id: serial("id").primaryKey(),
   content: text("content").notNull(),
-  platforms: text("platforms").notNull(), // Changed from jsonb
+  platforms: text("platforms").notNull(),
   scheduledFor: timestamp("scheduled_for").notNull(),
   status: text("status").notNull(),
   userId: serial("user_id").references(() => users.id),
@@ -131,11 +142,11 @@ export const analytics = pgTable("analytics", {
   id: serial("id").primaryKey(),
   postId: serial("post_id").references(() => posts.id),
   platform: text("platform").notNull(),
-  likes: text("likes").default("0"), // Changed from integer
-  shares: text("shares").default("0"), // Changed from integer
-  comments: text("comments").default("0"), // Changed from integer
-  reach: text("reach").default("0"),     // Changed from integer
-  engagementRate: text("engagement_rate"), // Changed from decimal
+  likes: text("likes").default("0"),
+  shares: text("shares").default("0"),
+  comments: text("comments").default("0"),
+  reach: text("reach").default("0"),
+  engagementRate: text("engagement_rate"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
