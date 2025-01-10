@@ -1,13 +1,13 @@
-import { useNavigate } from "wouter";
+import { useLocation } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { SMSVerification } from "@/components/ui/sms-verification";
+import { EmailVerification } from "@/components/ui/email-verification";
 
-export default function VerifyPhonePage() {
-  const navigate = useNavigate();
+export default function VerifyEmailPage() {
+  const [, setLocation] = useLocation();
 
-  const handleVerificationComplete = (phoneNumber: string) => {
-    // After successful verification, redirect to home or dashboard
-    navigate("/");
+  const handleVerificationComplete = (email: string) => {
+    // بعد نجاح التحقق، انتقل إلى الصفحة الرئيسية أو لوحة التحكم
+    setLocation("/");
   };
 
   return (
@@ -15,11 +15,11 @@ export default function VerifyPhonePage() {
       <Card className="w-full max-w-md">
         <CardHeader>
           <CardTitle className="text-center">
-            التحقق من رقم الهاتف
+            التحقق من البريد الإلكتروني
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <SMSVerification
+          <EmailVerification
             onVerificationComplete={handleVerificationComplete}
             action="verify"
           />

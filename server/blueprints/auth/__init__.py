@@ -11,14 +11,14 @@ import string
 import time
 import traceback
 
-# Import SMS service at the top of the file
+# Import email service
 try:
-    from .sms_service import sms_service
+    from .email_service import email_service
     logger = logging.getLogger('silvarium_auth')
     logger.setLevel(logging.INFO)
 except Exception as e:
-    logger.error(f"Error importing SMS service: {str(e)}")
-    sms_service = None
+    logger.error(f"Error importing email service: {str(e)}")
+    email_service = None
 
 # Create blueprint with unique name
 auth_bp = Blueprint('silvarium_auth', __name__, url_prefix='/api/auth')
@@ -38,24 +38,24 @@ def get_bilingual_message(ar_msg: str, en_msg: str) -> dict:
 
 @auth_bp.route('/send-verification-code', methods=['POST'])
 async def send_verification_code():
-    """إرسال رمز التحقق عبر SMS | Send verification code via SMS"""
+    """إرسال رمز التحقق عبر البريد الإلكتروني | Send verification code via email"""
     try:
         data = request.get_json()
-        phone_number = data.get('phoneNumber')
+        email = data.get('email')
         action = data.get('action', 'verify')  # 'verify' or 'reset'
 
-        logger.info(f"Received verification code request for phone number: {phone_number}, action: {action}")
+        logger.info(f"Received verification code request for email: {email}, action: {action}")
 
-        if not phone_number:
-            logger.warning("لم يتم توفير رقم الهاتف | Phone number not provided")
+        if not email:
+            logger.warning("لم يتم توفير البريد الإلكتروني | Email not provided")
             return jsonify(get_bilingual_message(
-                "يجب توفير رقم الهاتف",
-                "Phone number is required"
+                "يجب توفير البريد الإلكتروني",
+                "Email is required"
             )), 400
 
         # Check rate limit
-        if not await sms_service.check_rate_limit(phone_number):
-            logger.warning(f"تم تجاوز الحد المسموح لإرسال الرموز: {phone_number}")
+        if not await email_service.check_rate_limit(email):
+            logger.warning(f"تم تجاوز الحد المسموح لإرسال الرموز: {email}")
             return jsonify(get_bilingual_message(
                 "تم تجاوز الحد المسموح من المحاولات، يرجى المحاولة لاحقاً",
                 "Rate limit exceeded, please try again later"
@@ -69,11 +69,11 @@ async def send_verification_code():
         conn = psycopg2.connect(os.getenv('DATABASE_URL'))
         cur = conn.cursor()
 
-        # Check if phone number exists
+        # Check if email exists
         cur.execute("""
             SELECT id, status FROM users 
-            WHERE phone_number = %s
-        """, (phone_number,))
+            WHERE email = %s
+        """, (email,))
 
         user = cur.fetchone()
 
@@ -82,8 +82,8 @@ async def send_verification_code():
             user_id, user_status = user
             if action == 'verify' and user_status == 'active':
                 return jsonify(get_bilingual_message(
-                    "رقم الهاتف مسجل مسبقاً",
-                    "Phone number is already verified"
+                    "البريد الإلكتروني مسجل مسبقاً",
+                    "Email is already verified"
                 )), 400
 
             cur.execute("""
@@ -94,24 +94,24 @@ async def send_verification_code():
             """, (verification_code, expires_at, user_id))
         else:
             # Create temporary user record
-            temp_username = f"temp_{phone_number}_{int(time.time())}"
+            temp_username = f"temp_{email}_{int(time.time())}"
             temp_password = generate_password_hash('temp_password')
 
             cur.execute("""
-                INSERT INTO users (username, password, phone_number, verification_code, verification_code_expires_at, role, status)
+                INSERT INTO users (username, password, email, verification_code, verification_code_expires_at, role, status)
                 VALUES (%s, %s, %s, %s, %s, 'user', 'pending')
-            """, (temp_username, temp_password, phone_number, verification_code, expires_at))
+            """, (temp_username, temp_password, email, verification_code, expires_at))
 
         conn.commit()
         cur.close()
         conn.close()
 
         # Send verification code
-        success, error = await sms_service.send_verification_code(phone_number, verification_code)
+        success = await email_service.send_verification_code(email, verification_code)
         if not success:
             return jsonify(get_bilingual_message(
                 "فشل في إرسال رمز التحقق",
-                f"Failed to send verification code: {error}"
+                "Failed to send verification code"
             )), 500
 
         return jsonify(get_bilingual_message(
@@ -129,28 +129,28 @@ async def send_verification_code():
             "Error sending verification code"
         )), 500
 
-@auth_bp.route('/verify-phone', methods=['POST'])
-async def verify_phone():
-    """التحقق من رقم الهاتف | Verify phone number"""
+@auth_bp.route('/verify-email', methods=['POST'])
+async def verify_email():
+    """التحقق من البريد الإلكتروني | Verify email"""
     try:
         data = request.get_json()
-        phone_number = data.get('phoneNumber')
+        email = data.get('email')
         code = data.get('code')
         action = data.get('action', 'verify')  # 'verify' or 'reset'
 
-        if not all([phone_number, code]):
-            logger.warning("بيانات غير مكتملة في طلب التحقق من رقم الهاتف")
+        if not all([email, code]):
+            logger.warning("بيانات غير مكتملة في طلب التحقق من البريد الإلكتروني")
             return jsonify(get_bilingual_message(
-                "يجب توفير رقم الهاتف ورمز التحقق",
-                "Phone number and verification code are required"
+                "يجب توفير البريد الإلكتروني ورمز التحقق",
+                "Email and verification code are required"
             )), 400
 
         # Verify code
-        success, error = await sms_service.verify_code(phone_number, code)
+        success = await email_service.verify_code(email, code)
         if not success:
             return jsonify(get_bilingual_message(
-                error,
-                "Verification failed"
+                "رمز التحقق غير صحيح أو منتهي الصلاحية",
+                "Invalid or expired verification code"
             )), 400
 
         # Clear verification code after successful verification
@@ -164,17 +164,17 @@ async def verify_phone():
                 SET verification_code = NULL, 
                     verification_code_expires_at = NULL,
                     status = 'active'
-                WHERE phone_number = %s
+                WHERE email = %s
                 RETURNING id
-            """, (phone_number,))
+            """, (email,))
         else:
             cur.execute("""
                 UPDATE users 
                 SET verification_code = NULL, 
                     verification_code_expires_at = NULL
-                WHERE phone_number = %s
+                WHERE email = %s
                 RETURNING id
-            """, (phone_number,))
+            """, (email,))
 
         user_id = cur.fetchone()
         if not user_id:
@@ -190,68 +190,17 @@ async def verify_phone():
         conn.close()
 
         return jsonify(get_bilingual_message(
-            "تم التحقق من رقم الهاتف بنجاح",
-            "Phone number verified successfully"
+            "تم التحقق من البريد الإلكتروني بنجاح",
+            "Email verified successfully"
         ))
 
     except Exception as e:
-        logger.error(f"خطأ في التحقق من رقم الهاتف: {str(e)}")
+        logger.error(f"خطأ في التحقق من البريد الإلكتروني: {str(e)}")
         logger.error(traceback.format_exc())
         return jsonify(get_bilingual_message(
-            "حدث خطأ في التحقق من رقم الهاتف",
-            "Error verifying phone number"
+            "حدث خطأ في التحقق من البريد الإلكتروني",
+            "Error verifying email"
         )), 500
-
-class User:
-    def __init__(self, id, username, password=None, role='user', is_approved=True, status='active', verification_code=None, verification_code_expires_at=None):
-        self.id = id
-        self.username = username
-        self.password = password
-        self.role = role
-        self.is_approved = is_approved
-        self.status = status
-        self.is_authenticated = True
-        self.is_active = True
-        self.is_anonymous = False
-        self.verification_code = verification_code
-        self.verification_code_expires_at = verification_code_expires_at
-
-    def get_id(self):
-        return str(self.id)
-
-    @staticmethod
-    def get_by_username(username):
-        """البحث عن مستخدم باستخدام اسم المستخدم"""
-        try:
-            conn = psycopg2.connect(os.getenv('DATABASE_URL'))
-            cur = conn.cursor()
-
-            cur.execute("""
-                SELECT id, username, password, role, is_approved, status, verification_code, verification_code_expires_at
-                FROM users 
-                WHERE username = %s
-            """, (username,))
-
-            user_data = cur.fetchone()
-            cur.close()
-            conn.close()
-
-            if user_data:
-                return User(
-                    id=user_data[0],
-                    username=user_data[1],
-                    password=user_data[2],
-                    role=user_data[3],
-                    is_approved=user_data[4],
-                    status=user_data[5],
-                    verification_code=user_data[6],
-                    verification_code_expires_at=user_data[7]
-                )
-            return None
-
-        except Exception as e:
-            logger.error(f"خطأ في البحث عن المستخدم: {str(e)}")
-            return None
 
 def init_verification_tables() -> bool:
     """Initialize verification related tables | تهيئة جداول التحقق"""
@@ -259,21 +208,21 @@ def init_verification_tables() -> bool:
         conn = psycopg2.connect(os.getenv('DATABASE_URL'))
         cur = conn.cursor()
 
+        # Add email column to users table if it doesn't exist
+        cur.execute("""
+            ALTER TABLE users 
+            ADD COLUMN IF NOT EXISTS email VARCHAR(255) UNIQUE,
+            ADD COLUMN IF NOT EXISTS verification_code VARCHAR(4),
+            ADD COLUMN IF NOT EXISTS verification_code_expires_at TIMESTAMP
+        """)
+
         # Create verification_attempts table
         cur.execute("""
             CREATE TABLE IF NOT EXISTS verification_attempts (
                 id SERIAL PRIMARY KEY,
-                phone_number VARCHAR(20) NOT NULL,
+                email VARCHAR(255) NOT NULL,
                 attempt_time TIMESTAMP NOT NULL
             )
-        """)
-
-        # Add verification columns to users table if they don't exist
-        cur.execute("""
-            ALTER TABLE users 
-            ADD COLUMN IF NOT EXISTS phone_number VARCHAR(20) UNIQUE,
-            ADD COLUMN IF NOT EXISTS verification_code VARCHAR(4),
-            ADD COLUMN IF NOT EXISTS verification_code_expires_at TIMESTAMP
         """)
 
         conn.commit()
@@ -302,7 +251,7 @@ def init_auth(app):
                 cur = conn.cursor()
 
                 cur.execute("""
-                    SELECT id, username, password, role, is_approved, status, verification_code, verification_code_expires_at
+                    SELECT id, username, password, role, is_approved, status, email
                     FROM users 
                     WHERE id = %s
                 """, (user_id,))
@@ -319,8 +268,7 @@ def init_auth(app):
                         role=user_data[3],
                         is_approved=user_data[4],
                         status=user_data[5],
-                        verification_code=user_data[6],
-                        verification_code_expires_at=user_data[7]
+                        email=user_data[6]
                     )
                 return None
 
@@ -328,34 +276,9 @@ def init_auth(app):
                 logger.error(f"خطأ في تحميل المستخدم: {str(e)}")
                 return None
 
-        # Create users table if not exists
-        conn = psycopg2.connect(os.getenv('DATABASE_URL'))
-        cur = conn.cursor()
-
-        # Initialize verification tables before creating the users table.
+        # Initialize verification tables
         if not init_verification_tables():
             raise Exception("Failed to initialize verification tables.")
-
-
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                id SERIAL PRIMARY KEY,
-                username VARCHAR(255) UNIQUE NOT NULL,
-                password VARCHAR(255) NOT NULL,
-                role VARCHAR(50) DEFAULT 'user',
-                is_approved BOOLEAN DEFAULT true,
-                status VARCHAR(50) DEFAULT 'active',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                phone_number VARCHAR(20) UNIQUE,
-                verification_code VARCHAR(4),
-                verification_code_expires_at TIMESTAMP
-            )
-        """)
-
-        conn.commit()
-        cur.close()
-        conn.close()
-        logger.info("تم التأكد من وجود جدول المستخدمين")
 
         # Register blueprint only if not already registered
         if 'silvarium_auth' not in app.blueprints:
@@ -367,6 +290,55 @@ def init_auth(app):
     except Exception as e:
         logger.error(f"خطأ في تهيئة المصادقة: {str(e)}")
         return None
+
+class User:
+    def __init__(self, id, username, password=None, role='user', is_approved=True, status='active', email=None):
+        self.id = id
+        self.username = username
+        self.password = password
+        self.role = role
+        self.is_approved = is_approved
+        self.status = status
+        self.is_authenticated = True
+        self.is_active = True
+        self.is_anonymous = False
+        self.email = email
+
+    def get_id(self):
+        return str(self.id)
+
+    @staticmethod
+    def get_by_username(username):
+        """البحث عن مستخدم باستخدام اسم المستخدم"""
+        try:
+            conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+            cur = conn.cursor()
+
+            cur.execute("""
+                SELECT id, username, password, role, is_approved, status, email
+                FROM users 
+                WHERE username = %s
+            """, (username,))
+
+            user_data = cur.fetchone()
+            cur.close()
+            conn.close()
+
+            if user_data:
+                return User(
+                    id=user_data[0],
+                    username=user_data[1],
+                    password=user_data[2],
+                    role=user_data[3],
+                    is_approved=user_data[4],
+                    status=user_data[5],
+                    email=user_data[6]
+                )
+            return None
+
+        except Exception as e:
+            logger.error(f"خطأ في البحث عن المستخدم: {str(e)}")
+            return None
 
 @auth_bp.route('/reset-password', methods=['POST'])
 def reset_password():
@@ -503,9 +475,10 @@ def register():
         data = request.get_json()
         username = data.get('username')
         password = data.get('password')
+        email = data.get('email') # Added email field
 
-        if not username or not password:
-            return jsonify({"error": "يجب توفير اسم المستخدم وكلمة المرور"}), 400
+        if not username or not password or not email: # Check for email
+            return jsonify({"error": "يجب توفير اسم المستخدم وكلمة المرور والبريد الإلكتروني"}), 400
 
         conn = psycopg2.connect(os.getenv('DATABASE_URL'))
         cur = conn.cursor()
@@ -520,10 +493,10 @@ def register():
         # إنشاء مستخدم جديد
         hashed_password = generate_password_hash(password)
         cur.execute("""
-            INSERT INTO users (username, password, created_at)
-            VALUES (%s, %s, %s)
+            INSERT INTO users (username, password, created_at, email)
+            VALUES (%s, %s, %s, %s)
             RETURNING id, username, role, is_approved, status
-        """, (username, hashed_password, datetime.now()))
+        """, (username, hashed_password, datetime.now(), email))
 
         user_data = cur.fetchone()
         conn.commit()
@@ -536,7 +509,8 @@ def register():
                 username=user_data[1],
                 role=user_data[2],
                 is_approved=user_data[3],
-                status=user_data[4]
+                status=user_data[4],
+                email=email # Added email to User object
             )
             login_user(user)
             return jsonify({
@@ -573,7 +547,8 @@ def get_current_user():
                 "username": current_user.username,
                 "role": current_user.role,
                 "isApproved": current_user.is_approved,
-                "status": current_user.status
+                "status": current_user.status,
+                "email": current_user.email #Added email
             })
         return jsonify({"error": "لم يتم تسجيل الدخول"}), 401
     except Exception as e:

@@ -29,4 +29,6 @@ dependencies = [
     "firebase-admin>=6.6.0",
     "aioflask>=0.4.0",
     "twilio>=9.4.1",
+    "flask-mail>=0.10.0",
+    "email-validator>=2.2.0",
 ]

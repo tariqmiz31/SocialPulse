@@ -42,16 +42,19 @@ def create_app(testing=False):
             console_handler.setFormatter(formatter)
             logger.addHandler(console_handler)
 
-        # Initialize Firebase
+        # Initialize authentication and email service
         try:
+            # Import and initialize email service first
+            from server.blueprints.auth.email_service import email_service
             from server.blueprints.auth import init_verification_tables
+
             if not init_verification_tables():
                 logger.error("فشل في تهيئة جداول التحقق")
                 return None
             logger.info("تم تهيئة جداول التحقق بنجاح")
 
-        except Exception as firebase_error:
-            logger.error(f"خطأ في تهيئة النظام: {str(firebase_error)}")
+        except Exception as e:
+            logger.error(f"خطأ في تهيئة النظام: {str(e)}")
             return None
 
         # Determine environment
@@ -82,6 +85,10 @@ def create_app(testing=False):
         if not testing and not os.path.exists(app_config.SESSION_FILE_DIR):
             os.makedirs(app_config.SESSION_FILE_DIR)
         Session(app)
+
+        # Initialize email service
+        email_service.init_mail(app)
+        logger.info("تم تهيئة خدمة البريد الإلكتروني بنجاح")
 
         # Initialize routes
         app = setup_routes(app)
