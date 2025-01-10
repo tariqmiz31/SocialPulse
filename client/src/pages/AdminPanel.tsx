@@ -20,7 +20,8 @@ import {
   RefreshCw, 
   UserPlus,
   Trash2,
-  Shield
+  Shield,
+  Users
 } from "lucide-react";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
@@ -40,6 +41,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
 
 const newUserSchema = z.object({
   username: z.string().min(3, "اسم المستخدم يجب أن يكون 3 أحرف على الأقل"),
@@ -169,11 +176,31 @@ export default function AdminPanel() {
     );
   }
 
+  const pendingUsers = users?.filter(user => user.status === "pending") || [];
+  const activeUsers = users?.filter(user => user.status !== "pending") || [];
+
   return (
     <div className="container mx-auto py-8">
-      <Card>
+      <Tabs defaultValue="pending" className="space-y-6">
         <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle>لوحة إدارة المستخدمين</CardTitle>
+          <div className="flex items-center space-x-4">
+            <CardTitle>لوحة إدارة المستخدمين</CardTitle>
+            <TabsList>
+              <TabsTrigger value="pending" className="flex items-center gap-2">
+                <Users className="h-4 w-4" />
+                طلبات التسجيل
+                {pendingUsers.length > 0 && (
+                  <span className="bg-primary text-primary-foreground rounded-full px-2 py-0.5 text-xs">
+                    {pendingUsers.length}
+                  </span>
+                )}
+              </TabsTrigger>
+              <TabsTrigger value="users" className="flex items-center gap-2">
+                <Shield className="h-4 w-4" />
+                المستخدمين النشطين
+              </TabsTrigger>
+            </TabsList>
+          </div>
           <Dialog open={isAddUserOpen} onOpenChange={setIsAddUserOpen}>
             <DialogTrigger asChild>
               <Button>
@@ -232,116 +259,164 @@ export default function AdminPanel() {
             </DialogContent>
           </Dialog>
         </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>اسم المستخدم</TableHead>
-                <TableHead>الدور</TableHead>
-                <TableHead>الحالة</TableHead>
-                <TableHead>تاريخ التسجيل</TableHead>
-                <TableHead>الإجراءات</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {users?.map((user) => (
-                <TableRow key={user.id}>
-                  <TableCell>{user.username}</TableCell>
-                  <TableCell>
-                    {user.role === "admin" ? "مشرف" : "مستخدم"}
-                  </TableCell>
-                  <TableCell>
-                    {user.status === "pending"
-                      ? "قيد الانتظار"
-                      : user.status === "active"
-                      ? "نشط"
-                      : "محظور"}
-                  </TableCell>
-                  <TableCell>
-                    {new Date(user.createdAt).toLocaleDateString("ar")}
-                  </TableCell>
-                  <TableCell className="space-x-2">
-                    {!user.isApproved && user.status === "pending" && (
-                      <Button
-                        size="sm"
-                        onClick={() =>
-                          updateUserStatus.mutate({
-                            userId: user.id,
-                            action: "approve",
-                          })
-                        }
-                      >
-                        <CheckCircle className="h-4 w-4 ml-2" />
-                        موافقة
-                      </Button>
-                    )}
-                    {user.status !== "blocked" && (
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        onClick={() =>
-                          updateUserStatus.mutate({
-                            userId: user.id,
-                            action: "block",
-                          })
-                        }
-                      >
-                        <Ban className="h-4 w-4 ml-2" />
-                        حظر
-                      </Button>
-                    )}
-                    {user.status === "blocked" && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() =>
-                          updateUserStatus.mutate({
-                            userId: user.id,
-                            action: "unblock",
-                          })
-                        }
-                      >
-                        <RefreshCw className="h-4 w-4 ml-2" />
-                        إلغاء الحظر
-                      </Button>
-                    )}
-                    {user.username !== 'Tariq' && (
-                      <>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() =>
-                            updateUserStatus.mutate({
-                              userId: user.id,
-                              action: user.role === "admin" ? "demote" : "promote",
-                            })
-                          }
-                        >
-                          <Shield className="h-4 w-4 ml-2" />
-                          {user.role === "admin" ? "إلغاء الإشراف" : "ترقية لمشرف"}
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="destructive"
-                          onClick={() =>
-                            updateUserStatus.mutate({
-                              userId: user.id,
-                              action: "delete",
-                            })
-                          }
-                        >
-                          <Trash2 className="h-4 w-4 ml-2" />
-                          حذف
-                        </Button>
-                      </>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+
+        <TabsContent value="pending">
+          <Card>
+            <CardContent>
+              {pendingUsers.length === 0 ? (
+                <div className="text-center py-6 text-muted-foreground">
+                  لا توجد طلبات تسجيل جديدة
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>اسم المستخدم</TableHead>
+                      <TableHead>تاريخ التسجيل</TableHead>
+                      <TableHead>الإجراءات</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {pendingUsers.map((user) => (
+                      <TableRow key={user.id}>
+                        <TableCell>{user.username}</TableCell>
+                        <TableCell>
+                          {new Date(user.createdAt).toLocaleDateString("ar")}
+                        </TableCell>
+                        <TableCell className="space-x-2">
+                          <Button
+                            size="sm"
+                            onClick={() =>
+                              updateUserStatus.mutate({
+                                userId: user.id,
+                                action: "approve",
+                              })
+                            }
+                          >
+                            <CheckCircle className="h-4 w-4 ml-2" />
+                            موافقة
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={() =>
+                              updateUserStatus.mutate({
+                                userId: user.id,
+                                action: "delete",
+                              })
+                            }
+                          >
+                            <XCircle className="h-4 w-4 ml-2" />
+                            رفض
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="users">
+          <Card>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>اسم المستخدم</TableHead>
+                    <TableHead>الدور</TableHead>
+                    <TableHead>الحالة</TableHead>
+                    <TableHead>تاريخ التسجيل</TableHead>
+                    <TableHead>الإجراءات</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {activeUsers.map((user) => (
+                    <TableRow key={user.id}>
+                      <TableCell>{user.username}</TableCell>
+                      <TableCell>
+                        {user.role === "admin" ? "مشرف" : "مستخدم"}
+                      </TableCell>
+                      <TableCell>
+                        {user.status === "active"
+                          ? "نشط"
+                          : "محظور"}
+                      </TableCell>
+                      <TableCell>
+                        {new Date(user.createdAt).toLocaleDateString("ar")}
+                      </TableCell>
+                      <TableCell className="space-x-2">
+                        {user.status !== "blocked" && (
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={() =>
+                              updateUserStatus.mutate({
+                                userId: user.id,
+                                action: "block",
+                              })
+                            }
+                          >
+                            <Ban className="h-4 w-4 ml-2" />
+                            حظر
+                          </Button>
+                        )}
+                        {user.status === "blocked" && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() =>
+                              updateUserStatus.mutate({
+                                userId: user.id,
+                                action: "unblock",
+                              })
+                            }
+                          >
+                            <RefreshCw className="h-4 w-4 ml-2" />
+                            إلغاء الحظر
+                          </Button>
+                        )}
+                        {user.username !== 'Tariq' && (
+                          <>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() =>
+                                updateUserStatus.mutate({
+                                  userId: user.id,
+                                  action: user.role === "admin" ? "demote" : "promote",
+                                })
+                              }
+                            >
+                              <Shield className="h-4 w-4 ml-2" />
+                              {user.role === "admin" ? "إلغاء الإشراف" : "ترقية لمشرف"}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              onClick={() =>
+                                updateUserStatus.mutate({
+                                  userId: user.id,
+                                  action: "delete",
+                                })
+                              }
+                            >
+                              <Trash2 className="h-4 w-4 ml-2" />
+                              حذف
+                            </Button>
+                          </>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
