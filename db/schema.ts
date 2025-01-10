@@ -1,4 +1,4 @@
-import { pgTable, text, serial, timestamp, boolean } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, timestamp, boolean, integer } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -51,7 +51,6 @@ export const selectVerificationCodeSchema = createSelectSchema(verificationCodes
 export type InsertVerificationCode = typeof verificationCodes.$inferInsert;
 export type SelectVerificationCode = typeof verificationCodes.$inferSelect;
 
-// Keep the rest of the schemas unchanged as they are not related to authentication
 export const socialPlatforms = pgTable("social_platforms", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
@@ -102,31 +101,26 @@ export const taskAnalytics = pgTable("task_analytics", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
-// Export types for TaskAnalytics
 export const insertTaskAnalyticsSchema = createInsertSchema(taskAnalytics);
 export const selectTaskAnalyticsSchema = createSelectSchema(taskAnalytics);
 export type InsertTaskAnalytics = typeof taskAnalytics.$inferInsert;
 export type SelectTaskAnalytics = typeof taskAnalytics.$inferSelect;
 
-// Export types for Tasks
 export const insertTaskSchema = createInsertSchema(tasks);
 export const selectTaskSchema = createSelectSchema(tasks);
 export type InsertTask = typeof tasks.$inferInsert;
 export type SelectTask = typeof tasks.$inferSelect;
 
-// Export types for SocialPlatforms
 export const insertSocialPlatformSchema = createInsertSchema(socialPlatforms);
 export const selectSocialPlatformSchema = createSelectSchema(socialPlatforms);
 export type InsertSocialPlatform = typeof socialPlatforms.$inferInsert;
 export type SelectSocialPlatform = typeof socialPlatforms.$inferSelect;
 
-// Export types for PlatformConnections
 export const insertPlatformConnectionSchema = createInsertSchema(platformConnections);
 export const selectPlatformConnectionSchema = createSelectSchema(platformConnections);
 export type InsertPlatformConnection = typeof platformConnections.$inferInsert;
 export type SelectPlatformConnection = typeof platformConnections.$inferSelect;
 
-// Keep analytics and posts tables unchanged as they are not related to authentication
 export const posts = pgTable("posts", {
   id: serial("id").primaryKey(),
   content: text("content").notNull(),
@@ -154,3 +148,19 @@ export type InsertPost = typeof posts.$inferInsert;
 export type SelectPost = typeof posts.$inferSelect;
 export type InsertAnalytics = typeof analytics.$inferInsert;
 export type SelectAnalytics = typeof analytics.$inferSelect;
+
+
+export const roleChangeLogs = pgTable("role_change_logs", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").references(() => users.id),
+  changedByUserId: integer("changed_by_user_id").references(() => users.id),
+  oldRole: text("old_role").notNull(),
+  newRole: text("new_role").notNull(),
+  changeReason: text("change_reason"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertRoleChangeLogSchema = createInsertSchema(roleChangeLogs);
+export const selectRoleChangeLogSchema = createSelectSchema(roleChangeLogs);
+export type InsertRoleChangeLog = typeof roleChangeLogs.$inferInsert;
+export type SelectRoleChangeLog = typeof roleChangeLogs.$inferSelect;

@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { db } from "@db";
-import { users } from "@db/schema";
+import { roleChangeLogs, users } from "@db/schema";
 import { eq } from "drizzle-orm";
 import helmet from "helmet";
 import cors from "cors";
@@ -115,10 +115,33 @@ export function registerRoutes(app: Express): Server {
   app.post("/api/admin/users/:userId/promote", isAdmin, async (req, res) => {
     try {
       const userId = parseInt(req.params.userId);
+      const [user] = await db
+        .select()
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
+
+      if (!user) {
+        return res.status(404).send("المستخدم غير موجود");
+      }
+
+      const oldRole = user.role;
+
+      // تحديث دور المستخدم
       await db
         .update(users)
         .set({ role: "admin" })
         .where(eq(users.id, userId));
+
+      // تسجيل التغيير في السجل التاريخي
+      await db.insert(roleChangeLogs).values({
+        userId,
+        changedByUserId: req.user?.id,
+        oldRole,
+        newRole: "admin",
+        changeReason: "ترقية إلى مشرف من خلال لوحة الإدارة"
+      });
+
       res.json({ message: "تمت ترقية المستخدم إلى مشرف بنجاح" });
     } catch (error) {
       res.status(500).send("خطأ في ترقية المستخدم");
@@ -128,10 +151,33 @@ export function registerRoutes(app: Express): Server {
   app.post("/api/admin/users/:userId/demote", isAdmin, async (req, res) => {
     try {
       const userId = parseInt(req.params.userId);
+      const [user] = await db
+        .select()
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
+
+      if (!user) {
+        return res.status(404).send("المستخدم غير موجود");
+      }
+
+      const oldRole = user.role;
+
+      // تحديث دور المستخدم
       await db
         .update(users)
         .set({ role: "user" })
         .where(eq(users.id, userId));
+
+      // تسجيل التغيير في السجل التاريخي
+      await db.insert(roleChangeLogs).values({
+        userId,
+        changedByUserId: req.user?.id,
+        oldRole,
+        newRole: "user",
+        changeReason: "إلغاء صلاحيات الإشراف من خلال لوحة الإدارة"
+      });
+
       res.json({ message: "تم إلغاء صلاحيات الإشراف بنجاح" });
     } catch (error) {
       res.status(500).send("خطأ في إلغاء صلاحيات الإشراف");
@@ -178,7 +224,7 @@ export function registerRoutes(app: Express): Server {
         })
         .returning();
 
-      res.json({ 
+      res.json({
         message: "تم إنشاء الحساب بنجاح وبانتظار موافقة المشرف",
         user: {
           id: newUser.id,
