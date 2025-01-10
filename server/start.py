@@ -12,6 +12,8 @@ import time
 import prometheus_client
 import psycopg2
 from werkzeug.security import generate_password_hash
+from flask_session import Session
+from datetime import timedelta
 
 # Add project root to Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -39,7 +41,6 @@ def create_admin_user():
             VALUES (%s, %s, 'admin', true, 'active')
             ON CONFLICT (username) 
             DO UPDATE SET 
-                password = EXCLUDED.password,
                 role = 'admin',
                 is_approved = true,
                 status = 'active'
@@ -67,8 +68,9 @@ def main():
         # تحميل متغيرات البيئة
         load_dotenv()
 
-        # Create Flask application
-        app = Flask(__name__, static_folder='../client/dist', static_url_path='/')
+        # Create Flask application with proper static folder path
+        static_folder = os.path.abspath(os.path.join(project_root, 'client', 'dist'))
+        app = Flask(__name__, static_folder=static_folder, static_url_path='/')
 
         # Configure app
         app.config.update(
@@ -78,7 +80,16 @@ def main():
             MAIL_USE_TLS=True,
             MAIL_USERNAME=os.getenv('MAIL_USERNAME'),
             MAIL_PASSWORD=os.getenv('MAIL_PASSWORD'),
-            MAIL_DEFAULT_SENDER=os.getenv('MAIL_USERNAME')
+            MAIL_DEFAULT_SENDER=os.getenv('MAIL_USERNAME'),
+            SESSION_TYPE='filesystem',
+            SESSION_PERMANENT=True,
+            PERMANENT_SESSION_LIFETIME=timedelta(days=1),
+            SECRET_KEY=os.getenv('SECRET_KEY', os.urandom(24).hex()),
+            SESSION_FILE_DIR='/tmp/flask_session',
+            SESSION_FILE_THRESHOLD=500,
+            SESSION_COOKIE_SECURE=True,
+            SESSION_COOKIE_HTTPONLY=True,
+            SESSION_COOKIE_SAMESITE='Lax'
         )
 
         # Setup CORS
@@ -86,6 +97,11 @@ def main():
 
         # Initialize Flask-Mail
         mail = Mail(app)
+
+        # Setup Session
+        if not os.path.exists(app.config['SESSION_FILE_DIR']):
+            os.makedirs(app.config['SESSION_FILE_DIR'])
+        Session(app)
 
         # Setup logging handlers
         if not os.path.exists('logs'):
@@ -149,14 +165,14 @@ def main():
         # إنشاء/تحديث مستخدم مشرف
         create_admin_user()
 
-        # Signal ready
+        # Signal ready to workflow
         logger.info('الخادم جاهز | Server is ready')
         print('ready')
         sys.stdout.flush()
 
         # Start server
         port = app.config['PORT']
-        app.run(host='0.0.0.0', port=port)
+        app.run(host='0.0.0.0', port=port, debug=True)
         return 0
 
     except Exception as e:

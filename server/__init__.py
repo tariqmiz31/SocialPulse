@@ -11,6 +11,8 @@ from logging.handlers import RotatingFileHandler
 from server.routes import register_routes
 from server.blueprints.admin import admin_bp
 from dotenv import load_dotenv
+import flask_session
+from flask_session import Session
 
 # Setup logging
 logger = logging.getLogger('silvarium')
@@ -26,6 +28,7 @@ def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
                 sock.bind((host, port))
                 sock.close()
                 logger.info(f"المنفذ {port} متاح")
+                print('ready')  # Signal ready for workflow
                 return True
         except socket.error:
             time.sleep(1)
@@ -36,6 +39,7 @@ def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
 
 # Initialize Flask-Mail
 mail = Mail()
+sess = Session()
 
 def create_app(testing=False):
     """Create and configure Flask application"""
@@ -95,8 +99,15 @@ def create_app(testing=False):
             MAIL_DEFAULT_SENDER=os.getenv('MAIL_USERNAME'),
             SESSION_TYPE='filesystem',
             SESSION_PERMANENT=True,
-            PERMANENT_SESSION_LIFETIME=timedelta(days=31)
+            PERMANENT_SESSION_LIFETIME=timedelta(days=31),
+            SECRET_KEY=os.getenv('SECRET_KEY', os.urandom(24).hex()),
+            SESSION_FILE_DIR='/tmp/flask_session',  # Use tmp directory for session files
+            SESSION_FILE_THRESHOLD=500  # Maximum number of session files
         )
+
+        # Setup Session
+        if not os.path.exists(app.config['SESSION_FILE_DIR']):
+            os.makedirs(app.config['SESSION_FILE_DIR'])
 
         # Setup CORS
         CORS(app, supports_credentials=True)
@@ -104,6 +115,10 @@ def create_app(testing=False):
         # Initialize Flask-Mail
         mail.init_app(app)
         logger.info("تم تهيئة خدمة البريد الإلكتروني بنجاح")
+
+        # Initialize Flask-Session
+        sess.init_app(app)
+        logger.info("تم تهيئة إدارة الجلسات بنجاح")
 
         # Initialize database connection
         from server.database import init_db
@@ -126,9 +141,6 @@ def create_app(testing=False):
         # Create admin user if needed
         from server.start import create_admin_user
         create_admin_user()
-
-        # Signal ready to workflow
-        print('ready')
 
         logger.info(f"تم تهيئة التطبيق بنجاح على المنفذ {app.config['PORT']}")
         return app

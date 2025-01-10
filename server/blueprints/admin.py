@@ -1,4 +1,4 @@
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, session
 from flask_mail import Message
 from functools import wraps
 import secrets
@@ -83,6 +83,11 @@ def modify_user(user_id, action):
                     verification_id = cursor.fetchone()[0]
                     db.commit()
 
+                    # حفظ معرف رمز التحقق في الجلسة
+                    session['verification_id'] = verification_id
+                    session['role_change_action'] = action
+                    session['target_user_id'] = user_id
+
                     # إرسال رمز التحقق بالبريد
                     if mail is None:
                         logger.error('Mail instance not initialized')
@@ -119,22 +124,24 @@ def modify_user(user_id, action):
                     }), 500
 
             elif verification_step == 'email_verified':
-                code = request.json.get('code')
-                if not code:
-                    return jsonify({'message': 'رمز التحقق مطلوب'}), 400
+                # التحقق من وجود معلومات التحقق في الجلسة
+                if not all(key in session for key in ['verification_id', 'role_change_action', 'target_user_id']):
+                    return jsonify({'message': 'جلسة التحقق غير صالحة'}), 400
+
+                if session['target_user_id'] != user_id:
+                    return jsonify({'message': 'خطأ في معلومات المستخدم'}), 400
+
+                verification_id = session['verification_id']
 
                 # التحقق من صحة الرمز
                 cursor.execute("""
                     SELECT id 
                     FROM verification_codes 
-                    WHERE user_id = %s 
-                    AND code = %s 
-                    AND type = 'role_change'
+                    WHERE id = %s 
                     AND expires_at > NOW() 
                     AND verified = false
-                    ORDER BY created_at DESC 
-                    LIMIT 1
-                """, (request.user.id, code))
+                    AND type = 'role_change'
+                """, (verification_id,))
 
                 verification = cursor.fetchone()
                 if not verification:
@@ -160,12 +167,17 @@ def modify_user(user_id, action):
 
                     updated_user = cursor.fetchone()
 
-                    # Add role change history
+                    # إضافة سجل تغيير الصلاحيات
                     cursor.execute("""
                         INSERT INTO role_change_history 
                         (user_id, admin_id, old_role, new_role, verification_id, created_at)
                         VALUES (%s, %s, %s, %s, %s, NOW())
                     """, (user_id, request.user.id, user[3], new_role, verification[0]))
+
+                    # مسح معلومات التحقق من الجلسة
+                    session.pop('verification_id', None)
+                    session.pop('role_change_action', None)
+                    session.pop('target_user_id', None)
 
                     db.commit()
 

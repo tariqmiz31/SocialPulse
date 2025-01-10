@@ -1,18 +1,20 @@
 import os
 import logging
+import time
 from logging.handlers import RotatingFileHandler
 import prometheus_client
 from prometheus_client import Counter, Histogram
-import time
-import socket
-import psycopg2
 from werkzeug.security import generate_password_hash
 from flask_mail import Mail, Message
-from flask import Flask, send_from_directory, request, jsonify
+from flask import Flask, send_from_directory, request, jsonify, session
 from flask_cors import CORS
+from flask_session import Session
 from dotenv import load_dotenv
 from server.routes import register_routes
+from server.blueprints.admin import admin_bp, init_mail
 import sys
+from datetime import timedelta
+import socket
 
 # تحميل المتغيرات البيئية
 load_dotenv()
@@ -22,6 +24,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger('silvarium')
 
 mail = Mail()
+sess = Session()
 
 def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
     """Wait for port availability"""
@@ -42,77 +45,119 @@ def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
 
 def create_app():
     """إنشاء تطبيق Flask"""
-    app = Flask(__name__, static_folder='../client/dist', static_url_path='/')
+    try:
+        app = Flask(__name__, static_folder='../client/dist', static_url_path='/')
 
-    # تكوين البريد الإلكتروني
-    app.config.update(
-        MAIL_SERVER='smtp.gmail.com',
-        MAIL_PORT=587,
-        MAIL_USE_TLS=True,
-        MAIL_USERNAME=os.getenv('MAIL_USERNAME'),
-        MAIL_PASSWORD=os.getenv('MAIL_PASSWORD'),
-        MAIL_DEFAULT_SENDER=os.getenv('MAIL_USERNAME')
-    )
+        # إعدادات الجلسة
+        app.config.update(
+            SECRET_KEY=os.getenv('SECRET_KEY', os.urandom(24).hex()),
+            SESSION_TYPE='filesystem',
+            SESSION_PERMANENT=True,
+            PERMANENT_SESSION_LIFETIME=timedelta(days=1),
+            SESSION_COOKIE_SECURE=True,
+            SESSION_COOKIE_HTTPONLY=True,
+            SESSION_COOKIE_SAMESITE='Lax',
+            SESSION_FILE_DIR='/tmp/flask_session',
+            SESSION_FILE_THRESHOLD=500,
+            PORT=int(os.getenv('PORT', '5000')),
+            WAIT_FOR_PORT=True,
+            WAIT_FOR_PORT_TIMEOUT=120
+        )
 
-    # تهيئة Flask-Mail
-    mail.init_app(app)
+        # تكوين البريد الإلكتروني
+        app.config.update(
+            MAIL_SERVER='smtp.gmail.com',
+            MAIL_PORT=587,
+            MAIL_USE_TLS=True,
+            MAIL_USERNAME=os.getenv('MAIL_USERNAME'),
+            MAIL_PASSWORD=os.getenv('MAIL_PASSWORD'),
+            MAIL_DEFAULT_SENDER=os.getenv('MAIL_USERNAME')
+        )
 
-    # تكوين CORS
-    CORS(app, 
-         supports_credentials=True,
-         resources={
-             r"/api/*": {
-                 "origins": ["http://localhost:5000", "https://*.repl.co", "https://*.repl.dev"],
-                 "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-                 "allow_headers": ["Content-Type", "Authorization"]
-             }
-         })
+        # Create session directory if it doesn't exist
+        if not os.path.exists(app.config['SESSION_FILE_DIR']):
+            os.makedirs(app.config['SESSION_FILE_DIR'])
 
-    # تكوين التسجيل
-    if not os.path.exists('logs'):
-        os.makedirs('logs')
+        # تهيئة Flask-Session
+        sess.init_app(app)
 
-    file_handler = RotatingFileHandler(
-        'logs/silvarium.log',
-        maxBytes=10240,
-        backupCount=10
-    )
-    file_handler.setFormatter(logging.Formatter(
-        '%(asctime)s %(levelname)s: %(message)s'
-    ))
-    file_handler.setLevel(logging.INFO)
-    app.logger.addHandler(file_handler)
-    app.logger.setLevel(logging.INFO)
-    app.logger.info('تم بدء تشغيل سيلفاريوم سوشيال')
+        # تهيئة Flask-Mail
+        mail.init_app(app)
 
-    # تكوين Prometheus
-    REQUEST_COUNT = Counter('request_count', 'Total number of requests', ['method', 'endpoint', 'status'])
-    REQUEST_LATENCY = Histogram('request_latency_seconds', 'Request latency in seconds', ['method', 'endpoint'])
+        # تكوين CORS
+        CORS(app, 
+             supports_credentials=True,
+             resources={
+                 r"/api/*": {
+                     "origins": ["http://localhost:5000", "https://*.repl.co", "https://*.repl.dev"],
+                     "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+                     "allow_headers": ["Content-Type", "Authorization"]
+                 }
+             })
 
-    @app.before_request
-    def before_request():
-        request.start_time = time.time()
+        # تكوين التسجيل
+        if not os.path.exists('logs'):
+            os.makedirs('logs')
 
-    @app.after_request
-    def after_request(response):
-        if hasattr(request, 'start_time'):
-            duration = time.time() - request.start_time
-            REQUEST_LATENCY.labels(
+        file_handler = RotatingFileHandler(
+            'logs/silvarium.log',
+            maxBytes=10240,
+            backupCount=10
+        )
+        file_handler.setFormatter(logging.Formatter(
+            '%(asctime)s %(levelname)s: %(message)s'
+        ))
+        file_handler.setLevel(logging.INFO)
+        app.logger.addHandler(file_handler)
+        app.logger.setLevel(logging.INFO)
+        app.logger.info('تم بدء تشغيل سيلفاريوم سوشيال')
+
+        # تكوين Prometheus
+        REQUEST_COUNT = Counter('request_count', 'Total number of requests', ['method', 'endpoint', 'status'])
+        REQUEST_LATENCY = Histogram('request_latency_seconds', 'Request latency in seconds', ['method', 'endpoint'])
+
+        @app.before_request
+        def before_request():
+            request.start_time = time.time()
+            # التحقق من صلاحية الجلسة
+            if 'user_id' in session and 'last_activity' in session:
+                if time.time() - session['last_activity'] > app.config['PERMANENT_SESSION_LIFETIME'].total_seconds():
+                    session.clear()
+                    return jsonify({'message': 'انتهت صلاحية الجلسة'}), 401
+                session['last_activity'] = time.time()
+
+        @app.after_request
+        def after_request(response):
+            if hasattr(request, 'start_time'):
+                duration = time.time() - request.start_time
+                REQUEST_LATENCY.labels(
+                    method=request.method,
+                    endpoint=request.path
+                ).observe(duration)
+
+            REQUEST_COUNT.labels(
                 method=request.method,
-                endpoint=request.path
-            ).observe(duration)
+                endpoint=request.path,
+                status=response.status_code
+            ).inc()
+            return response
 
-        REQUEST_COUNT.labels(
-            method=request.method,
-            endpoint=request.path,
-            status=response.status_code
-        ).inc()
-        return response
+        # تهيئة البلوبرنت الإداري
+        init_mail(mail)
+        app.register_blueprint(admin_bp)
 
-    # تسجيل المسارات
-    app = register_routes(app)
+        # تسجيل المسارات
+        app = register_routes(app)
 
-    return app
+        # Signal ready for workflow
+        print('ready')
+        sys.stdout.flush()
+
+        return app
+
+    except Exception as e:
+        logger.error(f"خطأ في إنشاء التطبيق: {str(e)}")
+        return None
 
 def main():
     """الدالة الرئيسية لبدء الخادم"""
@@ -141,9 +186,6 @@ def main():
 
         logger.info("تم إنشاء تطبيق Flask بنجاح")
 
-        # Ready signal for workflow
-        print('ready')
-        sys.stdout.flush()
 
         return app, port
 
