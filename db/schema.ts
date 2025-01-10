@@ -1,4 +1,4 @@
-import { pgTable, text, serial, timestamp, boolean, integer } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, timestamp, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -17,6 +17,11 @@ export const users = pgTable("users", {
   verification_code_expires_at: timestamp("verification_code_expires_at"),
 });
 
+export const insertUserSchema = createInsertSchema(users);
+export const selectUserSchema = createSelectSchema(users);
+export type InsertUser = typeof users.$inferInsert;
+export type SelectUser = typeof users.$inferSelect;
+
 export const verificationCodes = pgTable("verification_codes", {
   id: serial("id").primaryKey(),
   userId: serial("user_id").references(() => users.id),
@@ -32,16 +37,6 @@ export const verificationAttempts = pgTable("verification_attempts", {
   email: text("email").notNull(),
   attemptTime: timestamp("attempt_time").defaultNow(),
 });
-
-export const insertUserSchema = createInsertSchema(users, {
-  role: z.enum(["admin", "user"]),
-  status: z.enum(["active", "pending", "blocked"]),
-  email: z.string().email().optional(),
-});
-
-export const selectUserSchema = createSelectSchema(users);
-export type InsertUser = typeof users.$inferInsert;
-export type SelectUser = typeof users.$inferSelect;
 
 export const insertVerificationCodeSchema = createInsertSchema(verificationCodes, {
   type: z.enum(["reset_password", "email_verification"]),
@@ -148,19 +143,3 @@ export type InsertPost = typeof posts.$inferInsert;
 export type SelectPost = typeof posts.$inferSelect;
 export type InsertAnalytics = typeof analytics.$inferInsert;
 export type SelectAnalytics = typeof analytics.$inferSelect;
-
-
-export const roleChangeLogs = pgTable("role_change_logs", {
-  id: serial("id").primaryKey(),
-  userId: integer("user_id").references(() => users.id),
-  changedByUserId: integer("changed_by_user_id").references(() => users.id),
-  oldRole: text("old_role").notNull(),
-  newRole: text("new_role").notNull(),
-  changeReason: text("change_reason"),
-  createdAt: timestamp("created_at").defaultNow(),
-});
-
-export const insertRoleChangeLogSchema = createInsertSchema(roleChangeLogs);
-export const selectRoleChangeLogSchema = createSelectSchema(roleChangeLogs);
-export type InsertRoleChangeLog = typeof roleChangeLogs.$inferInsert;
-export type SelectRoleChangeLog = typeof roleChangeLogs.$inferSelect;
