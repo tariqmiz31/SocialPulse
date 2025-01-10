@@ -9,9 +9,15 @@ interface EmailVerificationProps {
   onVerificationComplete: (email: string) => void;
   onCancel?: () => void;
   action?: 'verify' | 'reset';
+  username?: string;
 }
 
-export function EmailVerification({ onVerificationComplete, onCancel, action = 'verify' }: EmailVerificationProps) {
+export function EmailVerification({ 
+  onVerificationComplete, 
+  onCancel, 
+  action = 'verify',
+  username = 'Tariq' // Default to Tariq for this implementation
+}: EmailVerificationProps) {
   const [email, setEmail] = useState("");
   const [verificationCode, setVerificationCode] = useState("");
   const [step, setStep] = useState<"email" | "verify">("email");
@@ -41,7 +47,7 @@ export function EmailVerification({ onVerificationComplete, onCancel, action = '
       const response = await fetch('/api/auth/send-verification-code', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, action }),
+        body: JSON.stringify({ email, action, username }),
       });
 
       const data = await response.json();
@@ -89,6 +95,7 @@ export function EmailVerification({ onVerificationComplete, onCancel, action = '
           email,
           code: verificationCode,
           action,
+          username
         }),
       });
 

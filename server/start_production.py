@@ -8,8 +8,6 @@ from waitress import serve
 import socket
 import time
 import json
-import firebase_admin
-from firebase_admin import credentials, auth
 
 # Add project root to Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -42,31 +40,34 @@ console_handler = logging.StreamHandler()
 console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 
-def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 60) -> bool:
+def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
     """Wait for port availability | انتظار جاهزية المنفذ"""
     logger.info(f"بدء انتظار المنفذ {port}... | Starting to wait for port {port}...")
     start_time = time.time()
-    while time.time() - start_time < timeout:
+
+    while True:
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                # Try to bind to the port
                 sock.bind((host, port))
                 sock.close()
                 logger.info(f"المنفذ {port} متاح | Port {port} is available")
                 return True
         except socket.error:
+            if time.time() - start_time > timeout:
+                logger.error(f"المنفذ {port} غير متاح بعد {timeout} ثانية")
+                return False
             logger.info(f"انتظار المنفذ {port}... | Waiting for port {port}...")
             time.sleep(1)
-
-    logger.error(f"المنفذ {port} غير متاح بعد {timeout} ثانية")
-    return False
+            continue
 
 def main():
     """نقطة البداية الرئيسية | Main entry point"""
     try:
-        # Set production environment and enable port waiting
+        # Explicitly set production mode
         os.environ['FLASK_ENV'] = 'production'
-        os.environ['WAIT_FOR_PORT'] = 'true'  # Always wait for port in production
-        os.environ['WAIT_FOR_PORT_TIMEOUT'] = '120'  # 2 minutes timeout
+        os.environ['WAIT_FOR_PORT'] = 'true'
+        os.environ['WAIT_FOR_PORT_TIMEOUT'] = '120'
 
         logger.info("بدء تشغيل خادم سيلفاريوم الاجتماعي | Starting Silvarium Social production server")
 
@@ -77,7 +78,7 @@ def main():
             logger.warning("قيمة PORT غير صالحة، استخدام المنفذ الافتراضي 5000")
             port = 5000
 
-        # Wait for port availability with increased timeout
+        # Wait for port with increased timeout
         if not wait_for_port(port, timeout=120):
             logger.error(f"المنفذ {port} غير متاح - إنهاء التطبيق")
             return 1

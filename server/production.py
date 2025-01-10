@@ -17,7 +17,7 @@ project_root = os.path.dirname(current_dir)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-# Setup logging
+# Setup logging first
 logger = logging.getLogger('silvarium_production')
 logger.setLevel(logging.INFO)
 
@@ -39,19 +39,24 @@ console_handler = logging.StreamHandler()
 console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 
-def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 30) -> bool:
-    """Wait until port becomes available | انتظار حتى يصبح المنفذ متاحاً"""
+def is_port_in_use(port: int, host: str = '0.0.0.0') -> bool:
+    """Check if port is already in use | التحقق من استخدام المنفذ"""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        try:
+            sock.bind((host, port))
+            return False
+        except socket.error:
+            return True
+
+def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 60) -> bool:
+    """Wait for port availability | انتظار حتى يصبح المنفذ متاحاً"""
     start_time = time.time()
     while time.time() - start_time < timeout:
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                sock.bind((host, port))
-                sock.close()
-                logger.info(f"المنفذ {port} متاح | Port {port} is available")
-                return True
-        except socket.error:
-            time.sleep(1)
-            logger.info(f"انتظار المنفذ {port}... | Waiting for port {port}...")
+        if not is_port_in_use(port, host):
+            logger.info(f"المنفذ {port} متاح | Port {port} is available")
+            return True
+        logger.info(f"انتظار المنفذ {port}... | Waiting for port {port}...")
+        time.sleep(1)
 
     logger.error(f"المنفذ {port} غير متاح بعد {timeout} ثانية | Port {port} not available after {timeout} seconds")
     return False
@@ -61,7 +66,8 @@ def main() -> int:
     try:
         # Set production environment and enable port waiting
         os.environ['FLASK_ENV'] = 'production'
-        os.environ['WAIT_FOR_PORT'] = 'true'
+        os.environ['WAIT_FOR_PORT'] = 'true'  # Always wait for port in production
+        os.environ['WAIT_FOR_PORT_TIMEOUT'] = '120'  # 2 minutes timeout
 
         logger.info("بدء تشغيل خادم سيلفاريوم الاجتماعي | Starting Silvarium Social production server")
 
@@ -72,8 +78,8 @@ def main() -> int:
             logger.warning("قيمة PORT غير صالحة، استخدام المنفذ الافتراضي 5000")
             port = 5000
 
-        # Wait for port availability
-        if not wait_for_port(port):
+        # Wait for port to become available
+        if not wait_for_port(port, timeout=120):
             logger.error(f"المنفذ {port} غير متاح - إنهاء التطبيق")
             return 1
 
@@ -85,7 +91,7 @@ def main() -> int:
             logger.error("فشل في إنشاء تطبيق Flask")
             return 1
 
-        # Initialize email verification tables
+        # Initialize verification tables
         from server.blueprints.auth import init_verification_tables
         if not init_verification_tables():
             logger.error("فشل في تهيئة جداول التحقق")

@@ -11,6 +11,8 @@ class Config:
     DEBUG = False
     PORT = int(os.getenv('PORT', '5000'))
     HOST = '0.0.0.0'
+    WAIT_FOR_PORT = True  # Always wait for port
+    WAIT_FOR_PORT_TIMEOUT = 120  # 2 minutes timeout
 
     # إعدادات الجلسة | Session Settings
     SESSION_TYPE = 'filesystem'
@@ -18,10 +20,6 @@ class Config:
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = 'Lax'
     PERMANENT_SESSION_LIFETIME = 1800  # 30 minutes | 30 دقيقة
-
-    # إعدادات انتظار المنفذ | Port Waiting Settings
-    WAIT_FOR_PORT = True
-    WAIT_FOR_PORT_TIMEOUT = 120
 
     # إعدادات التحقق عبر البريد الإلكتروني | Email Verification Settings
     MAIL_SERVER = os.getenv('MAIL_SERVER', 'smtp.gmail.com')
@@ -50,8 +48,6 @@ class ProductionConfig(Config):
         'https://localhost:5000',
         os.getenv('APP_URL', 'https://silvariumsocial.com')
     ]
-    WAIT_FOR_PORT = True
-    WAIT_FOR_PORT_TIMEOUT = 120
 
 class DevelopmentConfig(Config):
     """تكوين بيئة التطوير | Development Environment Configuration"""
@@ -62,8 +58,6 @@ class DevelopmentConfig(Config):
         'http://localhost:5000',
         'https://localhost:5000'
     ]
-    WAIT_FOR_PORT = True
-    WAIT_FOR_PORT_TIMEOUT = 120
 
 config = {
     'development': DevelopmentConfig,

@@ -17,7 +17,7 @@ logger = logging.getLogger('silvarium')
 logger.setLevel(logging.INFO)
 
 def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
-    """Wait for port availability"""
+    """Wait for port availability | انتظار جاهزية المنفذ"""
     logger.info(f"بدء انتظار المنفذ {port}...")
     start_time = time.time()
     while time.time() - start_time < timeout:
@@ -40,11 +40,9 @@ def create_app(testing=False):
         # Load environment variables first
         load_dotenv()
 
-        if not testing:
-            # Setup logging handlers
-            if not os.path.exists('/tmp/logs'):
-                os.makedirs('/tmp/logs')
-
+        # Setup logging handlers
+        if not testing and not os.path.exists('/tmp/logs'):
+            os.makedirs('/tmp/logs')
             formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
 
             file_handler = RotatingFileHandler(
@@ -81,7 +79,7 @@ def create_app(testing=False):
         # Get port from environment or config
         port = int(os.getenv('PORT', '5000'))
 
-        # Wait for port if configured
+        # Always wait for port in production mode
         if app_config.WAIT_FOR_PORT and not testing:
             if not wait_for_port(port, timeout=app_config.WAIT_FOR_PORT_TIMEOUT):
                 logger.error("فشل في انتظار المنفذ")
@@ -103,8 +101,8 @@ def create_app(testing=False):
             DEBUG=app_config.DEBUG,
             PORT=port,
             HOST='0.0.0.0',
-            WAIT_FOR_PORT=app_config.WAIT_FOR_PORT,
-            WAIT_FOR_PORT_TIMEOUT=app_config.WAIT_FOR_PORT_TIMEOUT
+            WAIT_FOR_PORT=True,  # Always wait for port
+            WAIT_FOR_PORT_TIMEOUT=120  # 2 minutes timeout
         )
 
         # Setup CORS

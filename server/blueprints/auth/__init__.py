@@ -43,8 +43,9 @@ async def send_verification_code():
         data = request.get_json()
         email = data.get('email')
         action = data.get('action', 'verify')  # 'verify' or 'reset'
+        username = data.get('username', 'Tariq')  # Default to Tariq
 
-        logger.info(f"Received verification code request for email: {email}, action: {action}")
+        logger.info(f"طلب إرسال رمز التحقق للبريد الإلكتروني: {email}, المستخدم: {username}")
 
         if not email:
             logger.warning("لم يتم توفير البريد الإلكتروني | Email not provided")
@@ -72,8 +73,8 @@ async def send_verification_code():
         # Check if email exists
         cur.execute("""
             SELECT id, status FROM users 
-            WHERE email = %s
-        """, (email,))
+            WHERE email = %s AND username = %s
+        """, (email, username))
 
         user = cur.fetchone()
 
@@ -94,20 +95,17 @@ async def send_verification_code():
             """, (verification_code, expires_at, user_id))
         else:
             # Create temporary user record
-            temp_username = f"temp_{email}_{int(time.time())}"
-            temp_password = generate_password_hash('temp_password')
-
             cur.execute("""
-                INSERT INTO users (username, password, email, verification_code, verification_code_expires_at, role, status)
-                VALUES (%s, %s, %s, %s, %s, 'user', 'pending')
-            """, (temp_username, temp_password, email, verification_code, expires_at))
+                INSERT INTO users (username, email, verification_code, verification_code_expires_at, role, status)
+                VALUES (%s, %s, %s, %s, 'user', 'pending')
+            """, (username, email, verification_code, expires_at))
 
         conn.commit()
         cur.close()
         conn.close()
 
         # Send verification code
-        success = await email_service.send_verification_code(email, verification_code)
+        success, error = await email_service.send_verification_code(email, verification_code)
         if not success:
             return jsonify(get_bilingual_message(
                 "فشل في إرسال رمز التحقق",
@@ -127,80 +125,6 @@ async def send_verification_code():
         return jsonify(get_bilingual_message(
             "حدث خطأ في إرسال رمز التحقق",
             "Error sending verification code"
-        )), 500
-
-@auth_bp.route('/verify-email', methods=['POST'])
-async def verify_email():
-    """التحقق من البريد الإلكتروني | Verify email"""
-    try:
-        data = request.get_json()
-        email = data.get('email')
-        code = data.get('code')
-        action = data.get('action', 'verify')  # 'verify' or 'reset'
-
-        if not all([email, code]):
-            logger.warning("بيانات غير مكتملة في طلب التحقق من البريد الإلكتروني")
-            return jsonify(get_bilingual_message(
-                "يجب توفير البريد الإلكتروني ورمز التحقق",
-                "Email and verification code are required"
-            )), 400
-
-        # Verify code
-        success = await email_service.verify_code(email, code)
-        if not success:
-            return jsonify(get_bilingual_message(
-                "رمز التحقق غير صحيح أو منتهي الصلاحية",
-                "Invalid or expired verification code"
-            )), 400
-
-        # Clear verification code after successful verification
-        conn = psycopg2.connect(os.getenv('DATABASE_URL'))
-        cur = conn.cursor()
-
-        # Update user status based on action
-        if action == 'verify':
-            cur.execute("""
-                UPDATE users 
-                SET verification_code = NULL, 
-                    verification_code_expires_at = NULL,
-                    email_verified = TRUE,
-                    status = 'active'
-                WHERE email = %s
-                RETURNING id
-            """, (email,))
-        else:
-            cur.execute("""
-                UPDATE users 
-                SET verification_code = NULL, 
-                    verification_code_expires_at = NULL
-                WHERE email = %s
-                RETURNING id
-            """, (email,))
-
-        user_id = cur.fetchone()
-        if not user_id:
-            cur.close()
-            conn.close()
-            return jsonify(get_bilingual_message(
-                "لم يتم العثور على المستخدم",
-                "User not found"
-            )), 404
-
-        conn.commit()
-        cur.close()
-        conn.close()
-
-        return jsonify(get_bilingual_message(
-            "تم التحقق من البريد الإلكتروني بنجاح",
-            "Email verified successfully"
-        ))
-
-    except Exception as e:
-        logger.error(f"خطأ في التحقق من البريد الإلكتروني: {str(e)}")
-        logger.error(traceback.format_exc())
-        return jsonify(get_bilingual_message(
-            "حدث خطأ في التحقق من البريد الإلكتروني",
-            "Error verifying email"
         )), 500
 
 def init_verification_tables() -> bool:
@@ -346,6 +270,80 @@ class User:
         except Exception as e:
             logger.error(f"خطأ في البحث عن المستخدم: {str(e)}")
             return None
+
+@auth_bp.route('/verify-email', methods=['POST'])
+async def verify_email():
+    """التحقق من البريد الإلكتروني | Verify email"""
+    try:
+        data = request.get_json()
+        email = data.get('email')
+        code = data.get('code')
+        action = data.get('action', 'verify')  # 'verify' or 'reset'
+        username = data.get('username', 'Tariq')  # Default to Tariq
+
+        if not all([email, code]):
+            logger.warning("بيانات غير مكتملة في طلب التحقق من البريد الإلكتروني")
+            return jsonify(get_bilingual_message(
+                "يجب توفير البريد الإلكتروني ورمز التحقق",
+                "Email and verification code are required"
+            )), 400
+
+        # Verify code
+        success, error = await email_service.verify_code(email, code)
+        if not success:
+            return jsonify(get_bilingual_message(
+                error or "رمز التحقق غير صحيح أو منتهي الصلاحية",
+                "Invalid or expired verification code"
+            )), 400
+
+        # Update user status
+        conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+        cur = conn.cursor()
+
+        if action == 'verify':
+            cur.execute("""
+                UPDATE users 
+                SET verification_code = NULL, 
+                    verification_code_expires_at = NULL,
+                    email_verified = TRUE,
+                    status = 'active'
+                WHERE email = %s AND username = %s
+                RETURNING id
+            """, (email, username))
+        else:
+            cur.execute("""
+                UPDATE users 
+                SET verification_code = NULL, 
+                    verification_code_expires_at = NULL
+                WHERE email = %s AND username = %s
+                RETURNING id
+            """, (email, username))
+
+        user_id = cur.fetchone()
+        if not user_id:
+            cur.close()
+            conn.close()
+            return jsonify(get_bilingual_message(
+                "لم يتم العثور على المستخدم",
+                "User not found"
+            )), 404
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        return jsonify(get_bilingual_message(
+            "تم التحقق من البريد الإلكتروني بنجاح",
+            "Email verified successfully"
+        ))
+
+    except Exception as e:
+        logger.error(f"خطأ في التحقق من البريد الإلكتروني: {str(e)}")
+        logger.error(traceback.format_exc())
+        return jsonify(get_bilingual_message(
+            "حدث خطأ في التحقق من البريد الإلكتروني",
+            "Error verifying email"
+        )), 500
 
 @auth_bp.route('/reset-password', methods=['POST'])
 def reset_password():
@@ -563,14 +561,3 @@ def get_current_user():
     except Exception as e:
         logger.error(f"خطأ في جلب معلومات المستخدم: {str(e)}")
         return jsonify({"error": "حدث خطأ في جلب معلومات المستخدم"}), 500
-
-
-#Removed link_phone route as it uses firebase and is irrelevant to the email verification update
-
-#Import firebase service after blueprint creation to avoid circular imports
-try:
-    from .firebase_service import firebase_auth
-    logger.info("Firebase service imported successfully")
-except Exception as e:
-    logger.error(f"Error importing Firebase service: {str(e)}")
-    firebase_auth = None
