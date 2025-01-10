@@ -5,6 +5,8 @@ from flask_cors import CORS
 from flask_session import Session
 from datetime import timedelta
 import logging
+import socket
+import time
 from logging.handlers import RotatingFileHandler
 from server.routes import setup_routes
 from server.config import config
@@ -14,14 +16,29 @@ from dotenv import load_dotenv
 logger = logging.getLogger('silvarium')
 logger.setLevel(logging.INFO)
 
+def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
+    """Wait for port availability"""
+    logger.info(f"بدء انتظار المنفذ {port}...")
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.bind((host, port))
+                sock.close()
+                logger.info(f"المنفذ {port} متاح")
+                return True
+        except socket.error:
+            time.sleep(1)
+            logger.info(f"انتظار المنفذ {port}...")
+
+    logger.error(f"المنفذ {port} غير متاح بعد {timeout} ثانية")
+    return False
+
 def create_app(testing=False):
     """Create and configure Flask application"""
     try:
         # Load environment variables first
         load_dotenv()
-
-        # Set port waiting configuration
-        os.environ['WAIT_FOR_PORT'] = 'true'
 
         if not testing:
             # Setup logging handlers
@@ -61,6 +78,16 @@ def create_app(testing=False):
         env = os.getenv('FLASK_ENV', 'development')
         app_config = config[env]
 
+        # Get port from environment or config
+        port = int(os.getenv('PORT', '5000'))
+
+        # Wait for port if configured
+        if app_config.WAIT_FOR_PORT and not testing:
+            if not wait_for_port(port, timeout=app_config.WAIT_FOR_PORT_TIMEOUT):
+                logger.error("فشل في انتظار المنفذ")
+                return None
+            logger.info("تم تأكيد توفر المنفذ بنجاح")
+
         # Create Flask application with correct static folder path
         static_folder = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'client', 'dist'))
         app = Flask(__name__, static_folder=static_folder, static_url_path='/')
@@ -74,8 +101,10 @@ def create_app(testing=False):
             PERMANENT_SESSION_LIFETIME=timedelta(seconds=app_config.PERMANENT_SESSION_LIFETIME),
             SECRET_KEY=app_config.SECRET_KEY,
             DEBUG=app_config.DEBUG,
-            PORT=int(os.getenv('PORT', '5000')),
-            HOST='0.0.0.0'
+            PORT=port,
+            HOST='0.0.0.0',
+            WAIT_FOR_PORT=app_config.WAIT_FOR_PORT,
+            WAIT_FOR_PORT_TIMEOUT=app_config.WAIT_FOR_PORT_TIMEOUT
         )
 
         # Setup CORS

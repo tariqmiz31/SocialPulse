@@ -6,7 +6,7 @@ import AuthPage from "@/pages/AuthPage";
 import { useUser } from "@/hooks/use-user";
 import { Navbar } from "@/components/ui/navbar";
 import ResetPassword from "@/pages/ResetPassword";
-import VerifyPhonePage from "@/pages/verify-phone";
+import VerifyEmailPage from "@/pages/verify-email";
 
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
 const Calendar = lazy(() => import("@/pages/Calendar"));
@@ -37,7 +37,7 @@ function App() {
           <Switch>
             {/* المسارات العامة | Public routes */}
             <Route path="/reset-password" component={ResetPassword} />
-            <Route path="/verify-phone" component={VerifyPhonePage} />
+            <Route path="/verify-email" component={VerifyEmailPage} />
 
             {/* المسارات المحمية | Protected routes */}
             {!user ? (

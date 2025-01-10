@@ -44,6 +44,7 @@ logger.addHandler(console_handler)
 
 def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 60) -> bool:
     """Wait for port availability | انتظار جاهزية المنفذ"""
+    logger.info(f"بدء انتظار المنفذ {port}... | Starting to wait for port {port}...")
     start_time = time.time()
     while time.time() - start_time < timeout:
         try:
@@ -65,6 +66,7 @@ def main():
         # Set production environment and enable port waiting
         os.environ['FLASK_ENV'] = 'production'
         os.environ['WAIT_FOR_PORT'] = 'true'  # Always wait for port in production
+        os.environ['WAIT_FOR_PORT_TIMEOUT'] = '120'  # 2 minutes timeout
 
         logger.info("بدء تشغيل خادم سيلفاريوم الاجتماعي | Starting Silvarium Social production server")
 
@@ -76,7 +78,7 @@ def main():
             port = 5000
 
         # Wait for port availability with increased timeout
-        if not wait_for_port(port, timeout=60):
+        if not wait_for_port(port, timeout=120):
             logger.error(f"المنفذ {port} غير متاح - إنهاء التطبيق")
             return 1
 
@@ -87,7 +89,7 @@ def main():
             logger.error("فشل في إنشاء تطبيق Flask")
             return 1
 
-        # Initialize SMS verification tables
+        # Initialize email verification tables
         from server.blueprints.auth import init_verification_tables
         if not init_verification_tables():
             logger.error("فشل في تهيئة جداول التحقق")

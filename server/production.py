@@ -85,7 +85,7 @@ def main() -> int:
             logger.error("فشل في إنشاء تطبيق Flask")
             return 1
 
-        # Initialize SMS verification tables
+        # Initialize email verification tables
         from server.blueprints.auth import init_verification_tables
         if not init_verification_tables():
             logger.error("فشل في تهيئة جداول التحقق")

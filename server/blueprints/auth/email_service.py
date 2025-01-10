@@ -44,14 +44,13 @@ class EmailService:
         except EmailNotValidError:
             return False
 
-    async def send_verification_code(self, email: str) -> Tuple[bool, Optional[str]]:
+    async def send_verification_code(self, email: str, code: str) -> Tuple[bool, Optional[str]]:
         """Send verification code via email"""
         try:
             if not self.validate_email(email):
                 return False, "عنوان البريد الإلكتروني غير صحيح"
 
-            verification_code = self.generate_verification_code()
-            logger.info(f"تم توليد رمز التحقق للبريد: {email}")
+            logger.info(f"إرسال رمز التحقق إلى البريد الإلكتروني: {email}")
 
             # Send verification email
             msg = Message(
@@ -61,7 +60,7 @@ class EmailService:
             msg.body = f"""
             مرحباً،
 
-            رمز التحقق الخاص بك هو: {verification_code}
+            رمز التحقق الخاص بك هو: {code}
 
             هذا الرمز صالح لمدة 10 دقائق.
 
@@ -73,7 +72,7 @@ class EmailService:
                 <h2>مرحباً،</h2>
                 <p>رمز التحقق الخاص بك هو:</p>
                 <h1 style="color: #4a5568; background: #edf2f7; padding: 10px; text-align: center; font-size: 32px;">
-                    {verification_code}
+                    {code}
                 </h1>
                 <p>هذا الرمز صالح لمدة 10 دقائق.</p>
                 <br>
@@ -83,32 +82,7 @@ class EmailService:
 
             if self.mail:
                 self.mail.send(msg)
-                logger.info(f"تم إرسال رمز التحقق إلى البريد الإلكتروني: {email}")
-
-                # Save the code in database
-                conn = psycopg2.connect(os.getenv('DATABASE_URL'))
-                cur = conn.cursor()
-
-                expires_at = datetime.now() + timedelta(minutes=10)
-                cur.execute("""
-                    UPDATE users 
-                    SET verification_code = %s,
-                        verification_code_expires_at = %s
-                    WHERE email = %s
-                """, (verification_code, expires_at, email))
-
-                if cur.rowcount == 0:
-                    # If no user exists with this email, create a temporary one
-                    temp_username = f"temp_{email}_{int(datetime.now().timestamp())}"
-                    cur.execute("""
-                        INSERT INTO users (username, email, verification_code, verification_code_expires_at, status)
-                        VALUES (%s, %s, %s, %s, 'pending')
-                    """, (temp_username, email, verification_code, expires_at))
-
-                conn.commit()
-                cur.close()
-                conn.close()
-
+                logger.info(f"تم إرسال رمز التحقق بنجاح إلى: {email}")
                 return True, None
             else:
                 logger.error("خدمة البريد الإلكتروني غير مهيأة")

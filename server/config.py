@@ -62,6 +62,8 @@ class DevelopmentConfig(Config):
         'http://localhost:5000',
         'https://localhost:5000'
     ]
+    WAIT_FOR_PORT = True
+    WAIT_FOR_PORT_TIMEOUT = 120
 
 config = {
     'development': DevelopmentConfig,

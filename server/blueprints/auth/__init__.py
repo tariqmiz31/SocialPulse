@@ -11,7 +11,7 @@ import string
 import time
 import traceback
 
-# Import email service
+# Import email service after blueprint creation to avoid circular imports
 try:
     from .email_service import email_service
     logger = logging.getLogger('silvarium_auth')
@@ -163,6 +163,7 @@ async def verify_email():
                 UPDATE users 
                 SET verification_code = NULL, 
                     verification_code_expires_at = NULL,
+                    email_verified = TRUE,
                     status = 'active'
                 WHERE email = %s
                 RETURNING id
@@ -208,26 +209,29 @@ def init_verification_tables() -> bool:
         conn = psycopg2.connect(os.getenv('DATABASE_URL'))
         cur = conn.cursor()
 
-        # Add email column to users table if it doesn't exist
+        # Add email verification columns to users table if they don't exist
         cur.execute("""
             ALTER TABLE users 
             ADD COLUMN IF NOT EXISTS email VARCHAR(255) UNIQUE,
             ADD COLUMN IF NOT EXISTS verification_code VARCHAR(4),
-            ADD COLUMN IF NOT EXISTS verification_code_expires_at TIMESTAMP
+            ADD COLUMN IF NOT EXISTS verification_code_expires_at TIMESTAMP,
+            ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT FALSE
         """)
 
-        # Create verification_attempts table
+        # Create verification_attempts table for rate limiting
         cur.execute("""
             CREATE TABLE IF NOT EXISTS verification_attempts (
                 id SERIAL PRIMARY KEY,
                 email VARCHAR(255) NOT NULL,
-                attempt_time TIMESTAMP NOT NULL
+                attempt_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
         """)
 
         conn.commit()
         cur.close()
         conn.close()
+
+        logger.info("تم تهيئة جداول التحقق بنجاح | Verification tables initialized successfully")
         return True
 
     except Exception as e:
@@ -242,7 +246,7 @@ def init_auth(app):
         login_manager = LoginManager()
         login_manager.init_app(app)
         login_manager.login_view = 'silvarium_auth.login'
-        logger.info("تم تهيئة مدير تسجيل الدخول")
+        logger.info("تم تهيئة مدير تسجيل الدخول | Login manager initialized")
 
         @login_manager.user_loader
         def load_user(user_id):
@@ -251,7 +255,7 @@ def init_auth(app):
                 cur = conn.cursor()
 
                 cur.execute("""
-                    SELECT id, username, password, role, is_approved, status, email
+                    SELECT id, username, password, role, is_approved, status, email, email_verified
                     FROM users 
                     WHERE id = %s
                 """, (user_id,))
@@ -268,7 +272,8 @@ def init_auth(app):
                         role=user_data[3],
                         is_approved=user_data[4],
                         status=user_data[5],
-                        email=user_data[6]
+                        email=user_data[6],
+                        email_verified=user_data[7]
                     )
                 return None
 
@@ -283,7 +288,7 @@ def init_auth(app):
         # Register blueprint only if not already registered
         if 'silvarium_auth' not in app.blueprints:
             app.register_blueprint(auth_bp)
-            logger.info("تم تسجيل مخطط المصادقة")
+            logger.info("تم تسجيل مخطط المصادقة | Auth blueprint registered")
 
         return app
 
@@ -292,7 +297,7 @@ def init_auth(app):
         return None
 
 class User:
-    def __init__(self, id, username, password=None, role='user', is_approved=True, status='active', email=None):
+    def __init__(self, id, username, password=None, role='user', is_approved=True, status='active', email=None, email_verified=False):
         self.id = id
         self.username = username
         self.password = password
@@ -303,6 +308,7 @@ class User:
         self.is_active = True
         self.is_anonymous = False
         self.email = email
+        self.email_verified = email_verified
 
     def get_id(self):
         return str(self.id)
@@ -315,7 +321,7 @@ class User:
             cur = conn.cursor()
 
             cur.execute("""
-                SELECT id, username, password, role, is_approved, status, email
+                SELECT id, username, password, role, is_approved, status, email, email_verified
                 FROM users 
                 WHERE username = %s
             """, (username,))
@@ -332,7 +338,8 @@ class User:
                     role=user_data[3],
                     is_approved=user_data[4],
                     status=user_data[5],
-                    email=user_data[6]
+                    email=user_data[6],
+                    email_verified=user_data[7]
                 )
             return None
 
@@ -493,8 +500,8 @@ def register():
         # إنشاء مستخدم جديد
         hashed_password = generate_password_hash(password)
         cur.execute("""
-            INSERT INTO users (username, password, created_at, email)
-            VALUES (%s, %s, %s, %s)
+            INSERT INTO users (username, password, created_at, email, email_verified)
+            VALUES (%s, %s, %s, %s, FALSE)
             RETURNING id, username, role, is_approved, status
         """, (username, hashed_password, datetime.now(), email))
 
@@ -510,7 +517,8 @@ def register():
                 role=user_data[2],
                 is_approved=user_data[3],
                 status=user_data[4],
-                email=email # Added email to User object
+                email=email, # Added email to User object
+                email_verified=False
             )
             login_user(user)
             return jsonify({
@@ -548,67 +556,16 @@ def get_current_user():
                 "role": current_user.role,
                 "isApproved": current_user.is_approved,
                 "status": current_user.status,
-                "email": current_user.email #Added email
+                "email": current_user.email, #Added email
+                "email_verified": current_user.email_verified #Added email_verified
             })
         return jsonify({"error": "لم يتم تسجيل الدخول"}), 401
     except Exception as e:
         logger.error(f"خطأ في جلب معلومات المستخدم: {str(e)}")
         return jsonify({"error": "حدث خطأ في جلب معلومات المستخدم"}), 500
 
-@auth_bp.route('/link-phone', methods=['POST'])
-def link_phone():
-    """ربط رقم الهاتف بالمستخدم | Link phone number to user"""
-    try:
-        data = request.get_json()
-        username = data.get('username')
-        phone_number = data.get('phoneNumber')
 
-        if not all([username, phone_number]):
-            logger.warning("بيانات غير مكتملة في طلب ربط رقم الهاتف")
-            return jsonify(get_bilingual_message(
-                "يجب توفير اسم المستخدم ورقم الهاتف",
-                "Username and phone number are required"
-            )), 400
-
-        # التحقق من وجود المستخدم | Check if user exists
-        user = User.get_by_username(username)
-        if not user:
-            logger.warning(f"محاولة ربط رقم الهاتف لمستخدم غير موجود: {username}")
-            return jsonify(get_bilingual_message(
-                "المستخدم غير موجود",
-                "User not found"
-            )), 404
-
-        # ربط رقم الهاتف باستخدام Firebase | Link phone number using Firebase
-        # This section needs to be removed or replaced with local database update
-        # Placeholder for local database update
-
-        # تحديث رقم الهاتف في قاعدة البيانات | Update phone number in database
-        conn = psycopg2.connect(os.getenv('DATABASE_URL'))
-        cur = conn.cursor()
-
-        cur.execute(
-            "UPDATE users SET phone_number = %s WHERE username = %s",
-            (phone_number, username)
-        )
-
-        conn.commit()
-        cur.close()
-        conn.close()
-
-        logger.info(f"تم ربط رقم الهاتف بنجاح للمستخدم: {username}")
-        return jsonify(get_bilingual_message(
-            "تم ربط رقم الهاتف بنجاح",
-            "Phone number linked successfully"
-        ))
-
-    except Exception as e:
-        logger.error(f"خطأ في ربط رقم الهاتف: {str(e)}")
-        logger.error(traceback.format_exc())
-        return jsonify(get_bilingual_message(
-            "حدث خطأ في ربط رقم الهاتف",
-            "Error linking phone number"
-        )), 500
+#Removed link_phone route as it uses firebase and is irrelevant to the email verification update
 
 #Import firebase service after blueprint creation to avoid circular imports
 try:
