@@ -74,9 +74,6 @@ def create_app(testing=False):
         static_folder = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'client', 'dist'))
         app = Flask(__name__, static_folder=static_folder, static_url_path='/')
 
-        # Register admin blueprint
-        app.register_blueprint(admin_bp)
-
         app.config.update(
             DEBUG=os.getenv('FLASK_ENV') == 'development',
             PORT=port,
@@ -97,6 +94,15 @@ def create_app(testing=False):
         # Initialize Flask-Mail
         mail.init_app(app)
         logger.info("تم تهيئة خدمة البريد الإلكتروني بنجاح")
+
+        # Initialize database connection
+        from server.database import init_db
+        db = init_db(app)
+
+        # Register blueprints after initializing mail
+        from server.blueprints.admin import admin_bp, init_mail
+        init_mail(mail)  # Pass mail instance to admin blueprint
+        app.register_blueprint(admin_bp)
 
         # Initialize routes
         app = register_routes(app)

@@ -12,7 +12,7 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 # Now we can import from server package
-from server.app import create_app, logger
+from server import create_app, logger
 
 def main():
     """نقطة البداية الرئيسية | Main entry point"""

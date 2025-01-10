@@ -1,18 +1,17 @@
 """Main server startup script"""
 import os
 import sys
-import psycopg2
+import logging
 from dotenv import load_dotenv
-from flask import Flask
+from flask import Flask, request
 from flask_cors import CORS
 from flask_mail import Mail
-import logging
-from werkzeug.security import generate_password_hash
-import prometheus_client
+from logging.handlers import RotatingFileHandler
 from prometheus_client import Counter, Histogram
 import time
-from logging.handlers import RotatingFileHandler
-from server.blueprints.admin import admin_bp
+import prometheus_client
+import psycopg2
+from werkzeug.security import generate_password_hash
 
 # Add project root to Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -20,7 +19,13 @@ project_root = os.path.dirname(current_dir)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
+from server.database import init_db
+from server.blueprints.admin import admin_bp, init_mail
 from server import create_app, logger
+
+# Setup logging
+logger = logging.getLogger('silvarium')
+logger.setLevel(logging.INFO)
 
 def create_admin_user():
     """إنشاء حساب المشرف Tariq"""
@@ -63,16 +68,11 @@ def main():
         load_dotenv()
 
         # Create Flask application
-        app = create_app()
-        if not app:
-            logger.error("فشل في إنشاء تطبيق Flask")
-            return 1
+        app = Flask(__name__, static_folder='../client/dist', static_url_path='/')
 
-        # Register admin blueprint
-        app.register_blueprint(admin_bp)
-
-        # تكوين البريد الإلكتروني
+        # Configure app
         app.config.update(
+            PORT=int(os.getenv('PORT', '5000')),
             MAIL_SERVER='smtp.gmail.com',
             MAIL_PORT=587,
             MAIL_USE_TLS=True,
@@ -81,12 +81,13 @@ def main():
             MAIL_DEFAULT_SENDER=os.getenv('MAIL_USERNAME')
         )
 
-        # تهيئة Flask-Mail
+        # Setup CORS
+        CORS(app, supports_credentials=True)
+
+        # Initialize Flask-Mail
         mail = Mail(app)
-        mail.init_app(app)
 
-
-        # إعداد ملف السجل
+        # Setup logging handlers
         if not os.path.exists('logs'):
             os.makedirs('logs')
 
@@ -102,18 +103,13 @@ def main():
         app.logger.addHandler(file_handler)
         app.logger.setLevel(logging.INFO)
 
-        # تكوين CORS
-        CORS(app,
-             supports_credentials=True,
-             resources={
-                 r"/api/*": {
-                     "origins": ["http://localhost:5000", "https://*.repl.co", "https://*.repl.dev"],
-                     "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-                     "allow_headers": ["Content-Type", "Authorization"]
-                 }
-             })
+        # Initialize database
+        db = init_db(app)
+        if not db:
+            logger.error("فشل في تهيئة قاعدة البيانات")
+            return 1
 
-        # تكوين Prometheus
+        # Setup Prometheus metrics
         REQUEST_COUNT = Counter('request_count', 'Total number of requests', ['method', 'endpoint', 'status'])
         REQUEST_LATENCY = Histogram('request_latency_seconds', 'Request latency in seconds', ['method', 'endpoint'])
 
@@ -137,13 +133,21 @@ def main():
             ).inc()
             return response
 
-        # تكوين نقاط النهاية
+        # Initialize admin blueprint with mail
+        init_mail(mail)
+        app.register_blueprint(admin_bp)
+
+        # Initialize routes
         from server.routes import register_routes
         register_routes(app)
 
+        # Start metrics server
+        metrics_port = app.config['PORT'] + 1
+        prometheus_client.start_http_server(metrics_port)
+        logger.info(f"تم بدء خادم المقاييس على المنفذ {metrics_port}")
+
         # إنشاء/تحديث مستخدم مشرف
         create_admin_user()
-
 
         # Signal ready
         logger.info('الخادم جاهز | Server is ready')
