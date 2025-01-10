@@ -12,20 +12,27 @@ import createMemoryStore from "memorystore";
 import nodemailer from "nodemailer";
 import { randomBytes } from "crypto";
 
-// إعداد البريد الإلكتروني
+// إعداد البريد الإلكتروني مع بيانات الاعتماد
 const transporter = nodemailer.createTransport({
-  host: process.env.MAIL_SERVER || 'smtp.gmail.com',
-  port: parseInt(process.env.MAIL_PORT || '587'),
-  secure: false,
+  service: 'gmail',
   auth: {
-    user: process.env.MAIL_USERNAME,
-    pass: process.env.MAIL_PASSWORD
+    user: process.env.MAIL_USERNAME || 'silvariumsa@gmail.com',
+    pass: process.env.MAIL_PASSWORD || 'rtbkamqrxsptmbrl'
+  }
+});
+
+// التحقق من اتصال البريد الإلكتروني
+transporter.verify(function(error, success) {
+  if (error) {
+    console.log('خطأ في إعداد البريد الإلكتروني:', error);
+  } else {
+    console.log('تم إعداد خادم البريد الإلكتروني بنجاح');
   }
 });
 
 async function sendVerificationEmail(email: string, code: string) {
   const mailOptions = {
-    from: process.env.MAIL_DEFAULT_SENDER || 'no-reply@silvariumsocial.com',
+    from: '"سيلفاريوم سوشيال" <silvariumsa@gmail.com>',
     to: email,
     subject: 'تأكيد البريد الإلكتروني - سيلفاريوم سوشيال',
     html: `
@@ -42,12 +49,19 @@ async function sendVerificationEmail(email: string, code: string) {
     `
   };
 
-  await transporter.sendMail(mailOptions);
+  try {
+    await transporter.sendMail(mailOptions);
+    console.log('تم إرسال بريد التحقق إلى:', email);
+    return true;
+  } catch (error) {
+    console.error('خطأ في إرسال البريد الإلكتروني:', error);
+    throw error;
+  }
 }
 
 async function sendRoleChangeNotification(email: string, newRole: string) {
   const mailOptions = {
-    from: process.env.MAIL_DEFAULT_SENDER || 'no-reply@silvariumsocial.com',
+    from: '"سيلفاريوم سوشيال" <silvariumsa@gmail.com>',
     to: email,
     subject: 'تحديث صلاحيات المستخدم - سيلفاريوم سوشيال',
     html: `
@@ -61,8 +75,22 @@ async function sendRoleChangeNotification(email: string, newRole: string) {
     `
   };
 
-  await transporter.sendMail(mailOptions);
+  try {
+    await transporter.sendMail(mailOptions);
+    console.log('تم إرسال إشعار تغيير الصلاحيات إلى:', email);
+    return true;
+  } catch (error) {
+    console.error('خطأ في إرسال البريد الإلكتروني:', error);
+    throw error;
+  }
 }
+
+async function isAdmin(req: any, res: any, next: any) {
+    if (req.isAuthenticated() && req.user.role === "admin") {
+      return next();
+    }
+    res.status(403).send("غير مصرح بالوصول");
+  };
 
 export function registerRoutes(app: Express): Server {
   // تكوين الجلسة
@@ -83,14 +111,6 @@ export function registerRoutes(app: Express): Server {
   app.use(sessionMiddleware);
   app.use(passport.initialize());
   app.use(passport.session());
-
-  // تحقق من صلاحيات المشرف
-  const isAdmin = (req: any, res: any, next: any) => {
-    if (req.isAuthenticated() && req.user.role === "admin") {
-      return next();
-    }
-    res.status(403).send("غير مصرح بالوصول");
-  };
 
   // نقاط نهاية التحقق من البريد الإلكتروني
   app.post("/api/auth/send-verification-code", async (req, res) => {
