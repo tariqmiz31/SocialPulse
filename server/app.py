@@ -1,6 +1,3 @@
-from flask import Flask, send_from_directory, request, session, jsonify
-from flask_cors import CORS
-from waitress import serve
 import os
 import logging
 from logging.handlers import RotatingFileHandler
@@ -10,78 +7,118 @@ import time
 import socket
 import psycopg2
 from werkzeug.security import generate_password_hash
+from flask_mail import Mail, Message
+from flask import Flask, send_from_directory, request, jsonify
+from flask_cors import CORS
 
 # إعداد التسجيل
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger('silvarium')
 
-def is_port_in_use(port: int) -> bool:
-    """التحقق مما إذا كان المنفذ قيد الاستخدام"""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        try:
-            s.bind(('0.0.0.0', port))
-            return False
-        except socket.error:
-            return True
+mail = Mail()
 
-def wait_for_port(port: int, timeout: int = 60) -> bool:
-    """انتظار حتى يصبح المنفذ متاحاً"""
-    start_time = time.time()
-    while time.time() - start_time < timeout:
-        if not is_port_in_use(port):
-            logger.info(f"المنفذ {port} متاح الآن")
-            return True
-        time.sleep(1)
-    return False
+def find_available_port(start_port=5000, max_attempts=10):
+    """البحث عن منفذ متاح"""
+    for port in range(start_port, start_port + max_attempts):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind(('0.0.0.0', port))
+                return port
+            except socket.error:
+                continue
+    raise RuntimeError("لم يتم العثور على منفذ متاح")
 
-# إنشاء تطبيق Flask
-app = Flask(__name__, static_folder='../client/dist', static_url_path='/')
-CORS(app, 
-     supports_credentials=True, 
-     resources={
-         r"/api/*": {
-             "origins": ["https://*.repl.co", "https://*.repl.dev"],
-             "methods": ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-             "allow_headers": ['Content-Type', 'Authorization']
-         }
-     })
+def create_app():
+    """إنشاء تطبيق Flask"""
+    app = Flask(__name__, static_folder='../client/dist', static_url_path='/')
 
-# مقاييس Prometheus
-REQUEST_COUNT = Counter('request_count', 'Total number of requests', ['method', 'endpoint', 'status'])
-REQUEST_LATENCY = Histogram('request_latency_seconds', 'Request latency in seconds', ['method', 'endpoint'])
+    # تكوين البريد الإلكتروني
+    app.config.update(
+        MAIL_SERVER=os.getenv('MAIL_SERVER', 'smtp.gmail.com'),
+        MAIL_PORT=int(os.getenv('MAIL_PORT', '587')),
+        MAIL_USE_TLS=True,
+        MAIL_USERNAME=os.getenv('MAIL_USERNAME'),
+        MAIL_PASSWORD=os.getenv('MAIL_PASSWORD'),
+        MAIL_DEFAULT_SENDER=os.getenv('MAIL_DEFAULT_SENDER', 'no-reply@silvariumsocial.com')
+    )
 
-@app.before_request
-def before_request():
-    """تسجيل وقت بدء الطلب"""
-    request.start_time = time.time()
+    # تهيئة Flask-Mail
+    mail.init_app(app)
 
-@app.after_request
-def after_request(response):
-    """تسجيل معلومات الطلب ومدته"""
-    if hasattr(request, 'start_time'):
-        duration = time.time() - request.start_time
-        REQUEST_LATENCY.labels(
+    CORS(app, 
+         supports_credentials=True, 
+         resources={
+             r"/api/*": {
+                 "origins": ["https://*.repl.co", "https://*.repl.dev"],
+                 "methods": ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+                 "allow_headers": ['Content-Type', 'Authorization']
+             }
+         })
+
+    # مقاييس Prometheus
+    REQUEST_COUNT = Counter('request_count', 'Total number of requests', ['method', 'endpoint', 'status'])
+    REQUEST_LATENCY = Histogram('request_latency_seconds', 'Request latency in seconds', ['method', 'endpoint'])
+
+    @app.before_request
+    def before_request():
+        """تسجيل وقت بدء الطلب"""
+        request.start_time = time.time()
+
+    @app.after_request
+    def after_request(response):
+        """تسجيل معلومات الطلب ومدته"""
+        if hasattr(request, 'start_time'):
+            duration = time.time() - request.start_time
+            REQUEST_LATENCY.labels(
+                method=request.method,
+                endpoint=request.path
+            ).observe(duration)
+
+        REQUEST_COUNT.labels(
             method=request.method,
-            endpoint=request.path
-        ).observe(duration)
+            endpoint=request.path,
+            status=response.status_code
+        ).inc()
 
-    REQUEST_COUNT.labels(
-        method=request.method,
-        endpoint=request.path,
-        status=response.status_code
-    ).inc()
+        # إضافة رؤوس CORS
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        return response
 
-    # إضافة رؤوس CORS
-    response.headers.add('Access-Control-Allow-Credentials', 'true')
-    return response
+    @app.route('/', defaults={'path': ''})
+    @app.route('/<path:path>')
+    def serve(path):
+        """خدمة الملفات الثابتة للتطبيق"""
+        if path and os.path.exists(os.path.join(app.static_folder, path)):
+            return send_from_directory(app.static_folder, path)
+        return send_from_directory(app.static_folder, 'index.html')
 
-@app.route('/', defaults={'path': ''})
-@app.route('/<path:path>')
-def serve(path):
-    """خدمة الملفات الثابتة للتطبيق"""
-    if path and os.path.exists(os.path.join(app.static_folder, path)):
-        return send_from_directory(app.static_folder, path)
-    return send_from_directory(app.static_folder, 'index.html')
+    async def send_verification_email(to_email: str, code: str):
+        """إرسال بريد التحقق"""
+        try:
+            msg = Message(
+                'تأكيد البريد الإلكتروني - سيلفاريوم سوشيال',
+                recipients=[to_email],
+                html=f"""
+                <div dir="rtl" style="text-align: right; font-family: Arial, sans-serif;">
+                    <h2>مرحباً بك في سيلفاريوم سوشيال</h2>
+                    <p>شكراً لتسجيلك معنا. للتحقق من بريدك الإلكتروني، يرجى إدخال الرمز التالي في التطبيق:</p>
+                    <div style="background-color: #f4f4f4; padding: 15px; margin: 20px 0; font-size: 24px; text-align: center;">
+                        {code}
+                    </div>
+                    <p>هذا الرمز صالح لمدة 24 ساعة.</p>
+                    <p>إذا لم تقم بطلب هذا التحقق، يرجى تجاهل هذا البريد الإلكتروني.</p>
+                    <p>مع تحيات فريق سيلفاريوم سوشيال</p>
+                </div>
+                """
+            )
+            mail.send(msg)
+            logger.info(f"تم إرسال رمز التحقق إلى {to_email}")
+            return True
+        except Exception as e:
+            logger.error(f"خطأ في إرسال البريد الإلكتروني: {str(e)}")
+            return False
+
+    return app
 
 def create_admin_user():
     """إنشاء مستخدم مشرف إذا لم يكن موجوداً"""
@@ -118,58 +155,27 @@ def create_admin_user():
 def main():
     """الدالة الرئيسية لبدء الخادم"""
     try:
-        # التحقق من متغيرات البيئة
-        if not os.getenv('DATABASE_URL'):
-            raise ValueError("DATABASE_URL غير موجود")
+        # تحديد المنفذ المتاح
+        port = find_available_port()
+        logger.info(f"تم العثور على منفذ متاح: {port}")
 
-        # تكوين التطبيق
-        app.config.update(
-            SECRET_KEY=os.getenv('SECRET_KEY', os.urandom(24).hex()),
-            SESSION_COOKIE_SECURE=True,
-            SESSION_COOKIE_HTTPONLY=True,
-            SESSION_COOKIE_SAMESITE='Lax',
-            PERMANENT_SESSION_LIFETIME=1800,
-            WAIT_FOR_PORT=True  # إضافة إعداد انتظار المنفذ
-        )
-
-        # إنشاء مستخدم مشرف
-        create_admin_user()
-
-        # تحديد المنفذ
-        port = int(os.getenv("PORT", "5001"))
-
-        # انتظار حتى يصبح المنفذ متاحاً
-        if app.config['WAIT_FOR_PORT']:
-            if not wait_for_port(port):
-                logger.warning(f"المنفذ {port} مشغول، جاري المحاولة على المنفذ التالي")
-                port += 1
-
-                if not wait_for_port(port):
-                    raise RuntimeError("لا توجد منافذ متاحة")
-
-        logger.info(f"بدء تشغيل الخادم على المنفذ {port}")
+        # إنشاء وتكوين التطبيق
+        app = create_app()
 
         # بدء خادم المقاييس
         metrics_port = port + 1
         prometheus_client.start_http_server(metrics_port)
         logger.info(f"تم بدء خادم المقاييس على المنفذ {metrics_port}")
 
-        # بدء خادم الإنتاج مع waitress
-        serve(
-            app,
-            host="0.0.0.0",
-            port=port,
-            url_scheme='https',
-            threads=4,
-            connection_limit=1000,
-            channel_timeout=30,
-            _quiet=True
-        )
+        # إنشاء مستخدم مشرف
+        create_admin_user()
 
-        return True
+        return app, port
+
     except Exception as e:
         logger.error(f"خطأ في بدء الخادم: {e}")
         raise
 
 if __name__ == "__main__":
-    main()
+    app, port = main()
+    app.run(host="0.0.0.0", port=port, debug=True)

@@ -16,7 +16,7 @@ export function EmailVerification({
   onVerificationComplete, 
   onCancel, 
   action = 'verify',
-  username = 'Tariq' // Default to Tariq for this implementation
+  username
 }: EmailVerificationProps) {
   const [email, setEmail] = useState("");
   const [verificationCode, setVerificationCode] = useState("");
@@ -53,12 +53,12 @@ export function EmailVerification({
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.message?.ar || 'حدث خطأ');
+        throw new Error(data.message || 'حدث خطأ');
       }
 
       toast({
         title: "تم إرسال الرمز",
-        description: data.message?.ar || "تم إرسال رمز التحقق بنجاح",
+        description: data.message || "تم إرسال رمز التحقق بنجاح",
       });
 
       setStep("verify");
@@ -102,12 +102,12 @@ export function EmailVerification({
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.message?.ar || 'حدث خطأ');
+        throw new Error(data.message || 'حدث خطأ');
       }
 
       toast({
         title: "تم التحقق",
-        description: data.message?.ar || "تم التحقق من البريد الإلكتروني بنجاح",
+        description: data.message || "تم التحقق من البريد الإلكتروني بنجاح",
       });
 
       onVerificationComplete(email);

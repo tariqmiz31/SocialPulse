@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { db } from "@db";
-import { users } from "@db/schema";
+import { users, verificationCodes } from "@db/schema";
 import { eq } from "drizzle-orm";
 import express from "express";
 import session from "express-session";
@@ -13,6 +13,41 @@ import helmet from "helmet";
 import cors from "cors";
 import compression from "compression";
 import rateLimit from "express-rate-limit";
+import { randomBytes } from "crypto";
+import nodemailer from "nodemailer";
+
+// إعداد البريد الإلكتروني
+const transporter = nodemailer.createTransport({
+  host: process.env.MAIL_SERVER || 'smtp.gmail.com',
+  port: parseInt(process.env.MAIL_PORT || '587'),
+  secure: false,
+  auth: {
+    user: process.env.MAIL_USERNAME,
+    pass: process.env.MAIL_PASSWORD
+  }
+});
+
+async function sendVerificationEmail(email: string, code: string) {
+  const mailOptions = {
+    from: process.env.MAIL_DEFAULT_SENDER || 'no-reply@silvariumsocial.com',
+    to: email,
+    subject: 'تأكيد البريد الإلكتروني - سيلفاريوم سوشيال',
+    html: `
+      <div dir="rtl" style="text-align: right; font-family: Arial, sans-serif;">
+        <h2>مرحباً بك في سيلفاريوم سوشيال</h2>
+        <p>شكراً لتسجيلك معنا. للتحقق من بريدك الإلكتروني، يرجى إدخال الرمز التالي في التطبيق:</p>
+        <div style="background-color: #f4f4f4; padding: 15px; margin: 20px 0; font-size: 24px; text-align: center;">
+          ${code}
+        </div>
+        <p>هذا الرمز صالح لمدة 24 ساعة.</p>
+        <p>إذا لم تقم بطلب هذا التحقق، يرجى تجاهل هذا البريد الإلكتروني.</p>
+        <p>مع تحيات فريق سيلفاريوم سوشيال</p>
+      </div>
+    `
+  };
+
+  await transporter.sendMail(mailOptions);
+}
 
 // إعداد المصادقة
 const MemoryStore = createMemoryStore(session);
@@ -263,6 +298,83 @@ export function registerRoutes(app: Express): Server {
       environment: process.env.NODE_ENV,
       auth_method: "admin_approval_required"
     });
+  });
+
+  // Email verification endpoints
+  app.post("/api/verify-email", async (req, res) => {
+    try {
+      const { code } = req.body;
+
+      const [verificationRecord] = await db
+        .select()
+        .from(verificationCodes)
+        .where(eq(verificationCodes.code, code))
+        .where(eq(verificationCodes.type, "email_verification"))
+        .where(eq(verificationCodes.verified, false))
+        .limit(1);
+
+      if (!verificationRecord) {
+        return res.status(400).send("رمز التحقق غير صالح");
+      }
+
+      if (new Date() > verificationRecord.expiresAt) {
+        return res.status(400).send("رمز التحقق منتهي الصلاحية");
+      }
+
+      // Update verification status
+      await db.transaction(async (tx) => {
+        await tx
+          .update(verificationCodes)
+          .set({ verified: true })
+          .where(eq(verificationCodes.id, verificationRecord.id));
+
+        await tx
+          .update(users)
+          .set({ emailVerified: true })
+          .where(eq(users.id, verificationRecord.userId));
+      });
+
+      res.json({ message: "تم تأكيد البريد الإلكتروني بنجاح" });
+    } catch (error) {
+      res.status(500).send("حدث خطأ أثناء التحقق من البريد الإلكتروني");
+    }
+  });
+
+  app.post("/api/resend-verification", async (req, res) => {
+    try {
+      if (!req.isAuthenticated()) {
+        return res.status(401).send("غير مصرح");
+      }
+
+      const user = req.user as any;
+      if (!user.email) {
+        return res.status(400).send("لم يتم تعيين البريد الإلكتروني");
+      }
+
+      if (user.emailVerified) {
+        return res.status(400).send("البريد الإلكتروني مؤكد بالفعل");
+      }
+
+      // توليد رمز تحقق جديد
+      const code = randomBytes(32).toString("hex").slice(0, 6);
+      const expiresAt = new Date();
+      expiresAt.setHours(expiresAt.getHours() + 24);
+
+      await db.insert(verificationCodes).values({
+        userId: user.id,
+        code,
+        type: "email_verification",
+        expiresAt,
+      });
+
+      // إرسال البريد الإلكتروني
+      await sendVerificationEmail(user.email, code);
+
+      res.json({ message: "تم إرسال رمز التحقق الجديد" });
+    } catch (error) {
+      console.error('Error sending verification email:', error);
+      res.status(500).send("حدث خطأ أثناء إعادة إرسال رمز التحقق");
+    }
   });
 
   const httpServer = createServer(app);
