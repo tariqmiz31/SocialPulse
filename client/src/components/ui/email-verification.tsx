@@ -8,7 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 interface EmailVerificationProps {
   onVerificationComplete: (email: string) => void;
   onCancel?: () => void;
-  action?: 'verify' | 'reset';
+  action?: 'verify' | 'reset' | 'role_change';
   username?: string;
 }
 

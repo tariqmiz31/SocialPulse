@@ -1,16 +1,16 @@
-import { forwardRef, useId } from "react"
-import { OTPInput, OTPInputContext } from "input-otp"
-import { cn } from "@/lib/utils"
-import { Dot } from "lucide-react"
+import { forwardRef, useId, useState } from "react";
+import { OTPInput as BaseOTPInput, OTPInputContext } from "input-otp";
+import { cn } from "@/lib/utils";
+import { Dot } from "lucide-react";
 
 const OTPInputGroup = forwardRef<
-  React.ElementRef<typeof OTPInput>,
-  React.ComponentPropsWithoutRef<typeof OTPInput>
+  React.ElementRef<typeof BaseOTPInput>,
+  React.ComponentPropsWithoutRef<typeof BaseOTPInput>
 >(({ className, ...props }, ref) => {
-  const id = useId()
+  const id = useId();
 
   return (
-    <OTPInput
+    <BaseOTPInput
       ref={ref}
       containerClassName={cn(
         "flex items-center gap-2 has-[:disabled]:opacity-50",
@@ -18,9 +18,9 @@ const OTPInputGroup = forwardRef<
       )}
       {...props}
     />
-  )
-})
-OTPInputGroup.displayName = "OTPInputGroup"
+  );
+});
+OTPInputGroup.displayName = "OTPInputGroup";
 
 const OTPInputSlot = forwardRef<
   React.ElementRef<"div">,
@@ -29,7 +29,7 @@ const OTPInputSlot = forwardRef<
   const inputClassName = cn(
     "w-10 h-12 text-center text-2xl font-semibold border rounded-md focus:border-primary focus:ring-1 focus:ring-primary",
     className
-  )
+  );
 
   return (
     <div
@@ -42,17 +42,43 @@ const OTPInputSlot = forwardRef<
         className={inputClassName}
       />
     </div>
-  )
-})
-OTPInputSlot.displayName = "OTPInputSlot"
+  );
+});
+OTPInputSlot.displayName = "OTPInputSlot";
 
 const OTPInputSeparator = ({ ...props }) => {
   return (
     <div role="separator" {...props}>
       <Dot className="w-4 h-4" />
     </div>
-  )
-}
-OTPInputSeparator.displayName = "OTPInputSeparator"
+  );
+};
+OTPInputSeparator.displayName = "OTPInputSeparator";
 
-export { OTPInputGroup, OTPInputSlot, OTPInputSeparator }
+// Main OTP Input component for easy usage
+export function OTPInput({ 
+  value, 
+  onChange, 
+  valueLength = 4 
+}: { 
+  value: string; 
+  onChange: (value: string) => void;
+  valueLength?: number;
+}) {
+  return (
+    <OTPInputGroup
+      maxLength={valueLength}
+      value={value}
+      onChange={onChange}
+      render={({ slots }) => (
+        <>
+          {slots.map((slot, i) => (
+            <OTPInputSlot key={i} {...slot} index={i} />
+          ))}
+        </>
+      )}
+    />
+  );
+}
+
+export { OTPInputGroup, OTPInputSlot, OTPInputSeparator };

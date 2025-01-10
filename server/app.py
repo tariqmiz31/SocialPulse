@@ -60,6 +60,23 @@ def create_app():
              }
          })
 
+    # تكوين التسجيل
+    if not os.path.exists('logs'):
+        os.makedirs('logs')
+
+    file_handler = RotatingFileHandler(
+        'logs/silvarium.log',
+        maxBytes=10240,
+        backupCount=10
+    )
+    file_handler.setFormatter(logging.Formatter(
+        '%(asctime)s %(levelname)s: %(message)s'
+    ))
+    file_handler.setLevel(logging.INFO)
+    app.logger.addHandler(file_handler)
+    app.logger.setLevel(logging.INFO)
+    app.logger.info('تم بدء تشغيل سيلفاريوم سوشيال')
+
     # تكوين Prometheus
     REQUEST_COUNT = Counter('request_count', 'Total number of requests', ['method', 'endpoint', 'status'])
     REQUEST_LATENCY = Histogram('request_latency_seconds', 'Request latency in seconds', ['method', 'endpoint'])
@@ -91,65 +108,7 @@ def create_app():
             return send_from_directory(app.static_folder, path)
         return send_from_directory(app.static_folder, 'index.html')
 
-    # وظيفة إرسال بريد التحقق
-    async def send_verification_email(to_email: str, code: str):
-        try:
-            msg = Message(
-                'تأكيد البريد الإلكتروني - سيلفاريوم سوشيال',
-                recipients=[to_email],
-                html=f"""
-                <div dir="rtl" style="text-align: right; font-family: Arial, sans-serif;">
-                    <h2>مرحباً بك في سيلفاريوم سوشيال</h2>
-                    <p>شكراً لتسجيلك معنا. للتحقق من بريدك الإلكتروني، يرجى إدخال الرمز التالي في التطبيق:</p>
-                    <div style="background-color: #f4f4f4; padding: 15px; margin: 20px 0; font-size: 24px; text-align: center;">
-                        {code}
-                    </div>
-                    <p>هذا الرمز صالح لمدة 24 ساعة.</p>
-                    <p>إذا لم تقم بطلب هذا التحقق، يرجى تجاهل هذا البريد الإلكتروني.</p>
-                    <p>مع تحيات فريق سيلفاريوم سوشيال</p>
-                </div>
-                """
-            )
-            mail.send(msg)
-            logger.info(f"تم إرسال رمز التحقق إلى {to_email}")
-            return True
-        except Exception as e:
-            logger.error(f"خطأ في إرسال البريد الإلكتروني: {str(e)}")
-            return False
-
     return app
-
-def create_admin_user():
-    """إنشاء مستخدم مشرف إذا لم يكن موجوداً"""
-    try:
-        conn = psycopg2.connect(os.getenv('DATABASE_URL'))
-        cur = conn.cursor()
-
-        # التحقق من وجود المشرف
-        cur.execute("""
-            INSERT INTO users (username, password, role, is_approved, status)
-            VALUES (%s, %s, 'admin', true, 'active')
-            ON CONFLICT (username) 
-            DO UPDATE SET 
-                password = EXCLUDED.password,
-                role = 'admin',
-                is_approved = true,
-                status = 'active'
-            RETURNING id;
-        """, ('Tariq', generate_password_hash('admin123')))
-
-        user_id = cur.fetchone()[0]
-        conn.commit()
-        logger.info(f"تم تحديث حساب المشرف Tariq بنجاح (ID: {user_id})")
-
-    except Exception as e:
-        logger.error(f"خطأ في إنشاء/تحديث حساب المشرف: {e}")
-        raise
-    finally:
-        if 'cur' in locals():
-            cur.close()
-        if 'conn' in locals():
-            conn.close()
 
 def main():
     """الدالة الرئيسية لبدء الخادم"""
@@ -165,9 +124,6 @@ def main():
         metrics_port = port + 1
         prometheus_client.start_http_server(metrics_port)
         logger.info(f"تم بدء خادم المقاييس على المنفذ {metrics_port}")
-
-        # إنشاء مستخدم مشرف
-        create_admin_user()
 
         return app, port
 

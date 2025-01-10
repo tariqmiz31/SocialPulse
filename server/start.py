@@ -1,26 +1,18 @@
 import os
 import psycopg2
 from dotenv import load_dotenv
-from flask import Flask
+from flask import Flask, request, send_from_directory
 from flask_cors import CORS
 import logging
 from werkzeug.security import generate_password_hash
 import socket
+import prometheus_client
+from prometheus_client import Counter, Histogram
+import time
 
 # تكوين التسجيل
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger('silvarium')
-
-def find_available_port(start_port=5000, max_attempts=10):
-    """البحث عن منفذ متاح"""
-    for port in range(start_port, start_port + max_attempts):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            try:
-                s.bind(('0.0.0.0', port))
-                return port
-            except socket.error:
-                continue
-    raise RuntimeError("لم يتم العثور على منفذ متاح")
 
 def create_admin_user():
     """إنشاء حساب المشرف Tariq"""
@@ -71,6 +63,38 @@ def create_app():
              }
          })
 
+    # تكوين Prometheus
+    REQUEST_COUNT = Counter('request_count', 'Total number of requests', ['method', 'endpoint', 'status'])
+    REQUEST_LATENCY = Histogram('request_latency_seconds', 'Request latency in seconds', ['method', 'endpoint'])
+
+    @app.before_request
+    def before_request():
+        request.start_time = time.time()
+
+    @app.after_request
+    def after_request(response):
+        if hasattr(request, 'start_time'):
+            duration = time.time() - request.start_time
+            REQUEST_LATENCY.labels(
+                method=request.method,
+                endpoint=request.path
+            ).observe(duration)
+
+        REQUEST_COUNT.labels(
+            method=request.method,
+            endpoint=request.path,
+            status=response.status_code
+        ).inc()
+        return response
+
+    # Serve static files and handle frontend routing
+    @app.route('/', defaults={'path': ''})
+    @app.route('/<path:path>')
+    def serve(path):
+        if path and os.path.exists(os.path.join(app.static_folder, path)):
+            return send_from_directory(app.static_folder, path)
+        return send_from_directory(app.static_folder, 'index.html')
+
     return app
 
 def main():
@@ -89,10 +113,16 @@ def main():
         # إنشاء التطبيق
         app = create_app()
 
-        # البحث عن منفذ متاح
-        port = find_available_port()
+        # تحديد المنفذ
+        port = int(os.getenv('PORT', 5000))
 
-        logger.info(f"بدء تشغيل الخادم على المنفذ {port}")
+        # بدء خادم المقاييس
+        metrics_port = port + 1
+        prometheus_client.start_http_server(metrics_port)
+        logger.info(f"تم بدء خادم المقاييس على المنفذ {metrics_port}")
+
+        # Ready signal for workflow
+        print('ready')
 
         # بدء الخادم
         app.run(host="0.0.0.0", port=port, debug=True)

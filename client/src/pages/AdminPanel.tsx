@@ -21,7 +21,8 @@ import {
   UserPlus,
   Trash2,
   Shield,
-  Users
+  Users,
+  AlertTriangle
 } from "lucide-react";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
@@ -33,7 +34,10 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
+  DialogFooter,
+  DialogDescription,
 } from "@/components/ui/dialog";
+import { EmailVerification } from "@/components/ui/email-verification";
 import {
   Select,
   SelectContent,
@@ -41,6 +45,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import {
   Tabs,
   TabsContent,
@@ -87,12 +102,18 @@ export default function AdminPanel() {
     mutationFn: async ({
       userId,
       action,
+      verificationStep = 'initial'
     }: {
       userId: number;
       action: "approve" | "block" | "unblock" | "delete" | "promote" | "demote";
+      verificationStep?: 'initial' | 'email_verified';
     }) => {
       const response = await fetch(`/api/admin/users/${userId}/${action}`, {
         method: "POST",
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ verificationStep }),
         credentials: "include",
       });
 
@@ -102,22 +123,11 @@ export default function AdminPanel() {
 
       return response.json();
     },
-    onSuccess: (_, { action }) => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
       toast({
         title: "نجاح",
-        description:
-          action === "approve"
-            ? "تمت الموافقة على المستخدم بنجاح"
-            : action === "block"
-            ? "تم حظر المستخدم بنجاح"
-            : action === "unblock"
-            ? "تم إلغاء حظر المستخدم بنجاح"
-            : action === "delete"
-            ? "تم حذف المستخدم بنجاح"
-            : action === "promote"
-            ? "تمت ترقية المستخدم إلى مشرف بنجاح"
-            : "تم إلغاء صلاحيات الإشراف بنجاح",
+        description: data.message
       });
     },
     onError: (error: Error) => {
@@ -349,30 +359,43 @@ export default function AdminPanel() {
                       </TableCell>
                       <TableCell className="space-x-2">
                         {user.status !== "blocked" && (
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            onClick={() =>
-                              updateUserStatus.mutate({
-                                userId: user.id,
-                                action: "block",
-                              })
-                            }
-                          >
-                            <Ban className="h-4 w-4 ml-2" />
-                            حظر
-                          </Button>
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                              >
+                                <Ban className="h-4 w-4 ml-2" />
+                                حظر
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>تأكيد حظر المستخدم</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  هل أنت متأكد من رغبتك في حظر {user.username}؟ لن يتمكن المستخدم من الوصول إلى حسابه.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>إلغاء</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => updateUserStatus.mutate({
+                                  userId: user.id,
+                                  action: "block"
+                                })}>
+                                  تأكيد الحظر
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
                         )}
                         {user.status === "blocked" && (
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() =>
-                              updateUserStatus.mutate({
-                                userId: user.id,
-                                action: "unblock",
-                              })
-                            }
+                            onClick={() => updateUserStatus.mutate({
+                              userId: user.id,
+                              action: "unblock"
+                            })}
                           >
                             <RefreshCw className="h-4 w-4 ml-2" />
                             إلغاء الحظر
@@ -380,32 +403,66 @@ export default function AdminPanel() {
                         )}
                         {user.username !== 'Tariq' && (
                           <>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() =>
-                                updateUserStatus.mutate({
-                                  userId: user.id,
-                                  action: user.role === "admin" ? "demote" : "promote",
-                                })
-                              }
-                            >
-                              <Shield className="h-4 w-4 ml-2" />
-                              {user.role === "admin" ? "إلغاء الإشراف" : "ترقية لمشرف"}
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="destructive"
-                              onClick={() =>
-                                updateUserStatus.mutate({
-                                  userId: user.id,
-                                  action: "delete",
-                                })
-                              }
-                            >
-                              <Trash2 className="h-4 w-4 ml-2" />
-                              حذف
-                            </Button>
+                            <Dialog>
+                              <DialogTrigger asChild>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                >
+                                  <Shield className="h-4 w-4 ml-2" />
+                                  {user.role === "admin" ? "إلغاء الإشراف" : "ترقية لمشرف"}
+                                </Button>
+                              </DialogTrigger>
+                              <DialogContent>
+                                <DialogHeader>
+                                  <DialogTitle>تأكيد تغيير الصلاحيات</DialogTitle>
+                                  <DialogDescription>
+                                    {user.role === "admin" 
+                                      ? "هل أنت متأكد من رغبتك في إلغاء صلاحيات الإشراف؟"
+                                      : "لتغيير صلاحيات المستخدم إلى مشرف، يرجى إكمال عملية التحقق متعددة المراحل."}
+                                  </DialogDescription>
+                                </DialogHeader>
+                                <EmailVerification
+                                  onVerificationComplete={(email) => {
+                                    updateUserStatus.mutate({
+                                      userId: user.id,
+                                      action: user.role === "admin" ? "demote" : "promote",
+                                      verificationStep: 'email_verified'
+                                    });
+                                  }}
+                                  action="role_change"
+                                  username={user.username}
+                                />
+                              </DialogContent>
+                            </Dialog>
+                            <AlertDialog>
+                              <AlertDialogTrigger asChild>
+                                <Button
+                                  size="sm"
+                                  variant="destructive"
+                                >
+                                  <Trash2 className="h-4 w-4 ml-2" />
+                                  حذف
+                                </Button>
+                              </AlertDialogTrigger>
+                              <AlertDialogContent>
+                                <AlertDialogHeader>
+                                  <AlertDialogTitle>تأكيد حذف المستخدم</AlertDialogTitle>
+                                  <AlertDialogDescription>
+                                    هل أنت متأكد من رغبتك في حذف {user.username}؟ لا يمكن التراجع عن هذا الإجراء.
+                                  </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                  <AlertDialogCancel>إلغاء</AlertDialogCancel>
+                                  <AlertDialogAction onClick={() => updateUserStatus.mutate({
+                                    userId: user.id,
+                                    action: "delete"
+                                  })}>
+                                    تأكيد الحذف
+                                  </AlertDialogAction>
+                                </AlertDialogFooter>
+                              </AlertDialogContent>
+                            </AlertDialog>
                           </>
                         )}
                       </TableCell>

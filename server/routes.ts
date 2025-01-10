@@ -200,6 +200,7 @@ export function registerRoutes(app: Express): Server {
     try {
       const userId = parseInt(req.params.userId);
       const action = req.params.action;
+      const { verificationStep = 'initial' } = req.body;
 
       const [user] = await db
         .select()
@@ -209,6 +210,11 @@ export function registerRoutes(app: Express): Server {
 
       if (!user) {
         return res.status(404).send("المستخدم غير موجود");
+      }
+
+      // التحقق من مراحل تغيير الصلاحيات
+      if ((action === "promote" || action === "demote") && verificationStep !== 'email_verified') {
+        return res.status(400).send("يجب إكمال التحقق من البريد الإلكتروني أولاً");
       }
 
       switch (action) {

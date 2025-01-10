@@ -3,6 +3,7 @@ import os
 import sys
 import logging
 from waitress import serve
+from prometheus_client import start_http_server
 
 # Add project root to Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -24,6 +25,11 @@ def main():
         # Find available port
         port = find_available_port(start_port=5000)
         logger.info(f"تم العثور على منفذ متاح: {port}")
+
+        # Start metrics server
+        metrics_port = port + 1
+        start_http_server(metrics_port)
+        logger.info(f"تم بدء خادم المقاييس على المنفذ {metrics_port}")
 
         # Create Flask app
         logger.info("إنشاء تطبيق Flask")
