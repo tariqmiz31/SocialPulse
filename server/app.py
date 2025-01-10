@@ -10,6 +10,10 @@ from werkzeug.security import generate_password_hash
 from flask_mail import Mail, Message
 from flask import Flask, send_from_directory, request, jsonify
 from flask_cors import CORS
+from dotenv import load_dotenv
+
+# تحميل المتغيرات البيئية
+load_dotenv()
 
 # إعداد التسجيل
 logging.basicConfig(level=logging.INFO)
@@ -34,39 +38,38 @@ def create_app():
 
     # تكوين البريد الإلكتروني
     app.config.update(
-        MAIL_SERVER=os.getenv('MAIL_SERVER', 'smtp.gmail.com'),
-        MAIL_PORT=int(os.getenv('MAIL_PORT', '587')),
+        MAIL_SERVER='smtp.gmail.com',
+        MAIL_PORT=587,
         MAIL_USE_TLS=True,
-        MAIL_USERNAME=os.getenv('MAIL_USERNAME'),
-        MAIL_PASSWORD=os.getenv('MAIL_PASSWORD'),
-        MAIL_DEFAULT_SENDER=os.getenv('MAIL_DEFAULT_SENDER', 'no-reply@silvariumsocial.com')
+        MAIL_USERNAME=os.getenv('MAIL_USERNAME', 'silvariumsa@gmail.com'),
+        MAIL_PASSWORD=os.getenv('MAIL_PASSWORD', 'rtbkamqrxsptmbrl'),
+        MAIL_DEFAULT_SENDER='silvariumsa@gmail.com'
     )
 
     # تهيئة Flask-Mail
     mail.init_app(app)
 
+    # تكوين CORS
     CORS(app, 
-         supports_credentials=True, 
+         supports_credentials=True,
          resources={
              r"/api/*": {
-                 "origins": ["https://*.repl.co", "https://*.repl.dev"],
-                 "methods": ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-                 "allow_headers": ['Content-Type', 'Authorization']
+                 "origins": ["http://localhost:5000", "https://*.repl.co", "https://*.repl.dev"],
+                 "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+                 "allow_headers": ["Content-Type", "Authorization"]
              }
          })
 
-    # مقاييس Prometheus
+    # تكوين Prometheus
     REQUEST_COUNT = Counter('request_count', 'Total number of requests', ['method', 'endpoint', 'status'])
     REQUEST_LATENCY = Histogram('request_latency_seconds', 'Request latency in seconds', ['method', 'endpoint'])
 
     @app.before_request
     def before_request():
-        """تسجيل وقت بدء الطلب"""
         request.start_time = time.time()
 
     @app.after_request
     def after_request(response):
-        """تسجيل معلومات الطلب ومدته"""
         if hasattr(request, 'start_time'):
             duration = time.time() - request.start_time
             REQUEST_LATENCY.labels(
@@ -79,21 +82,17 @@ def create_app():
             endpoint=request.path,
             status=response.status_code
         ).inc()
-
-        # إضافة رؤوس CORS
-        response.headers.add('Access-Control-Allow-Credentials', 'true')
         return response
 
     @app.route('/', defaults={'path': ''})
     @app.route('/<path:path>')
     def serve(path):
-        """خدمة الملفات الثابتة للتطبيق"""
         if path and os.path.exists(os.path.join(app.static_folder, path)):
             return send_from_directory(app.static_folder, path)
         return send_from_directory(app.static_folder, 'index.html')
 
+    # وظيفة إرسال بريد التحقق
     async def send_verification_email(to_email: str, code: str):
-        """إرسال بريد التحقق"""
         try:
             msg = Message(
                 'تأكيد البريد الإلكتروني - سيلفاريوم سوشيال',
@@ -155,12 +154,12 @@ def create_admin_user():
 def main():
     """الدالة الرئيسية لبدء الخادم"""
     try:
+        # إنشاء التطبيق
+        app = create_app()
+
         # تحديد المنفذ المتاح
         port = find_available_port()
         logger.info(f"تم العثور على منفذ متاح: {port}")
-
-        # إنشاء وتكوين التطبيق
-        app = create_app()
 
         # بدء خادم المقاييس
         metrics_port = port + 1
