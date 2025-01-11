@@ -26,9 +26,11 @@ def admin_required(f):
         if not current_user.is_authenticated:
             logger.warning(f"محاولة وصول غير مصرح بها: المستخدم غير مسجل الدخول")
             return jsonify({'message': 'يجب تسجيل الدخول'}), 401
-        if current_user.role != 'admin':
+
+        if not hasattr(current_user, 'role') or current_user.role != 'admin':
             logger.warning(f"محاولة وصول غير مصرح بها: المستخدم {current_user.username} ليس مشرفاً")
             return jsonify({'message': 'غير مصرح بهذا الإجراء'}), 403
+
         return f(*args, **kwargs)
     return decorated_function
 
@@ -61,6 +63,7 @@ def modify_user(user_id, action):
                 logger.warning(f"محاولة تنفيذ إجراء غير صالح: {action}")
                 return jsonify({'message': 'إجراء غير صالح'}), 400
 
+            # التحقق من محاولة تعديل المستخدم الرئيسي
             if user[1] == 'Tariq':  # التحقق من اسم المستخدم
                 logger.warning(f"محاولة تعديل صلاحيات المستخدم الرئيسي")
                 return jsonify({'message': 'لا يمكن تعديل صلاحيات المستخدم الرئيسي'}), 403
@@ -70,9 +73,8 @@ def modify_user(user_id, action):
 
             # التحقق من المراحل لتغيير الصلاحيات
             if action in ['promote', 'demote']:
+                # المرحلة الأولى: إرسال رمز التحقق
                 if verification_step == 'initial':
-                    logger.info(f"بدء عملية تغيير صلاحيات المستخدم {user[1]} بواسطة {current_user.username}")
-
                     if not email:
                         return jsonify({'message': 'البريد الإلكتروني مطلوب للتحقق'}), 400
 
@@ -113,14 +115,9 @@ def modify_user(user_id, action):
                     session['verification_id'] = verification_id
                     session['role_change_action'] = action
                     session['target_user_id'] = user_id
-                    session.modified = True  # Ensure session is saved
+                    session.modified = True
 
                     # إرسال رمز التحقق بالبريد
-                    if not mail:
-                        logger.error('لم يتم تهيئة خدمة البريد')
-                        db.rollback()
-                        return jsonify({'message': 'خطأ في إعداد البريد الإلكتروني'}), 500
-
                     try:
                         msg = Message(
                             'رمز التحقق لتغيير الصلاحيات - سيلفاريوم',
@@ -129,7 +126,7 @@ def modify_user(user_id, action):
                         msg.html = f"""
                         <div dir="rtl" style="font-family: Arial, sans-serif;">
                             <h2>تأكيد تغيير صلاحيات المستخدم</h2>
-                            <p>مرحباً،</p>
+                            <p>مرحباً {current_user.username}،</p>
                             <p>لقد تلقينا طلباً لتغيير صلاحيات مستخدم في نظام سيلفاريوم.</p>
                             <p>رمز التحقق الخاص بك هو: <strong>{verification_code}</strong></p>
                             <p>هذا الرمز صالح لمدة 10 دقائق فقط.</p>
@@ -152,6 +149,7 @@ def modify_user(user_id, action):
                         db.rollback()
                         return jsonify({'message': 'حدث خطأ في إرسال رمز التحقق'}), 500
 
+                # المرحلة الثانية: التحقق من الرمز
                 elif verification_step == 'verify_code':
                     if 'verification_id' not in session:
                         logger.warning('محاولة تحقق بدون جلسة صالحة')
@@ -208,7 +206,7 @@ def modify_user(user_id, action):
                         session.pop('verification_id', None)
                         session.pop('role_change_action', None)
                         session.pop('target_user_id', None)
-                        session.modified = True  # Ensure session is saved
+                        session.modified = True
 
                         db.commit()
 
@@ -330,7 +328,7 @@ def modify_user(user_id, action):
             cursor.close()
 
     except Exception as e:
-        logger.error(f'خطأ في تعديل صلاحيات المستخدم: {str(e)}')
+        logger.error(f'خطأ في تعديل صلاحيات المستخدم: {str(e)}', exc_info=True)
         return jsonify({
             'message': 'حدث خطأ أثناء تعديل صلاحيات المستخدم'
         }), 500
