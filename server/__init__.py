@@ -35,27 +35,32 @@ class User(UserMixin):
         self.role = user_data[3]
         self.status = user_data[4]
 
+    @staticmethod
+    def get(user_id):
+        """تحميل المستخدم من قاعدة البيانات"""
+        try:
+            db = get_db()
+            if db:
+                cur = db.cursor()
+                try:
+                    cur.execute("""
+                        SELECT id, username, email, role, status
+                        FROM users
+                        WHERE id = %s AND status = 'active'
+                    """, (user_id,))
+                    user_data = cur.fetchone()
+                    if user_data:
+                        return User(user_data)
+                finally:
+                    cur.close()
+        except Exception as e:
+            logger.error(f"Error loading user: {str(e)}")
+        return None
+
 @login_manager.user_loader
 def load_user(user_id):
     """تحميل المستخدم من قاعدة البيانات"""
-    try:
-        db = get_db()
-        if db:
-            cur = db.cursor()
-            try:
-                cur.execute("""
-                    SELECT id, username, email, role, status
-                    FROM users
-                    WHERE id = %s AND status = 'active'
-                """, (user_id,))
-                user_data = cur.fetchone()
-                if user_data:
-                    return User(user_data)
-            finally:
-                cur.close()
-    except Exception as e:
-        logger.error(f"Error loading user: {str(e)}")
-    return None
+    return User.get(user_id)
 
 def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
     """Wait for port availability"""
@@ -66,7 +71,7 @@ def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                 sock.bind((host, port))
-                sock.close()  # Make sure to close the socket
+                sock.close()
                 logger.info(f"المنفذ {port} متاح")
                 print('ready')  # Signal ready for workflow
                 sys.stdout.flush()
@@ -103,7 +108,7 @@ def create_app(testing=False):
             PERMANENT_SESSION_LIFETIME=timedelta(days=1),
             SESSION_FILE_DIR='/tmp/flask_session',
             SESSION_FILE_THRESHOLD=500,
-            SESSION_COOKIE_SECURE=False,  # Set to False for development
+            SESSION_COOKIE_SECURE=True,
             SESSION_COOKIE_HTTPONLY=True,
             SESSION_COOKIE_SAMESITE='Lax',
             MAIL_SERVER='smtp.gmail.com',
@@ -137,7 +142,7 @@ def create_app(testing=False):
              supports_credentials=True,
              resources={
                  r"/api/*": {
-                     "origins": ["http://localhost:5000", "https://*.repl.co", "http://0.0.0.0:5000"],
+                     "origins": ["http://localhost:5000", "https://*.repl.co", "https://*.repl.dev"],
                      "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
                      "allow_headers": ["Content-Type", "Authorization"],
                      "expose_headers": ["Content-Type"],
@@ -169,8 +174,10 @@ def create_app(testing=False):
         logger.info("تم تسجيل المسارات الإدارية ومسارات التحقق بنجاح")
 
         # Signal ready for workflow
-        print('ready')
-        sys.stdout.flush()
+        if app.config.get('WAIT_FOR_PORT', False):
+            print('ready')
+            sys.stdout.flush()
+            logger.info("تم تهيئة التطبيق بنجاح وهو جاهز للاستخدام")
 
         return app
 

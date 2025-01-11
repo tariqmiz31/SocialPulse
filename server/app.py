@@ -38,7 +38,7 @@ def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                 sock.bind((host, port))
-                sock.close()  # Make sure to close the socket
+                sock.close()
                 logger.info(f"المنفذ {port} متاح")
                 print('ready')  # Signal ready for workflow
                 sys.stdout.flush()
@@ -130,11 +130,18 @@ def create_app(testing=False):
                     session.clear()
                     return jsonify({'message': 'انتهت صلاحية الجلسة'}), 401
                 session['last_activity'] = time.time()
+                session.modified = True  # Ensure session changes are saved
 
         # تسجيل المسارات
         app = register_routes(app)
 
         logger.info("تم إنشاء تطبيق Flask بنجاح")
+
+        # Signal ready for workflow if configured
+        if app.config.get('WAIT_FOR_PORT', False):
+            print('ready')
+            sys.stdout.flush()
+
         return app
 
     except Exception as e:

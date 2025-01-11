@@ -25,7 +25,7 @@ if project_root not in sys.path:
 from server.database import init_db
 from server.blueprints.admin import admin_bp, init_mail
 from server.blueprints.auth import auth_bp
-from server import logger
+from server import logger, User
 
 def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
     """Wait for port availability"""
@@ -65,8 +65,6 @@ def create_app(testing=False):
 
         # Configure app
         app.config.update(
-            WAIT_FOR_PORT=True,
-            WAIT_FOR_PORT_TIMEOUT=120,
             DEBUG=False,
             TESTING=testing,
             MAIL_SERVER='smtp.gmail.com',
@@ -84,7 +82,9 @@ def create_app(testing=False):
             SESSION_COOKIE_SECURE=True,
             SESSION_COOKIE_HTTPONLY=True,
             SESSION_COOKIE_SAMESITE='Lax',
-            JSON_AS_ASCII=False
+            JSON_AS_ASCII=False,
+            WAIT_FOR_PORT=True,
+            WAIT_FOR_PORT_TIMEOUT=120
         )
 
         # Setup Session directory
@@ -102,7 +102,7 @@ def create_app(testing=False):
         login_manager.login_view = 'auth.login'
         logger.info("تم تهيئة نظام تسجيل الدخول بنجاح")
 
-        # Setup CORS
+        # Setup CORS with proper configuration
         CORS(app, 
              supports_credentials=True,
              resources={
@@ -121,6 +121,10 @@ def create_app(testing=False):
             logger.error("فشل في تهيئة قاعدة البيانات")
             return None
         logger.info("تم الاتصال بقاعدة البيانات بنجاح")
+
+        @login_manager.user_loader
+        def load_user(user_id):
+            return User.get(user_id)
 
         # Register blueprints after all initializations
         init_mail(mail)  # Initialize mail for admin blueprint
@@ -156,10 +160,6 @@ def main():
             logger.error("فشل في إنشاء تطبيق Flask")
             return 1
 
-        # Signal ready for workflow after port is available and app is created
-        print('ready')
-        sys.stdout.flush()
-
         # Start metrics server on a different port
         metrics_port = port + 1
         try:
@@ -167,6 +167,10 @@ def main():
             logger.info(f"تم بدء خادم المقاييس على المنفذ {metrics_port}")
         except Exception as e:
             logger.warning(f"فشل في بدء خادم المقاييس: {str(e)}")
+
+        # Signal ready for workflow before starting the server
+        print('ready')
+        sys.stdout.flush()
 
         # Start production server with waitress
         logger.info(f"بدء تشغيل الخادم على المنفذ {port}")

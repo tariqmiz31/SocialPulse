@@ -24,8 +24,10 @@ def admin_required(f):
     @login_required
     def decorated_function(*args, **kwargs):
         if not current_user.is_authenticated:
+            logger.warning(f"محاولة وصول غير مصرح بها: المستخدم غير مسجل الدخول")
             return jsonify({'message': 'يجب تسجيل الدخول'}), 401
         if current_user.role != 'admin':
+            logger.warning(f"محاولة وصول غير مصرح بها: المستخدم {current_user.username} ليس مشرفاً")
             return jsonify({'message': 'غير مصرح بهذا الإجراء'}), 403
         return f(*args, **kwargs)
     return decorated_function
@@ -52,12 +54,15 @@ def modify_user(user_id, action):
             user = cursor.fetchone()
 
             if not user:
+                logger.warning(f"محاولة تعديل مستخدم غير موجود: ID {user_id}")
                 return jsonify({'message': 'المستخدم غير موجود'}), 404
 
             if action not in ['promote', 'demote', 'block', 'unblock', 'approve', 'delete']:
+                logger.warning(f"محاولة تنفيذ إجراء غير صالح: {action}")
                 return jsonify({'message': 'إجراء غير صالح'}), 400
 
             if user[1] == 'Tariq':  # التحقق من اسم المستخدم
+                logger.warning(f"محاولة تعديل صلاحيات المستخدم الرئيسي")
                 return jsonify({'message': 'لا يمكن تعديل صلاحيات المستخدم الرئيسي'}), 403
 
             verification_step = request.json.get('verificationStep', 'initial')
@@ -66,7 +71,7 @@ def modify_user(user_id, action):
             # التحقق من المراحل لتغيير الصلاحيات
             if action in ['promote', 'demote']:
                 if verification_step == 'initial':
-                    logger.info(f"بدء عملية تغيير صلاحيات المستخدم {user[1]}")
+                    logger.info(f"بدء عملية تغيير صلاحيات المستخدم {user[1]} بواسطة {current_user.username}")
 
                     if not email:
                         return jsonify({'message': 'البريد الإلكتروني مطلوب للتحقق'}), 400
@@ -81,6 +86,7 @@ def modify_user(user_id, action):
                     attempt_count = cursor.fetchone()[0]
 
                     if attempt_count >= 5:
+                        logger.warning(f"تم تجاوز عدد محاولات التحقق للبريد {email}")
                         return jsonify({'message': 'تم تجاوز الحد الأقصى لمحاولات التحقق. الرجاء المحاولة لاحقاً'}), 429
 
                     # تسجيل محاولة التحقق
@@ -107,6 +113,7 @@ def modify_user(user_id, action):
                     session['verification_id'] = verification_id
                     session['role_change_action'] = action
                     session['target_user_id'] = user_id
+                    session.modified = True  # Ensure session is saved
 
                     # إرسال رمز التحقق بالبريد
                     if not mail:
@@ -147,6 +154,7 @@ def modify_user(user_id, action):
 
                 elif verification_step == 'verify_code':
                     if 'verification_id' not in session:
+                        logger.warning('محاولة تحقق بدون جلسة صالحة')
                         return jsonify({'message': 'جلسة التحقق غير صالحة'}), 400
 
                     verification_code = request.json.get('code')
@@ -166,6 +174,7 @@ def modify_user(user_id, action):
 
                     verification = cursor.fetchone()
                     if not verification:
+                        logger.warning(f'محاولة تحقق فاشلة: رمز غير صالح أو منتهي الصلاحية')
                         return jsonify({'message': 'رمز التحقق غير صحيح أو منتهي الصلاحية'}), 400
 
                     try:
@@ -199,6 +208,7 @@ def modify_user(user_id, action):
                         session.pop('verification_id', None)
                         session.pop('role_change_action', None)
                         session.pop('target_user_id', None)
+                        session.modified = True  # Ensure session is saved
 
                         db.commit()
 
@@ -236,6 +246,7 @@ def modify_user(user_id, action):
                         }), 500
 
                 else:
+                    logger.warning(f'خطوة تحقق غير صالحة: {verification_step}')
                     return jsonify({'message': 'خطوة تحقق غير صالحة'}), 400
 
             else:
