@@ -35,12 +35,16 @@ def wait_for_port(port=5000, host='0.0.0.0', timeout=60):
     start_time = time.time()
     while time.time() - start_time < timeout:
         try:
-            with socket.create_connection((host, port), timeout=1):
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(1)
+            result = sock.connect_ex((host, port))
+            sock.close()
+            if result != 0:  # المنفذ غير مستخدم
                 logger.info(f"المنفذ {port} متاح للاستخدام")
                 return True
-        except (socket.timeout, ConnectionRefusedError, OSError) as e:
+        except Exception as e:
             logger.debug(f"انتظار المنفذ {port}: {str(e)}")
-            time.sleep(1)
+        time.sleep(1)
     logger.error(f"المنفذ {port} غير متاح بعد {timeout} ثانية")
     return False
 
@@ -60,6 +64,8 @@ def init_app_components(app: Flask):
 
             # 2. تهيئة نظام الجلسات
             logger.info("جاري تهيئة نظام الجلسات...")
+            if not os.path.exists(app.config['SESSION_FILE_DIR']):
+                os.makedirs(app.config['SESSION_FILE_DIR'])
             session_interface = Session()
             session_interface.init_app(app)
             components['session'] = session_interface
@@ -85,7 +91,7 @@ def create_app():
         load_dotenv()
 
         # التحقق من المتغيرات المطلوبة
-        required_vars = ['MAIL_USERNAME', 'MAIL_PASSWORD', 'DATABASE_URL']
+        required_vars = ['DATABASE_URL']
         missing_vars = [var for var in required_vars if not os.getenv(var)]
         if missing_vars:
             logger.error(f"المتغيرات البيئية التالية مفقودة: {', '.join(missing_vars)}")
@@ -98,12 +104,8 @@ def create_app():
         # تطبيق الإعدادات
         app.config.update(APP_CONFIG)
         app.config.update({
-            'MAIL_SERVER': 'smtp.gmail.com',
-            'MAIL_PORT': 587,
-            'MAIL_USE_TLS': True,
-            'MAIL_USERNAME': os.getenv('MAIL_USERNAME'),
-            'MAIL_PASSWORD': os.getenv('MAIL_PASSWORD'),
-            'MAIL_DEFAULT_SENDER': os.getenv('MAIL_USERNAME'),
+            'SESSION_FILE_DIR': '/tmp/flask_session',
+            'SESSION_TYPE': 'filesystem',
             'SECRET_KEY': os.getenv('SECRET_KEY', os.urandom(24).hex())
         })
 
@@ -112,34 +114,13 @@ def create_app():
                 # تهيئة المكونات الأساسية
                 components = init_app_components(app)
 
-                # إضافة تنظيف موارد قاعدة البيانات
-                @app.teardown_appcontext
-                def cleanup(exc):
-                    """تنظيف موارد قاعدة البيانات"""
-                    db = g.pop('db', None)
-                    if db is not None:
-                        db.close()
-
-                # إضافة معالجات الطلبات
-                @app.before_request
-                def before_request():
-                    """تنفيذ قبل كل طلب"""
-                    try:
-                        g.db = get_db()
-                        if 'user_id' in session:
-                            session['last_activity'] = time.time()
-                            session.modified = True
-                    except Exception as e:
-                        logger.error(f"خطأ في معالجة الطلب: {str(e)}", exc_info=True)
-                        return jsonify({"error": "حدث خطأ في معالجة الطلب"}), 500
-
                 # تهيئة CORS
                 logger.info("جاري تهيئة CORS...")
                 CORS(app, 
                     supports_credentials=True,
                     resources={
                         r"/api/*": {
-                            "origins": ["http://localhost:5000", "https://*.repl.co", "http://0.0.0.0:5000"],
+                            "origins": ["http://localhost:8080", "https://*.repl.co", "http://0.0.0.0:8080"],
                             "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
                             "allow_headers": ["Content-Type", "Authorization"],
                             "expose_headers": ["Content-Type"],
@@ -169,6 +150,18 @@ def create_app():
                             'session': bool(components.get('session'))
                         }
                     })
+
+                # إضافة معالجات الطلبات
+                @app.before_request
+                def before_request():
+                    """تنفيذ قبل كل طلب"""
+                    try:
+                        g.db = get_db()
+                        if g.db is None:
+                            return jsonify({"error": "فشل الاتصال بقاعدة البيانات"}), 500
+                    except Exception as e:
+                        logger.error(f"خطأ في معالجة الطلب: {str(e)}")
+                        return jsonify({"error": "حدث خطأ في معالجة الطلب"}), 500
 
                 app.ready = True
                 logger.info("✓ تم تهيئة التطبيق بنجاح وهو جاهز للعمل")

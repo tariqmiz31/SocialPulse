@@ -3,13 +3,14 @@ import os
 import sys
 import logging
 import socket
+import time
 from dotenv import load_dotenv
-from flask import Flask, session, g, jsonify
+from flask import Flask, session, g, jsonify, current_app
 from flask_cors import CORS
 from flask_mail import Mail
 from logging.handlers import RotatingFileHandler
-import time
 import prometheus_client
+from prometheus_flask_exporter import PrometheusMetrics
 from flask_session import Session
 from datetime import timedelta
 from flask_login import LoginManager
@@ -41,28 +42,7 @@ def setup_logging():
     ))
     logger.addHandler(file_handler)
     logger.setLevel(logging.INFO)
-
-def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 60) -> bool:
-    """انتظار حتى يصبح المنفذ متاحاً"""
-    start_time = time.time()
-    logger.info(f"انتظار المنفذ {port} ليصبح متاحاً...")
-
-    while True:
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                sock.settimeout(1)
-                result = sock.connect_ex((host, port))
-                if result != 0:  # المنفذ متاح
-                    logger.info(f"المنفذ {port} متاح")
-                    return True
-        except socket.error as e:
-            logger.error(f"خطأ في فحص المنفذ {port}: {str(e)}")
-
-        if time.time() - start_time > timeout:
-            logger.error(f"انتهت مهلة انتظار المنفذ {port}")
-            return False
-
-        time.sleep(1)
+    logger.info("تم تهيئة نظام التسجيل")
 
 def create_app(testing=False):
     """إنشاء تطبيق Flask"""
@@ -75,6 +55,10 @@ def create_app(testing=False):
 
         # إنشاء تطبيق Flask
         app = Flask(__name__)
+
+        # إضافة مقاييس Prometheus
+        metrics = PrometheusMetrics(app)
+        metrics.info('app_info', 'Application info', version='1.0.0')
 
         # التكوين الأساسي
         app.config.update(
@@ -111,21 +95,6 @@ def create_app(testing=False):
 
         logger.info("تم تهيئة مدير تسجيل الدخول")
 
-        # تهيئة خدمة البريد الإلكتروني إذا كانت المتغيرات البيئية متوفرة
-        if os.getenv('MAIL_USERNAME') and os.getenv('MAIL_PASSWORD'):
-            app.config.update(
-                MAIL_SERVER='smtp.gmail.com',
-                MAIL_PORT=587,
-                MAIL_USE_TLS=True,
-                MAIL_USERNAME=os.getenv('MAIL_USERNAME'),
-                MAIL_PASSWORD=os.getenv('MAIL_PASSWORD')
-            )
-            mail = Mail(app)
-            logger.info("تم تهيئة خدمة البريد الإلكتروني")
-        else:
-            mail = None
-            logger.warning("لم يتم تكوين خدمة البريد الإلكتروني")
-
         # تهيئة قاعدة البيانات
         db = init_db(app)
         if not db:
@@ -147,12 +116,14 @@ def create_app(testing=False):
         logger.info("تم تطبيق إعدادات CORS")
 
         # تسجيل المسارات البرمجية
-        if mail:
-            init_mail(mail)
+        from server.routes import register_routes
+        register_routes(app)
+        logger.info("تم تسجيل المسارات الأساسية")
+
         app.register_blueprint(admin_bp)
         app.register_blueprint(auth_bp)
         app.register_blueprint(roles_bp)
-        logger.info("تم تسجيل المسارات البرمجية")
+        logger.info("تم تسجيل جميع المسارات البرمجية")
 
         @app.before_request
         def before_request():
@@ -160,6 +131,7 @@ def create_app(testing=False):
             try:
                 g.db = get_db()
                 if g.db is None:
+                    logger.error("فشل الاتصال بقاعدة البيانات")
                     return jsonify({"error": "فشل الاتصال بقاعدة البيانات"}), 500
             except Exception as e:
                 logger.error(f"خطأ في معالجة الطلب: {str(e)}")
@@ -173,28 +145,28 @@ def create_app(testing=False):
                 "details": str(error) if app.debug else None
             }), 500
 
+        # إشارة الجاهزية
+        print("ready")
+        sys.stdout.flush()
+        logger.info("تم تهيئة التطبيق بنجاح")
+
         return app
 
     except Exception as e:
         logger.error(f"خطأ في تهيئة التطبيق: {str(e)}")
         return None
 
-def main():
-    """نقطة الدخول الرئيسية"""
+if __name__ == "__main__":
     try:
         # الحصول على رقم المنفذ من المتغيرات البيئية
         port = int(os.getenv('PORT', '8080'))
-
-        # انتظار حتى يصبح المنفذ متاحاً
-        if not wait_for_port(port):
-            logger.error(f"المنفذ {port} غير متاح")
-            return 1
+        logger.info(f"بدء تشغيل التطبيق على المنفذ {port}")
 
         # إنشاء وتكوين التطبيق
         app = create_app()
         if not app:
             logger.error("فشل في إنشاء تطبيق Flask")
-            return 1
+            sys.exit(1)
 
         # إعداد خادم المقاييس
         metrics_port = port + 1
@@ -204,17 +176,9 @@ def main():
         except Exception as e:
             logger.warning(f"فشل في بدء خادم المقاييس: {str(e)}")
 
-        # الإشارة إلى جاهزية التطبيق
-        print('ready')
-        sys.stdout.flush()
-
         # بدء الخادم
         app.run(host='0.0.0.0', port=port)
-        return 0
 
     except Exception as e:
         logger.error(f"خطأ في بدء الخادم: {str(e)}")
-        return 1
-
-if __name__ == "__main__":
-    sys.exit(main())
+        sys.exit(1)
