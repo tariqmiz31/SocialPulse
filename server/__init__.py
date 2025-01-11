@@ -2,8 +2,7 @@
 import os
 import sys
 import logging
-import time
-from flask import Flask, session, g
+from flask import Flask, session, g, jsonify
 from flask_cors import CORS
 from flask_mail import Mail
 from flask_login import LoginManager, UserMixin
@@ -15,7 +14,6 @@ from dotenv import load_dotenv
 from flask_session import Session
 from server.database import get_db, init_db
 from server.blueprints.auth import auth_bp
-import socket
 
 # Setup logging
 logger = logging.getLogger('silvarium')
@@ -51,26 +49,36 @@ class User(UserMixin):
             logger.error(f"Error loading user: {str(e)}", exc_info=True)
         return None
 
-def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
-    """Wait for port availability"""
-    start_time = time.time()
-    logger.info(f"بدء انتظار المنفذ {port}...")
+def init_extensions(app):
+    """تهيئة امتدادات Flask بالترتيب الصحيح"""
+    try:
+        # 1. تهيئة Session أولاً
+        session_interface = Session()
+        session_interface.init_app(app)
+        logger.info("تم تهيئة إدارة الجلسات")
 
-    while True:
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                sock.bind((host, port))
-                sock.close()
-                logger.info(f"المنفذ {port} متاح")
-                print('ready')  # Signal ready for workflow
-                sys.stdout.flush()
-                return True
-        except socket.error:
-            if time.time() - start_time >= timeout:
-                logger.error(f"المنفذ {port} غير متاح بعد {timeout} ثانية")
-                return False
-            time.sleep(1)
-            logger.info(f"انتظار المنفذ {port}...")
+        # 2. تهيئة نظام تسجيل الدخول
+        login_manager = LoginManager()
+        login_manager.init_app(app)
+        login_manager.login_view = 'auth.login'
+        login_manager.login_message = 'يجب تسجيل الدخول للوصول إلى هذه الصفحة'
+        login_manager.login_message_category = 'error'
+
+        @login_manager.user_loader
+        def load_user(user_id):
+            return User.get(user_id)
+
+        logger.info("تم تهيئة نظام تسجيل الدخول")
+
+        # 3. تهيئة خدمة البريد الإلكتروني
+        mail = Mail()
+        mail.init_app(app)
+        logger.info("تم تهيئة خدمة البريد الإلكتروني")
+
+        return session_interface, login_manager, mail
+    except Exception as e:
+        logger.error(f"خطأ في تهيئة الامتدادات: {str(e)}", exc_info=True)
+        raise
 
 def create_app(testing=False):
     """Create Flask application"""
@@ -89,12 +97,10 @@ def create_app(testing=False):
         static_folder = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'client', 'dist'))
         app = Flask(__name__, static_folder=static_folder, static_url_path='/')
 
-        # Configure app with basic settings first
-        app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', os.urandom(24).hex())
-        app.config['JSON_AS_ASCII'] = False
-
-        # Configure session settings
+        # Basic Configuration
         app.config.update(
+            SECRET_KEY=os.getenv('SECRET_KEY', os.urandom(24).hex()),
+            JSON_AS_ASCII=False,
             SESSION_TYPE='filesystem',
             SESSION_FILE_DIR='/tmp/flask_session',
             SESSION_FILE_THRESHOLD=500,
@@ -102,39 +108,7 @@ def create_app(testing=False):
             PERMANENT_SESSION_LIFETIME=timedelta(days=1),
             SESSION_COOKIE_SECURE=True,
             SESSION_COOKIE_HTTPONLY=True,
-            SESSION_COOKIE_SAMESITE='Lax'
-        )
-
-        # Setup Session directory
-        if not os.path.exists(app.config['SESSION_FILE_DIR']):
-            os.makedirs(app.config['SESSION_FILE_DIR'])
-            logger.info("تم إنشاء دليل الجلسات")
-
-        # Initialize Flask extensions in the correct order
-        # 1. Session
-        flask_session = Session()
-        flask_session.init_app(app)
-        logger.info("تم تهيئة إدارة الجلسات")
-
-        # 2. Login Manager
-        login_manager = LoginManager()
-        login_manager.init_app(app)
-        login_manager.login_view = 'auth.login'
-
-        @login_manager.user_loader
-        def load_user(user_id):
-            """تحميل المستخدم من قاعدة البيانات"""
-            return User.get(user_id)
-
-        logger.info("تم تهيئة نظام تسجيل الدخول")
-
-        # 3. Mail
-        flask_mail = Mail()
-        flask_mail.init_app(app)
-        logger.info("تم تهيئة خدمة البريد الإلكتروني")
-
-        # Configure mail settings
-        app.config.update(
+            SESSION_COOKIE_SAMESITE='Lax',
             MAIL_SERVER='smtp.gmail.com',
             MAIL_PORT=587,
             MAIL_USE_TLS=True,
@@ -143,50 +117,65 @@ def create_app(testing=False):
             MAIL_DEFAULT_SENDER=os.getenv('MAIL_USERNAME')
         )
 
-        # Setup CORS
-        CORS(app, 
-             supports_credentials=True,
-             resources={
-                 r"/api/*": {
-                     "origins": ["http://localhost:5000", "https://*.repl.co", "https://*.repl.dev"],
-                     "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-                     "allow_headers": ["Content-Type", "Authorization"],
-                     "expose_headers": ["Content-Type"],
-                     "supports_credentials": True
-                 }
-             })
+        # Ensure session directory exists
+        if not os.path.exists(app.config['SESSION_FILE_DIR']):
+            os.makedirs(app.config['SESSION_FILE_DIR'])
+            logger.info("تم إنشاء دليل الجلسات")
 
-        # Initialize database
-        db = init_db(app)
-        if not db:
-            logger.error("فشل في تهيئة قاعدة البيانات")
+        try:
+            # Initialize extensions
+            session_interface, login_manager, mail = init_extensions(app)
+
+            # Setup CORS
+            CORS(app, 
+                 supports_credentials=True,
+                 resources={
+                     r"/api/*": {
+                         "origins": ["http://localhost:5000", "https://*.repl.co", "http://0.0.0.0:5000"],
+                         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+                         "allow_headers": ["Content-Type", "Authorization"],
+                         "expose_headers": ["Content-Type"],
+                         "supports_credentials": True
+                     }
+                 })
+
+            # Initialize database
+            db = init_db(app)
+            if not db:
+                logger.error("فشل في تهيئة قاعدة البيانات")
+                return None
+            logger.info("تم الاتصال بقاعدة البيانات")
+
+            @app.before_request
+            def before_request():
+                """تنفيذ قبل كل طلب"""
+                try:
+                    g.db = get_db()
+                    if 'user_id' in session:
+                        session['last_activity'] = time.time()
+                        session.modified = True
+                except Exception as e:
+                    logger.error(f"خطأ في معالجة الطلب: {str(e)}", exc_info=True)
+                    return jsonify({"error": "حدث خطأ في معالجة الطلب"}), 500
+
+            @app.teardown_appcontext
+            def teardown_db(exception):
+                """تنظيف موارد قاعدة البيانات"""
+                db = g.pop('db', None)
+                if db is not None:
+                    db.close()
+
+            # Register blueprints
+            init_mail(mail)
+            app.register_blueprint(admin_bp)
+            app.register_blueprint(auth_bp)
+            logger.info("تم تسجيل المسارات")
+
+            return app
+
+        except Exception as e:
+            logger.error(f"خطأ في تهيئة التطبيق: {str(e)}", exc_info=True)
             return None
-        logger.info("تم الاتصال بقاعدة البيانات بنجاح")
-
-        @app.before_request
-        def before_request():
-            """تنفيذ قبل كل طلب"""
-            g.db = get_db()
-
-            # تحديث وقت النشاط في الجلسة إذا كان المستخدم مسجل الدخول
-            if hasattr(g, 'user') and g.user is not None:
-                session['last_activity'] = time.time()
-                session.modified = True
-
-        @app.teardown_appcontext
-        def teardown_db(exception):
-            """تنظيف موارد قاعدة البيانات"""
-            db = g.pop('db', None)
-            if db is not None:
-                db.close()
-
-        # Register blueprints after all configurations
-        init_mail(flask_mail)
-        app.register_blueprint(admin_bp)
-        app.register_blueprint(auth_bp)
-        logger.info("تم تسجيل المسارات الإدارية ومسارات التحقق بنجاح")
-
-        return app
 
     except Exception as e:
         logger.error(f"خطأ في تهيئة التطبيق: {str(e)}", exc_info=True)

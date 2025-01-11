@@ -26,6 +26,8 @@ from server.database import init_db
 from server.blueprints.admin import admin_bp, init_mail
 from server.blueprints.auth import auth_bp
 from server import logger
+from server.models import User # Assuming User model is defined here
+
 
 def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
     """Wait for port availability"""
@@ -47,6 +49,36 @@ def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
                 return False
             time.sleep(1)
             logger.info(f"انتظار المنفذ {port}...")
+
+def init_extensions(app):
+    """تهيئة امتدادات Flask بالترتيب الصحيح"""
+    try:
+        # 1. تهيئة Session أولاً
+        flask_session = Session()
+        flask_session.init_app(app)
+        logger.info("تم تهيئة إدارة الجلسات")
+
+        # 2. تهيئة نظام تسجيل الدخول
+        login_manager = LoginManager()
+        login_manager.init_app(app)
+        login_manager.login_view = 'auth.login'
+
+        @login_manager.user_loader
+        def load_user(user_id):
+            return User.get(user_id) # Assuming User model has a get method
+
+        logger.info("تم تهيئة نظام تسجيل الدخول")
+
+        # 3. تهيئة خدمة البريد الإلكتروني
+        flask_mail = Mail()
+        flask_mail.init_app(app)
+        logger.info("تم تهيئة خدمة البريد الإلكتروني")
+
+        return flask_session, login_manager, flask_mail
+
+    except Exception as e:
+        logger.error(f"خطأ في تهيئة الامتدادات: {str(e)}", exc_info=True)
+        raise
 
 def create_app(testing=False):
     """Create Flask application"""
@@ -80,7 +112,7 @@ def create_app(testing=False):
             SECRET_KEY=os.getenv('SECRET_KEY', os.urandom(24).hex()),
             SESSION_FILE_DIR='/tmp/flask_session',
             SESSION_FILE_THRESHOLD=500,
-            SESSION_COOKIE_SECURE=False,  # Set to False for development
+            SESSION_COOKIE_SECURE=True, # Changed to True for better security
             SESSION_COOKIE_HTTPONLY=True,
             SESSION_COOKIE_SAMESITE='Lax',
             JSON_AS_ASCII=False,
@@ -92,18 +124,10 @@ def create_app(testing=False):
         if not os.path.exists(app.config['SESSION_FILE_DIR']):
             os.makedirs(app.config['SESSION_FILE_DIR'])
 
-        # Initialize Flask extensions in the correct order
-        mail = Mail(app)
-        logger.info("تم تهيئة خدمة البريد الإلكتروني بنجاح")
+        # Initialize all extensions
+        flask_session, login_manager, flask_mail = init_extensions(app)
 
-        session = Session(app)
-        logger.info("تم تهيئة إدارة الجلسات بنجاح")
-
-        login_manager = LoginManager(app)
-        login_manager.login_view = 'auth.login'
-        logger.info("تم تهيئة نظام تسجيل الدخول بنجاح")
-
-        # Setup CORS with proper configuration
+        # Setup CORS
         CORS(app, 
              supports_credentials=True,
              resources={
@@ -124,14 +148,15 @@ def create_app(testing=False):
         logger.info("تم الاتصال بقاعدة البيانات بنجاح")
 
         # Register blueprints
-        init_mail(mail)
+        init_mail(flask_mail)
         app.register_blueprint(admin_bp)
         app.register_blueprint(auth_bp)
         logger.info("تم تسجيل المسارات بنجاح")
 
         # Signal ready for workflow
-        print('ready')
-        sys.stdout.flush()
+        if app.config.get('WAIT_FOR_PORT', False):
+            print('ready')
+            sys.stdout.flush()
 
         return app
 
