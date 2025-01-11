@@ -20,24 +20,26 @@ const waitForPort = (port: number, host: string = '0.0.0.0', timeout: number = 6
     const startTime = Date.now();
     const checkPort = () => {
       const socket = new net.Socket();
+
       socket.on('error', () => {
         socket.destroy();
         logger.info(`Port ${port} is available | المنفذ ${port} متاح`);
-        // After port is available, signal ready
+        // Signal ready for workflow
         console.log('ready');
         resolve(true);
       });
 
-      socket.connect(port, host, () => {
+      socket.on('connect', () => {
         socket.destroy();
         if (Date.now() - startTime >= timeout) {
           logger.error(`Port ${port} is not available after timeout | المنفذ ${port} غير متاح بعد انتهاء المهلة`);
           resolve(false);
           return;
         }
-        logger.info(`Waiting for port ${port}... | انتظار المنفذ ${port}...`);
         setTimeout(checkPort, 1000);
       });
+
+      socket.connect(port, host);
     };
     checkPort();
   });
@@ -159,8 +161,6 @@ app.get("/api/monitoring/status", async (_req, res) => {
     server.listen(PORT, "0.0.0.0", () => {
       logger.info(`Server running on port ${PORT} in ${process.env.NODE_ENV || 'development'} mode | الخادم يعمل على المنفذ ${PORT}`);
       logger.info(`Database connected successfully | تم الاتصال بقاعدة البيانات بنجاح`);
-      // Signal ready to workflow
-      console.log('ready');
     });
 
     // Handle cleanup on shutdown
