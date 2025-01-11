@@ -64,18 +64,22 @@ def is_port_in_use(port: int, logger) -> bool:
             return True
 
 def wait_for_port(port: int, logger, timeout=120):
-    """انتظار حتى يصبح المنفذ متاحًا | Wait until port becomes available"""
+    """انتظار حتى يصبح المنفذ متاحاً | Wait until port becomes available"""
     logger.info(f"بدء انتظار المنفذ {port}... | Starting to wait for port {port}...")
     start_time = time.time()
+    host = "0.0.0.0"
 
     while time.time() - start_time < timeout:
-        if not is_port_in_use(port, logger):
+        try:
+            with socket.create_connection((host, port), timeout=1) as sock:
+                sock.close()
+                logger.info(f"المنفذ {port} مشغول، محاولة تحريره... | Port {port} is busy, trying to free it...")
+                return False
+        except (socket.timeout, ConnectionRefusedError):
             logger.info(f"المنفذ {port} متاح الآن | Port {port} is now available")
             return True
-        if cleanup_port(port, logger):
-            logger.info(f"تم تحرير المنفذ {port} بنجاح | Port {port} freed successfully")
-            return True
-        logger.debug(f"المنفذ {port} مشغول، انتظار... | Port {port} is busy, waiting...")
+        except Exception as e:
+            logger.debug(f"خطأ أثناء فحص المنفذ {port}: {str(e)} | Error checking port {port}: {str(e)}")
         time.sleep(1)
 
     logger.error(f"انتهت مهلة انتظار المنفذ {port} | Port {port} wait timeout")
@@ -148,7 +152,7 @@ def start_server():
         # تحديد المنفذ | Determine port
         port = int(os.getenv("PORT", "5001"))
 
-        # انتظار حتى يصبح المنفذ متاحًا | Wait until port becomes available
+        # انتظار حتى يصبح المنفذ متاحاً | Wait until port becomes available
         if not wait_for_port(port, logger, timeout=120):
             logger.error(f"فشل في انتظار المنفذ {port} | Failed waiting for port {port}")
             return False
@@ -171,13 +175,12 @@ def start_server():
             logger.error(f"فشل الاتصال بقاعدة البيانات: {e} | Database connection failed: {e}")
             return False
 
-        # بدء التشغيل | Start server
-        logger.info(f"بدء تشغيل الخادم على المنفذ {port} | Starting server on port {port}")
-
         # Signal ready state
         print("ready")
         sys.stdout.flush()
 
+        # بدء التشغيل | Start server
+        logger.info(f"بدء تشغيل الخادم على المنفذ {port} | Starting server on port {port}")
         serve(
             app,
             host="0.0.0.0",
@@ -186,6 +189,7 @@ def start_server():
             threads=4,
             connection_limit=1000,
             channel_timeout=30,
+            cleanup_interval=30,
             _quiet=False  # تمكين سجلات Waitress | Enable Waitress logs
         )
 

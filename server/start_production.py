@@ -30,22 +30,28 @@ from server import logger
 # إضافة معالج السجلات
 logger.addHandler(file_handler)
 
+def is_port_in_use(port: int, host: str = '0.0.0.0') -> bool:
+    """التحقق من استخدام المنفذ"""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        try:
+            sock.bind((host, port))
+            return False
+        except socket.error:
+            return True
+
 def wait_for_port(port=5000, host='0.0.0.0', timeout=60):
     """انتظار حتى يصبح المنفذ متاحاً"""
+    logger.info(f"بدء انتظار المنفذ {port}... | Starting to wait for port {port}...")
     start_time = time.time()
+
     while time.time() - start_time < timeout:
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(1)
-            result = sock.connect_ex((host, port))
-            sock.close()
-            if result != 0:  # المنفذ غير مستخدم
-                logger.info(f"المنفذ {port} متاح للاستخدام")
-                return True
-        except Exception as e:
-            logger.debug(f"انتظار المنفذ {port}: {str(e)}")
+        if not is_port_in_use(port, host):
+            logger.info(f"المنفذ {port} متاح للاستخدام | Port {port} is available")
+            return True
+        logger.debug(f"المنفذ {port} مشغول، انتظار... | Port {port} is busy, waiting...")
         time.sleep(1)
-    logger.error(f"المنفذ {port} غير متاح بعد {timeout} ثانية")
+
+    logger.error(f"المنفذ {port} غير متاح بعد {timeout} ثانية | Port {port} not available after {timeout} seconds")
     return False
 
 def init_app_components(app: Flask):
@@ -178,8 +184,12 @@ def create_app():
 def main():
     """النقطة الرئيسية لبدء الخادم"""
     try:
+        # Set environment variables for port waiting
+        os.environ['WAIT_FOR_PORT'] = 'true'
+        os.environ['WAIT_FOR_PORT_TIMEOUT'] = '120'  # 2 minutes timeout
+
         # تحديد المنفذ
-        port = PRODUCTION_CONFIG['port']
+        port = int(os.getenv('PORT', '5000'))
         logger.info(f"بدء تهيئة الخادم على المنفذ {port}")
 
         # إنشاء وتهيئة التطبيق
@@ -189,17 +199,27 @@ def main():
             return 1
 
         # انتظار حتى يصبح المنفذ متاحاً
-        if not wait_for_port(port=port):
+        if not wait_for_port(port=port, timeout=120):
             logger.error(f"المنفذ {port} غير متاح بعد انتهاء المهلة")
             return 1
 
         # تأكيد جاهزية التطبيق
-        logger.info("التطبيق جاهز للتشغيل")
         print('ready')
         sys.stdout.flush()
+        logger.info("التطبيق جاهز للتشغيل")
 
         # بدء الخادم باستخدام waitress
-        serve(app, **PRODUCTION_CONFIG)
+        serve(
+            app,
+            host='0.0.0.0',
+            port=port,
+            url_scheme='https',
+            threads=4,
+            connection_limit=1000,
+            channel_timeout=30,
+            cleanup_interval=30,
+            ident='Silvarium Social'
+        )
         return 0
 
     except Exception as e:
