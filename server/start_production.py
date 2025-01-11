@@ -39,7 +39,7 @@ def is_port_in_use(port: int, host: str = '0.0.0.0') -> bool:
         except socket.error:
             return True
 
-def wait_for_port(port=5000, host='0.0.0.0', timeout=60):
+def wait_for_port(port=5000, host='0.0.0.0', timeout=120):
     """انتظار حتى يصبح المنفذ متاحاً"""
     logger.info(f"بدء انتظار المنفذ {port}... | Starting to wait for port {port}...")
     start_time = time.time()
@@ -56,39 +56,38 @@ def wait_for_port(port=5000, host='0.0.0.0', timeout=60):
 
 def init_app_components(app: Flask):
     """تهيئة مكونات التطبيق بالترتيب الصحيح مع التحقق من كل خطوة"""
-    with app.app_context():
-        try:
-            components = {}
+    try:
+        components = {}
 
-            # 1. تهيئة قاعدة البيانات
-            logger.info("جاري تهيئة قاعدة البيانات...")
-            db = init_db(app)
-            if not db:
-                raise Exception("فشل في تهيئة قاعدة البيانات")
-            components['db'] = db
-            logger.info("✓ تم تهيئة قاعدة البيانات بنجاح")
+        # 1. تهيئة قاعدة البيانات
+        logger.info("جاري تهيئة قاعدة البيانات...")
+        db = init_db(app)
+        if not db:
+            raise Exception("فشل في تهيئة قاعدة البيانات")
+        components['db'] = db
+        logger.info("✓ تم تهيئة قاعدة البيانات بنجاح")
 
-            # 2. تهيئة نظام الجلسات
-            logger.info("جاري تهيئة نظام الجلسات...")
-            if not os.path.exists(app.config['SESSION_FILE_DIR']):
-                os.makedirs(app.config['SESSION_FILE_DIR'])
-            session_interface = Session()
-            session_interface.init_app(app)
-            components['session'] = session_interface
-            logger.info("✓ تم تهيئة نظام الجلسات بنجاح")
+        # 2. تهيئة نظام الجلسات
+        logger.info("جاري تهيئة نظام الجلسات...")
+        if not os.path.exists(app.config['SESSION_FILE_DIR']):
+            os.makedirs(app.config['SESSION_FILE_DIR'])
+        session_interface = Session()
+        session_interface.init_app(app)
+        components['session'] = session_interface
+        logger.info("✓ تم تهيئة نظام الجلسات بنجاح")
 
-            # 3. تهيئة خدمة البريد الإلكتروني
-            logger.info("جاري تهيئة خدمة البريد الإلكتروني...")
-            mail = Mail()
-            mail.init_app(app)
-            components['mail'] = mail
-            logger.info("✓ تم تهيئة خدمة البريد الإلكتروني بنجاح")
+        # 3. تهيئة خدمة البريد الإلكتروني
+        logger.info("جاري تهيئة خدمة البريد الإلكتروني...")
+        mail = Mail()
+        mail.init_app(app)
+        components['mail'] = mail
+        logger.info("✓ تم تهيئة خدمة البريد الإلكتروني بنجاح")
 
-            return components
+        return components
 
-        except Exception as e:
-            logger.error(f"خطأ في تهيئة المكونات: {str(e)}", exc_info=True)
-            raise
+    except Exception as e:
+        logger.error(f"خطأ في تهيئة المكونات: {str(e)}", exc_info=True)
+        raise
 
 def create_app():
     """إنشاء وتهيئة تطبيق Flask مع التحقق المناسب من كل خطوة"""
@@ -116,62 +115,61 @@ def create_app():
         })
 
         try:
-            with app.app_context():
-                # تهيئة المكونات الأساسية
-                components = init_app_components(app)
+            # تهيئة المكونات الأساسية
+            components = init_app_components(app)
 
-                # تهيئة CORS
-                logger.info("جاري تهيئة CORS...")
-                CORS(app, 
-                    supports_credentials=True,
-                    resources={
-                        r"/api/*": {
-                            "origins": ["http://localhost:8080", "https://*.repl.co", "http://0.0.0.0:8080"],
-                            "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-                            "allow_headers": ["Content-Type", "Authorization"],
-                            "expose_headers": ["Content-Type"],
-                            "supports_credentials": True
-                        }
-                    })
-                logger.info("✓ تم تهيئة CORS بنجاح")
+            # تهيئة CORS
+            logger.info("جاري تهيئة CORS...")
+            CORS(app, 
+                supports_credentials=True,
+                resources={
+                    r"/api/*": {
+                        "origins": ["http://localhost:5000", "https://*.repl.co", "http://0.0.0.0:5000"],
+                        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+                        "allow_headers": ["Content-Type", "Authorization"],
+                        "expose_headers": ["Content-Type"],
+                        "supports_credentials": True
+                    }
+                })
+            logger.info("✓ تم تهيئة CORS بنجاح")
 
-                # تسجيل المسارات
-                logger.info("جاري تسجيل المسارات...")
-                init_mail(components['mail'])
-                app.register_blueprint(admin_bp)
-                app.register_blueprint(auth_bp)
-                logger.info("✓ تم تسجيل المسارات بنجاح")
+            # تسجيل المسارات
+            logger.info("جاري تسجيل المسارات...")
+            init_mail(components['mail'])
+            app.register_blueprint(admin_bp)
+            app.register_blueprint(auth_bp)
+            logger.info("✓ تم تسجيل المسارات بنجاح")
 
-                # نقطة نهاية حالة الخادم
-                @app.route('/api/server/status')
-                def server_status():
-                    """التحقق من حالة الخادم"""
-                    return jsonify({
-                        'status': 'running',
-                        'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
-                        'ready': True,
-                        'components_status': {
-                            'database': bool(g.get('db')),
-                            'mail': bool(components.get('mail')),
-                            'session': bool(components.get('session'))
-                        }
-                    })
+            # نقطة نهاية حالة الخادم
+            @app.route('/api/server/status')
+            def server_status():
+                """التحقق من حالة الخادم"""
+                return jsonify({
+                    'status': 'running',
+                    'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
+                    'components_status': {
+                        'database': bool(g.get('db')),
+                        'mail': bool(components.get('mail')),
+                        'session': bool(components.get('session'))
+                    }
+                })
 
-                # إضافة معالجات الطلبات
-                @app.before_request
-                def before_request():
-                    """تنفيذ قبل كل طلب"""
-                    try:
-                        g.db = get_db()
-                        if g.db is None:
-                            return jsonify({"error": "فشل الاتصال بقاعدة البيانات"}), 500
-                    except Exception as e:
-                        logger.error(f"خطأ في معالجة الطلب: {str(e)}")
-                        return jsonify({"error": "حدث خطأ في معالجة الطلب"}), 500
+            # إضافة معالجات الطلبات
+            @app.before_request
+            def before_request():
+                """تنفيذ قبل كل طلب"""
+                try:
+                    g.db = get_db()
+                    if g.db is None:
+                        logger.error("فشل في الاتصال بقاعدة البيانات")
+                        return jsonify({"error": "فشل الاتصال بقاعدة البيانات"}), 500
+                except Exception as e:
+                    logger.error(f"خطأ في معالجة الطلب: {str(e)}")
+                    return jsonify({"error": "حدث خطأ في معالجة الطلب"}), 500
 
-                app.ready = True
-                logger.info("✓ تم تهيئة التطبيق بنجاح وهو جاهز للعمل")
-                return app
+            app.ready = True
+            logger.info("✓ تم تهيئة التطبيق بنجاح وهو جاهز للعمل")
+            return app
 
         except Exception as e:
             logger.error(f"خطأ في إعداد التطبيق: {str(e)}", exc_info=True)
@@ -184,23 +182,26 @@ def create_app():
 def main():
     """النقطة الرئيسية لبدء الخادم"""
     try:
-        # Set environment variables for port waiting
+        # تحديد المتغيرات البيئية
+        os.environ['FLASK_ENV'] = 'production'
         os.environ['WAIT_FOR_PORT'] = 'true'
-        os.environ['WAIT_FOR_PORT_TIMEOUT'] = '120'  # 2 minutes timeout
+        os.environ['WAIT_FOR_PORT_TIMEOUT'] = '120'
 
         # تحديد المنفذ
         port = int(os.getenv('PORT', '5000'))
+        host = '0.0.0.0'
+
         logger.info(f"بدء تهيئة الخادم على المنفذ {port}")
+
+        # انتظار حتى يصبح المنفذ متاحاً
+        if not wait_for_port(port, host, timeout=120):
+            logger.error(f"المنفذ {port} غير متاح - إنهاء التطبيق")
+            return 1
 
         # إنشاء وتهيئة التطبيق
         app = create_app()
         if not app:
             logger.error("فشل في إنشاء تطبيق Flask")
-            return 1
-
-        # انتظار حتى يصبح المنفذ متاحاً
-        if not wait_for_port(port=port, timeout=120):
-            logger.error(f"المنفذ {port} غير متاح بعد انتهاء المهلة")
             return 1
 
         # تأكيد جاهزية التطبيق
@@ -211,7 +212,7 @@ def main():
         # بدء الخادم باستخدام waitress
         serve(
             app,
-            host='0.0.0.0',
+            host=host,
             port=port,
             url_scheme='https',
             threads=4,
@@ -220,10 +221,11 @@ def main():
             cleanup_interval=30,
             ident='Silvarium Social'
         )
+
         return 0
 
     except Exception as e:
-        logger.error(f"خطأ في بدء الخادم: {str(e)}", exc_info=True)
+        logger.error(f"خطأ في بدء الخادم: {str(e)}")
         return 1
 
 if __name__ == "__main__":

@@ -40,25 +40,48 @@ def send_verification_email(email, code, action, username):
     """إرسال رمز التحقق عبر البريد الإلكتروني"""
     try:
         msg = Message(
-            'تأكيد تغيير الصلاحيات - سيلفاريوم',
+            subject='تأكيد تغيير الصلاحيات - سيلفاريوم | Role Change Verification - Silvarium',
             recipients=[email]
         )
+
+        # قالب ثنائي اللغة | Bilingual template
         msg.html = f"""
-        <div dir="rtl" style="font-family: Arial, sans-serif;">
-            <h2>تأكيد تغيير صلاحيات المستخدم</h2>
-            <p>مرحباً،</p>
-            <p>تم طلب {action} للمستخدم {username}.</p>
-            <p>رمز التحقق الخاص بك هو: <strong>{code}</strong></p>
-            <p>هذا الرمز صالح لمدة 10 دقائق فقط.</p>
-            <p>إذا لم تقم بطلب هذا التغيير، يرجى تجاهل هذا البريد الإلكتروني وإبلاغ المسؤول.</p>
-            <br>
-            <p>مع تحيات،<br>فريق سيلفاريوم</p>
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <div dir="rtl" style="padding: 20px; background-color: #f8f9fa; margin-bottom: 20px;">
+                <h2 style="color: #2c3e50; margin-bottom: 20px;">تأكيد تغيير صلاحيات المستخدم</h2>
+                <p>مرحباً،</p>
+                <p>تم طلب {action} للمستخدم {username}.</p>
+                <div style="background-color: #e9ecef; padding: 15px; border-radius: 5px; margin: 20px 0;">
+                    <p style="font-size: 18px; text-align: center;">رمز التحقق الخاص بك هو:</p>
+                    <p style="font-size: 24px; text-align: center; font-weight: bold; letter-spacing: 5px;">{code}</p>
+                </div>
+                <p style="color: #6c757d;">هذا الرمز صالح لمدة 10 دقائق فقط.</p>
+                <p>إذا لم تقم بطلب هذا التغيير، يرجى تجاهل هذا البريد الإلكتروني وإبلاغ المسؤول.</p>
+            </div>
+
+            <div dir="ltr" style="padding: 20px; background-color: #f8f9fa;">
+                <h2 style="color: #2c3e50; margin-bottom: 20px;">User Role Change Verification</h2>
+                <p>Hello,</p>
+                <p>A request has been made to {action} for user {username}.</p>
+                <div style="background-color: #e9ecef; padding: 15px; border-radius: 5px; margin: 20px 0;">
+                    <p style="font-size: 18px; text-align: center;">Your verification code is:</p>
+                    <p style="font-size: 24px; text-align: center; font-weight: bold; letter-spacing: 5px;">{code}</p>
+                </div>
+                <p style="color: #6c757d;">This code is valid for 10 minutes only.</p>
+                <p>If you did not request this change, please ignore this email and notify the administrator.</p>
+            </div>
+
+            <div style="text-align: center; padding: 20px; color: #6c757d;">
+                <p>Silvarium Social Platform</p>
+            </div>
         </div>
         """
+
         current_app.mail.send(msg)
+        logger.info(f"تم إرسال رمز التحقق إلى {email} | Verification code sent to {email}")
         return True
     except Exception as e:
-        logger.error(f"خطأ في إرسال البريد الإلكتروني: {str(e)}")
+        logger.error(f"خطأ في إرسال البريد الإلكتروني: {str(e)} | Error sending email: {str(e)}")
         return False
 
 @roles_bp.route('/change-request', methods=['POST'])
@@ -94,7 +117,7 @@ def request_role_change():
 
         cur = g.db.cursor()
         try:
-            # التحقق من وجود المستخدم
+            # التحقق من وجود المستخدم وحالته
             cur.execute("""
                 SELECT username, role, email 
                 FROM users 
@@ -308,16 +331,26 @@ def verify_role_change():
             # إرسال إشعار للمستخدم
             if user_email:
                 msg = Message(
-                    'تحديث الصلاحيات - سيلفاريوم',
+                    'تحديث الصلاحيات - سيلفاريوم | Role Update - Silvarium',
                     recipients=[user_email]
                 )
                 msg.html = f"""
-                <div dir="rtl" style="font-family: Arial, sans-serif;">
-                    <h2>تم تحديث صلاحياتك في نظام سيلفاريوم</h2>
-                    <p>مرحباً {username}،</p>
-                    <p>تم تحديث صلاحياتك من {old_role} إلى {new_role}.</p>
-                    <br>
-                    <p>مع تحيات،<br>فريق سيلفاريوم</p>
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                    <div dir="rtl" style="padding: 20px; background-color: #f8f9fa; margin-bottom: 20px;">
+                        <h2 style="color: #2c3e50;">تم تحديث صلاحياتك في نظام سيلفاريوم</h2>
+                        <p>مرحباً {username}،</p>
+                        <p>تم تحديث صلاحياتك من {old_role} إلى {new_role}.</p>
+                        <br>
+                        <p>مع تحيات،<br>فريق سيلفاريوم</p>
+                    </div>
+
+                    <div dir="ltr" style="padding: 20px; background-color: #f8f9fa;">
+                        <h2 style="color: #2c3e50;">Your Role Has Been Updated in Silvarium</h2>
+                        <p>Hello {username},</p>
+                        <p>Your role has been updated from {old_role} to {new_role}.</p>
+                        <br>
+                        <p>Best regards,<br>Silvarium Team</p>
+                    </div>
                 </div>
                 """
                 try:

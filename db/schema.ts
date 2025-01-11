@@ -9,16 +9,14 @@ export const users = pgTable("users", {
   email: text("email").unique(),
   emailVerified: boolean("email_verified").default(false),
   role: text("role", { enum: ["admin", "user"] }).notNull().default("user"),
+  pendingRole: text("pending_role", { enum: ["admin", "user"] }),
+  roleChangeApproved: boolean("role_change_approved").default(false),
+  roleChangeApproverId: serial("role_change_approver_id").references(() => users.id),
   isApproved: boolean("is_approved").notNull().default(false),
   status: text("status", { enum: ["active", "pending", "blocked"] }).notNull().default("pending"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
-
-export const insertUserSchema = createInsertSchema(users);
-export const selectUserSchema = createSelectSchema(users);
-export type InsertUser = typeof users.$inferInsert;
-export type SelectUser = typeof users.$inferSelect;
 
 export const verificationCodes = pgTable("verification_codes", {
   id: serial("id").primaryKey(),
@@ -27,16 +25,11 @@ export const verificationCodes = pgTable("verification_codes", {
   type: text("type", { enum: ["reset_password", "email_verification", "role_change"] }).notNull(),
   expiresAt: timestamp("expires_at").notNull(),
   verified: boolean("verified").default(false),
+  verifiedAt: timestamp("verified_at"),
+  verificationStep: serial("verification_step").default(1),
+  totalSteps: serial("total_steps").default(3),
   createdAt: timestamp("created_at").defaultNow(),
 });
-
-export const insertVerificationCodeSchema = createInsertSchema(verificationCodes, {
-  type: z.enum(["reset_password", "email_verification", "role_change"]),
-});
-
-export const selectVerificationCodeSchema = createSelectSchema(verificationCodes);
-export type InsertVerificationCode = typeof verificationCodes.$inferInsert;
-export type SelectVerificationCode = typeof verificationCodes.$inferSelect;
 
 export const roleChangeHistory = pgTable("role_change_history", {
   id: serial("id").primaryKey(),
@@ -44,9 +37,33 @@ export const roleChangeHistory = pgTable("role_change_history", {
   adminId: serial("admin_id").references(() => users.id),
   oldRole: text("old_role").notNull(),
   newRole: text("new_role").notNull(),
+  changeReason: text("change_reason"),
   verificationId: serial("verification_id").references(() => verificationCodes.id),
+  approvalStatus: text("approval_status", { enum: ["pending", "approved", "rejected"] }).default("pending"),
+  approverId: serial("approver_id").references(() => users.id),
+  approvedAt: timestamp("approved_at"),
+  clientIp: text("client_ip"),
+  userAgent: text("user_agent"),
   createdAt: timestamp("created_at").defaultNow(),
 });
+
+// Export schemas and types
+export const insertUserSchema = createInsertSchema(users);
+export const selectUserSchema = createSelectSchema(users);
+export type InsertUser = typeof users.$inferInsert;
+export type SelectUser = typeof users.$inferSelect;
+
+export const insertVerificationCodeSchema = createInsertSchema(verificationCodes, {
+  type: z.enum(["reset_password", "email_verification", "role_change"]),
+});
+export const selectVerificationCodeSchema = createSelectSchema(verificationCodes);
+export type InsertVerificationCode = typeof verificationCodes.$inferInsert;
+export type SelectVerificationCode = typeof verificationCodes.$inferSelect;
+
+export const insertRoleChangeHistorySchema = createInsertSchema(roleChangeHistory);
+export const selectRoleChangeHistorySchema = createSelectSchema(roleChangeHistory);
+export type InsertRoleChangeHistory = typeof roleChangeHistory.$inferInsert;
+export type SelectRoleChangeHistory = typeof roleChangeHistory.$inferSelect;
 
 export const verificationAttempts = pgTable("verification_attempts", {
   id: serial("id").primaryKey(),

@@ -43,15 +43,16 @@ logger.addHandler(console_handler)
 def try_bind_port(host: str, port: int) -> bool:
     """محاولة ربط المنفذ للتحقق من توفره"""
     try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            sock.bind((host, port))
-            sock.close()
-            return True
-    except Exception:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind((host, port))
+        sock.close()
+        return True
+    except Exception as e:
+        logger.debug(f"فشل في ربط المنفذ {port}: {str(e)}")
         return False
 
-def wait_for_port(host: str, port: int, timeout: int = 60) -> bool:
+def wait_for_port(host: str, port: int, timeout: int = 120) -> bool:
     """انتظار حتى يصبح المنفذ متاحاً"""
     logger.info(f"بدء انتظار المنفذ {port} على {host}...")
     start_time = time.time()
@@ -67,13 +68,22 @@ def wait_for_port(host: str, port: int, timeout: int = 60) -> bool:
     logger.error(f"انتهت مهلة انتظار المنفذ {port} بعد {timeout} ثانية")
     return False
 
+def setup_signal_handlers():
+    """إعداد معالجات الإشارات"""
+    def signal_handler(signum, frame):
+        logger.info("تم استلام إشارة إيقاف، جاري إغلاق التطبيق بأمان...")
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+
 def main() -> int:
     """نقطة الدخول الرئيسية"""
     try:
         # Set production environment and enable port waiting
         os.environ['FLASK_ENV'] = 'production'
-        os.environ['WAIT_FOR_PORT'] = 'true'  # Always wait for port in production
-        os.environ['WAIT_FOR_PORT_TIMEOUT'] = '120'  # 2 minutes timeout
+        os.environ['WAIT_FOR_PORT'] = 'true'
+        os.environ['WAIT_FOR_PORT_TIMEOUT'] = '120'
 
         logger.info("بدء تشغيل خادم سيلفاريوم الاجتماعي")
 
@@ -85,6 +95,7 @@ def main() -> int:
             port = 5000
 
         host = '0.0.0.0'
+        setup_signal_handlers()
 
         # Wait for port to become available
         if not wait_for_port(host, port, timeout=120):
