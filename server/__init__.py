@@ -1,5 +1,6 @@
 """Initialize server package"""
 import os
+import sys
 from flask import Flask
 from flask_cors import CORS
 from flask_mail import Mail
@@ -9,9 +10,8 @@ import socket
 import time
 from logging.handlers import RotatingFileHandler
 from server.routes import register_routes
-from server.blueprints.admin import admin_bp
+from server.blueprints.admin import admin_bp, init_mail
 from dotenv import load_dotenv
-import flask_session
 from flask_session import Session
 
 # Setup logging
@@ -129,7 +129,6 @@ def create_app(testing=False):
         logger.info("تم تهيئة قاعدة البيانات بنجاح")
 
         # Register blueprints after initializing mail
-        from server.blueprints.admin import admin_bp, init_mail
         init_mail(mail)  # Pass mail instance to admin blueprint
         app.register_blueprint(admin_bp)
         logger.info("تم تسجيل المسارات الإدارية بنجاح")
@@ -137,10 +136,6 @@ def create_app(testing=False):
         # Initialize routes
         app = register_routes(app)
         logger.info("تم إعداد المسارات بنجاح")
-
-        # Create admin user if needed
-        from server.start import create_admin_user
-        create_admin_user()
 
         logger.info(f"تم تهيئة التطبيق بنجاح على المنفذ {app.config['PORT']}")
         return app

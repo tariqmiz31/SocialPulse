@@ -19,8 +19,10 @@ project_root = os.path.dirname(current_dir)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-# Now we can import from server package
-from server import create_app, logger
+# Import local modules after path setup
+from server.routes import register_routes
+from server.blueprints.admin import admin_bp, init_mail
+from server import logger
 
 def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
     """Wait for port availability"""
@@ -31,7 +33,10 @@ def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                 sock.bind((host, port))
+                sock.close()  # Make sure to close the socket after checking
                 logger.info(f"المنفذ {port} متاح")
+                print('ready')  # Signal ready for workflow
+                sys.stdout.flush()
                 return True
         except socket.error:
             if time.time() - start_time >= timeout:
@@ -40,41 +45,33 @@ def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
             time.sleep(1)
             logger.info(f"انتظار المنفذ {port}...")
 
-def main():
-    """نقطة البداية الرئيسية | Main entry point"""
+def create_app(testing=False):
+    """Create Flask application"""
     try:
-        # Explicitly set production mode
-        os.environ['FLASK_ENV'] = 'production'
-        os.environ['WAIT_FOR_PORT'] = 'true'  # Enable port waiting
-
         # Load environment variables
         load_dotenv()
 
-        logger.info("بدء تشغيل خادم سيلفاريوم الاجتماعي | Starting Silvarium Social production server")
+        # Check required environment variables
+        required_vars = ['MAIL_USERNAME', 'MAIL_PASSWORD']
+        missing_vars = [var for var in required_vars if not os.getenv(var)]
+        if missing_vars:
+            logger.error(f"المتغيرات البيئية التالية مفقودة: {', '.join(missing_vars)}")
+            return None
 
-        # Use fixed port for production
-        port = 5000
-        logger.info(f"تم تحديد المنفذ: {port}")
+        # Create Flask app
+        static_folder = os.path.abspath(os.path.join(project_root, 'client', 'dist'))
+        app = Flask(__name__, static_folder=static_folder, static_url_path='/')
 
-        # Wait for port availability
-        if not wait_for_port(port):
-            logger.error(f"المنفذ {port} غير متاح بعد {120} ثانية")
-            return 1
-
-        # Start metrics server
-        metrics_port = port + 1
-        start_http_server(metrics_port)
-        logger.info(f"تم بدء خادم المقاييس على المنفذ {metrics_port}")
-
-        # Create Flask app with proper configuration
-        logger.info("إنشاء تطبيق Flask")
-        app = create_app()
-        if not app:
-            logger.error("فشل في إنشاء تطبيق Flask")
-            return 1
-
-        # Set up session configuration
+        # Configure app
         app.config.update(
+            DEBUG=False,
+            TESTING=testing,
+            MAIL_SERVER='smtp.gmail.com',
+            MAIL_PORT=587,
+            MAIL_USE_TLS=True,
+            MAIL_USERNAME=os.getenv('MAIL_USERNAME'),
+            MAIL_PASSWORD=os.getenv('MAIL_PASSWORD'),
+            MAIL_DEFAULT_SENDER=os.getenv('MAIL_USERNAME'),
             SESSION_TYPE='filesystem',
             SESSION_PERMANENT=True,
             PERMANENT_SESSION_LIFETIME=timedelta(days=1),
@@ -83,28 +80,67 @@ def main():
             SESSION_FILE_THRESHOLD=500,
             SESSION_COOKIE_SECURE=True,
             SESSION_COOKIE_HTTPONLY=True,
-            SESSION_COOKIE_SAMESITE='Lax',
-            WAIT_FOR_PORT=True,  # Enable port waiting
-            WAIT_FOR_PORT_TIMEOUT=120  # Set timeout to 2 minutes
+            SESSION_COOKIE_SAMESITE='Lax'
         )
 
-        # Initialize session
+        # Initialize extensions
+        mail = Mail(app)
+
+        # Setup Session directory and initialize
         if not os.path.exists(app.config['SESSION_FILE_DIR']):
             os.makedirs(app.config['SESSION_FILE_DIR'])
         Session(app)
 
-        # Signal ready to workflow
-        logger.info('الخادم جاهز | Server is ready')
-        print('ready')
-        sys.stdout.flush()
+        # Setup CORS
+        CORS(app, supports_credentials=True)
 
-        # Start server with waitress
+        # Initialize admin blueprint with mail
+        init_mail(mail)
+        app.register_blueprint(admin_bp)
+
+        # Register routes
+        register_routes(app)
+
+        return app
+
+    except Exception as e:
+        logger.error(f"خطأ في تهيئة التطبيق: {str(e)}")
+        return None
+
+def main():
+    """Main entry point"""
+    try:
+        # Set production mode
+        os.environ['FLASK_ENV'] = 'production'
+
+        # Use fixed port for production
+        port = 5000
+
+        # Wait for port availability
+        if not wait_for_port(port):
+            logger.error(f"المنفذ {port} غير متاح بعد {120} ثانية")
+            return 1
+
+        # Create Flask app
+        logger.info("إنشاء تطبيق Flask")
+        app = create_app()
+        if not app:
+            logger.error("فشل في إنشاء تطبيق Flask")
+            return 1
+
+        # Start metrics server on a different port
+        metrics_port = port + 1
+        start_http_server(metrics_port)
+        logger.info(f"تم بدء خادم المقاييس على المنفذ {metrics_port}")
+
+        # Start production server with waitress
+        logger.info(f"بدء تشغيل الخادم على المنفذ {port}")
         serve(
             app,
             host='0.0.0.0',
             port=port,
-            url_scheme='https',
             threads=4,
+            url_scheme='https',
             channel_timeout=30,
             cleanup_interval=30,
             ident='Silvarium Social',

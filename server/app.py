@@ -1,20 +1,24 @@
 import os
+import sys
 import logging
-import time
 from logging.handlers import RotatingFileHandler
-import prometheus_client
-from prometheus_client import Counter, Histogram
-from werkzeug.security import generate_password_hash
-from flask_mail import Mail, Message
-from flask import Flask, send_from_directory, request, jsonify, session
+from flask import Flask, request, jsonify, session
 from flask_cors import CORS
+from flask_mail import Mail
 from flask_session import Session
 from dotenv import load_dotenv
-from server.routes import register_routes
-from server.blueprints.admin import admin_bp, init_mail
-import sys
 from datetime import timedelta
 import socket
+import time
+
+# Add the project root to the Python path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(current_dir)
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+from server.blueprints.admin import admin_bp, init_mail
+from server.routes import register_routes
 
 # تحميل المتغيرات البيئية
 load_dotenv()
@@ -34,16 +38,19 @@ def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                 sock.bind((host, port))
+                sock.close()  # Make sure to close the socket
                 logger.info(f"المنفذ {port} متاح")
+                print('ready')  # Signal ready for workflow
+                sys.stdout.flush()
                 return True
         except socket.error:
             if time.time() - start_time >= timeout:
                 logger.error(f"المنفذ {port} غير متاح بعد {timeout} ثانية")
                 return False
             time.sleep(1)
-            logger.debug(f"انتظار المنفذ {port}...")
+            logger.info(f"انتظار المنفذ {port}...")
 
-def create_app():
+def create_app(testing=False):
     """إنشاء تطبيق Flask"""
     try:
         app = Flask(__name__, static_folder='../client/dist', static_url_path='/')
@@ -110,15 +117,13 @@ def create_app():
         file_handler.setLevel(logging.INFO)
         app.logger.addHandler(file_handler)
         app.logger.setLevel(logging.INFO)
-        app.logger.info('تم بدء تشغيل سيلفاريوم سوشيال')
 
-        # تكوين Prometheus
-        REQUEST_COUNT = Counter('request_count', 'Total number of requests', ['method', 'endpoint', 'status'])
-        REQUEST_LATENCY = Histogram('request_latency_seconds', 'Request latency in seconds', ['method', 'endpoint'])
+        # Initialize admin blueprint with mail
+        init_mail(mail)
+        app.register_blueprint(admin_bp)
 
         @app.before_request
         def before_request():
-            request.start_time = time.time()
             # التحقق من صلاحية الجلسة
             if 'user_id' in session and 'last_activity' in session:
                 if time.time() - session['last_activity'] > app.config['PERMANENT_SESSION_LIFETIME'].total_seconds():
@@ -126,33 +131,10 @@ def create_app():
                     return jsonify({'message': 'انتهت صلاحية الجلسة'}), 401
                 session['last_activity'] = time.time()
 
-        @app.after_request
-        def after_request(response):
-            if hasattr(request, 'start_time'):
-                duration = time.time() - request.start_time
-                REQUEST_LATENCY.labels(
-                    method=request.method,
-                    endpoint=request.path
-                ).observe(duration)
-
-            REQUEST_COUNT.labels(
-                method=request.method,
-                endpoint=request.path,
-                status=response.status_code
-            ).inc()
-            return response
-
-        # تهيئة البلوبرنت الإداري
-        init_mail(mail)
-        app.register_blueprint(admin_bp)
-
         # تسجيل المسارات
         app = register_routes(app)
 
-        # Signal ready for workflow
-        print('ready')
-        sys.stdout.flush()
-
+        logger.info("تم إنشاء تطبيق Flask بنجاح")
         return app
 
     except Exception as e:
@@ -173,19 +155,11 @@ def main():
 
         logger.info(f"المنفذ {port} جاهز للاستخدام")
 
-        # بدء خادم المقاييس
-        metrics_port = port + 1
-        prometheus_client.start_http_server(metrics_port)
-        logger.info(f"تم بدء خادم المقاييس على المنفذ {metrics_port}")
-
         # إنشاء التطبيق
         app = create_app()
         if not app:
             logger.error("فشل في إنشاء تطبيق Flask")
             return None, None
-
-        logger.info("تم إنشاء تطبيق Flask بنجاح")
-
 
         return app, port
 
