@@ -9,7 +9,6 @@ from flask_cors import CORS
 from flask_mail import Mail
 from flask_login import LoginManager
 from datetime import timedelta
-from logging.handlers import RotatingFileHandler
 from dotenv import load_dotenv
 from flask_session import Session
 from server.database import get_db, init_db
@@ -17,41 +16,28 @@ from server.blueprints.admin import admin_bp, init_mail
 from server.blueprints.auth import auth_bp
 from server import logger, User
 
-def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 60) -> bool:
-    """انتظار توفر المنفذ مع تسجيل مناسب"""
-    start_time = time.time()
-    logger.info(f"بدء انتظار المنفذ {port}...")
-
-    while True:
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                sock.settimeout(1)
-                sock.bind((host, port))
-                sock.close()
-                logger.info(f"المنفذ {port} متاح للاستخدام")
-                return True
-        except socket.error as e:
-            if time.time() - start_time >= timeout:
-                logger.error(f"المنفذ {port} غير متاح بعد {timeout} ثانية. السبب: {str(e)}")
-                return False
-            time.sleep(1)
-            logger.debug(f"جاري انتظار المنفذ {port}...")
-
 def init_app_components(app: Flask):
-    """تهيئة مكونات التطبيق بالترتيب الصحيح"""
+    """تهيئة مكونات التطبيق بالترتيب الصحيح مع التحقق من كل خطوة"""
     try:
-        # 1. Session
-        session_interface = Session()
-        session_interface.init_app(app)
-        logger.info("تم تهيئة إدارة الجلسات")
+        components = {}
 
-        # 2. Database
+        # 1. تهيئة قاعدة البيانات (أولاً لأنها أساسية)
+        logger.info("جاري تهيئة قاعدة البيانات...")
         db = init_db(app)
         if not db:
             raise Exception("فشل في تهيئة قاعدة البيانات")
-        logger.info("تم تهيئة قاعدة البيانات")
+        components['db'] = db
+        logger.info("✓ تم تهيئة قاعدة البيانات بنجاح")
 
-        # 3. Login Manager
+        # 2. تهيئة إدارة الجلسات
+        logger.info("جاري تهيئة نظام الجلسات...")
+        session_interface = Session()
+        session_interface.init_app(app)
+        components['session'] = session_interface
+        logger.info("✓ تم تهيئة نظام الجلسات بنجاح")
+
+        # 3. تهيئة نظام المصادقة وتسجيل الدخول
+        logger.info("جاري تهيئة نظام المصادقة...")
         login_manager = LoginManager()
         login_manager.init_app(app)
         login_manager.login_view = 'auth.login'
@@ -62,51 +48,40 @@ def init_app_components(app: Flask):
         def load_user(user_id):
             return User.get(user_id)
 
-        logger.info("تم تهيئة نظام تسجيل الدخول")
+        components['login_manager'] = login_manager
+        logger.info("✓ تم تهيئة نظام المصادقة بنجاح")
 
-        # 4. Mail
+        # 4. تهيئة خدمة البريد الإلكتروني
+        logger.info("جاري تهيئة خدمة البريد الإلكتروني...")
         mail = Mail()
         mail.init_app(app)
-        logger.info("تم تهيئة خدمة البريد الإلكتروني")
+        components['mail'] = mail
+        logger.info("✓ تم تهيئة خدمة البريد الإلكتروني بنجاح")
 
-        # 5. CORS
-        CORS(app, 
-             supports_credentials=True,
-             resources={
-                 r"/api/*": {
-                     "origins": ["http://localhost:5000", "https://*.repl.co", "http://0.0.0.0:5000"],
-                     "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-                     "allow_headers": ["Content-Type", "Authorization"],
-                     "expose_headers": ["Content-Type"],
-                     "supports_credentials": True
-                 }
-             })
-        logger.info("تم تهيئة CORS")
-
-        return db, mail
+        return components
 
     except Exception as e:
-        logger.error(f"خطأ في تهيئة مكونات التطبيق: {str(e)}", exc_info=True)
+        logger.error(f"خطأ في تهيئة المكونات: {str(e)}", exc_info=True)
         raise
 
 def create_app(testing=False):
-    """Create Flask application with proper initialization sequence"""
+    """إنشاء وتهيئة تطبيق Flask مع التحقق المناسب من كل خطوة"""
     try:
-        # Load environment variables
+        # تحميل متغيرات البيئة
         load_dotenv()
 
-        # Check required environment variables
+        # التحقق من المتغيرات المطلوبة
         required_vars = ['MAIL_USERNAME', 'MAIL_PASSWORD', 'DATABASE_URL']
         missing_vars = [var for var in required_vars if not os.getenv(var)]
         if missing_vars:
             logger.error(f"المتغيرات البيئية التالية مفقودة: {', '.join(missing_vars)}")
             return None
 
-        # Create Flask app
+        # إنشاء تطبيق Flask
         static_folder = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'client', 'dist'))
         app = Flask(__name__, static_folder=static_folder, static_url_path='/')
 
-        # Basic Configuration
+        # الإعدادات الأساسية
         app.config.update(
             SECRET_KEY=os.getenv('SECRET_KEY', os.urandom(24).hex()),
             JSON_AS_ASCII=False,
@@ -126,16 +101,16 @@ def create_app(testing=False):
             MAIL_DEFAULT_SENDER=os.getenv('MAIL_USERNAME')
         )
 
-        # Ensure session directory exists
+        # التأكد من وجود مجلد الجلسات
         if not os.path.exists(app.config['SESSION_FILE_DIR']):
             os.makedirs(app.config['SESSION_FILE_DIR'])
-            logger.info("تم إنشاء دليل الجلسات")
+            logger.info("✓ تم إنشاء مجلد الجلسات")
 
         try:
-            # Initialize components
-            db, mail = init_app_components(app)
+            # تهيئة المكونات الأساسية
+            components = init_app_components(app)
 
-            # Add database cleanup
+            # إضافة تنظيف موارد قاعدة البيانات
             @app.teardown_appcontext
             def cleanup(exc):
                 """تنظيف موارد قاعدة البيانات"""
@@ -143,7 +118,7 @@ def create_app(testing=False):
                 if db is not None:
                     db.close()
 
-            # Add request handlers
+            # إضافة معالجات الطلبات
             @app.before_request
             def before_request():
                 """تنفيذ قبل كل طلب"""
@@ -156,15 +131,31 @@ def create_app(testing=False):
                     logger.error(f"خطأ في معالجة الطلب: {str(e)}", exc_info=True)
                     return jsonify({"error": "حدث خطأ في معالجة الطلب"}), 500
 
-            # Register blueprints
-            init_mail(mail)
+            # تهيئة CORS
+            logger.info("جاري تهيئة CORS...")
+            CORS(app, 
+                supports_credentials=True,
+                resources={
+                    r"/api/*": {
+                        "origins": ["http://localhost:5000", "https://*.repl.co", "http://0.0.0.0:5000"],
+                        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+                        "allow_headers": ["Content-Type", "Authorization"],
+                        "expose_headers": ["Content-Type"],
+                        "supports_credentials": True
+                    }
+                })
+            logger.info("✓ تم تهيئة CORS بنجاح")
+
+            # تسجيل المسارات بعد تهيئة قاعدة البيانات
+            logger.info("جاري تسجيل المسارات...")
+            init_mail(components['mail'])
             app.register_blueprint(admin_bp)
             app.register_blueprint(auth_bp)
-            logger.info("تم تسجيل المسارات")
+            logger.info("✓ تم تسجيل المسارات بنجاح")
 
-            # Set application as ready
+            # تأكيد جاهزية التطبيق
             app.ready = True
-            logger.info("تم تهيئة التطبيق بنجاح وهو جاهز للعمل")
+            logger.info("✓ تم تهيئة التطبيق بنجاح وهو جاهز للعمل")
 
             return app
 
@@ -179,24 +170,19 @@ def create_app(testing=False):
 def main():
     """The main function to start the server"""
     try:
-        # Determine the port
+        # تحديد المنفذ
         port = int(os.getenv('PORT', '5000'))
         logger.info(f"بدء تهيئة الخادم على المنفذ {port}")
 
-        # Wait for port availability
-        if not wait_for_port(port):
-            logger.error(f"فشل في انتظار المنفذ {port}")
-            return None, None
-
-        logger.info(f"المنفذ {port} جاهز للاستخدام")
-
-        # Create the application
+        # إنشاء وتهيئة التطبيق
         app = create_app()
         if not app:
             logger.error("فشل في إنشاء تطبيق Flask")
             return None, None
 
-        # Signal ready for workflow
+        logger.info(f"المنفذ {port} جاهز للاستخدام")
+
+        # تأكيد جاهزية التطبيق
         print('ready')
         sys.stdout.flush()
 

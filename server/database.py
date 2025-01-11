@@ -37,6 +37,70 @@ def close_db(e=None):
             except:
                 pass
 
+def init_required_tables(conn):
+    """Initialize required tables if they don't exist"""
+    try:
+        with conn.cursor() as cur:
+            # Users table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id SERIAL PRIMARY KEY,
+                    username VARCHAR(255) UNIQUE NOT NULL,
+                    email VARCHAR(255) UNIQUE,
+                    password VARCHAR(255) NOT NULL,
+                    role VARCHAR(50) DEFAULT 'user',
+                    status VARCHAR(50) DEFAULT 'active',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Verification codes table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS verification_codes (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER REFERENCES users(id),
+                    code VARCHAR(6) NOT NULL,
+                    type VARCHAR(50) NOT NULL,
+                    expires_at TIMESTAMP NOT NULL,
+                    verified BOOLEAN DEFAULT false,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Role change history table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS role_change_history (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER REFERENCES users(id),
+                    admin_id INTEGER REFERENCES users(id),
+                    old_role VARCHAR(50) NOT NULL,
+                    new_role VARCHAR(50) NOT NULL,
+                    verification_id INTEGER REFERENCES verification_codes(id),
+                    change_reason TEXT,
+                    client_ip VARCHAR(45),
+                    user_agent TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Verification attempts table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS verification_attempts (
+                    id SERIAL PRIMARY KEY,
+                    email VARCHAR(255) NOT NULL,
+                    attempt_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            conn.commit()
+            logger.info("تم إنشاء/التحقق من وجود جميع الجداول المطلوبة")
+
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"خطأ في تهيئة الجداول: {str(e)}")
+        raise
+
 def init_db(app):
     """Initialize database connection pool with proper error handling and connection testing"""
     global pool
@@ -57,7 +121,7 @@ def init_db(app):
                     connect_timeout=10
                 )
 
-                # Test the connection
+                # Test the connection and initialize tables
                 conn = pool.getconn()
                 try:
                     with conn.cursor() as cur:
@@ -65,28 +129,12 @@ def init_db(app):
                         version = cur.fetchone()[0]
                         logger.info(f"تم الاتصال بقاعدة البيانات بنجاح: {version}")
 
-                        # التحقق من وجود الجداول المطلوبة
-                        cur.execute("""
-                            SELECT table_name 
-                            FROM information_schema.tables 
-                            WHERE table_schema = 'public'
-                        """)
-                        existing_tables = {row[0] for row in cur.fetchall()}
-                        required_tables = {
-                            'verification_codes', 
-                            'role_change_history', 
-                            'verification_attempts'
-                        }
-
-                        missing_tables = required_tables - existing_tables
-                        if missing_tables:
-                            logger.warning(f"الجداول المفقودة: {', '.join(missing_tables)}")
-                            # لا نقوم بإنشاء الجداول تلقائياً لتجنب تغيير هيكل قاعدة البيانات
-                        else:
-                            logger.info("جميع الجداول المطلوبة موجودة")
+                    # Initialize required tables
+                    init_required_tables(conn)
 
                     pool.putconn(conn)
                     break
+
                 except Exception as e:
                     if conn:
                         try:

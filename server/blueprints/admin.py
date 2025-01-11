@@ -14,9 +14,19 @@ admin_bp = Blueprint('admin', __name__)
 mail = None  # Will be initialized by the application
 
 def init_mail(mail_instance):
-    """Initialize mail instance for the blueprint"""
+    """Initialize mail instance for the blueprint with proper logging"""
     global mail
-    mail = mail_instance
+    try:
+        if not mail_instance:
+            logger.error("فشل في تهيئة خدمة البريد: لم يتم توفير نسخة البريد")
+            return False
+
+        mail = mail_instance
+        logger.info("تم تهيئة خدمة البريد بنجاح في مسارات المشرف")
+        return True
+    except Exception as e:
+        logger.error(f"خطأ في تهيئة خدمة البريد: {str(e)}")
+        return False
 
 def admin_required(f):
     """تأكد من أن المستخدم مشرف"""
@@ -58,6 +68,8 @@ def admin_required(f):
 def modify_user(user_id, action):
     """تعديل صلاحيات المستخدم مع التحقق متعدد المراحل وتسجيل التغييرات"""
     try:
+        logger.info(f"بدء عملية تعديل المستخدم: ID {user_id}, الإجراء: {action}")
+
         # Get database connection
         db = get_db()
         if not db:
@@ -110,6 +122,7 @@ def modify_user(user_id, action):
             # التحقق من المراحل لتغيير الصلاحيات
             if action in ['promote', 'demote']:
                 if not change_reason:
+                    logger.warning("محاولة تغيير صلاحيات بدون سبب")
                     return jsonify({
                         'status': 'error',
                         'message': 'يجب تحديد سبب تغيير الصلاحيات',
@@ -118,6 +131,7 @@ def modify_user(user_id, action):
 
                 # المرحلة الأولى: إرسال رمز التحقق
                 if verification_step == 'initial':
+                    logger.info(f"بدء مرحلة التحقق الأولى للمستخدم {user[1]}")
                     if not email:
                         return jsonify({
                             'status': 'error',
@@ -207,6 +221,7 @@ def modify_user(user_id, action):
 
                 # المرحلة الثانية: التحقق من الرمز
                 elif verification_step == 'verify_code':
+                    logger.info(f"بدء مرحلة التحقق الثانية للمستخدم {user[1]}")
                     if 'verification_id' not in session:
                         logger.warning('محاولة تحقق بدون جلسة صالحة')
                         return jsonify({
@@ -280,6 +295,7 @@ def modify_user(user_id, action):
                         session.modified = True
 
                         db.commit()
+                        logger.info(f'تم تحديث صلاحيات المستخدم {updated_user[0]} إلى {new_role}')
 
                         # إرسال إشعار للمستخدم
                         if updated_user[1]:  # إذا كان لديه بريد إلكتروني
@@ -373,6 +389,7 @@ def modify_user(user_id, action):
 
                     updated_user = cursor.fetchone()
                     db.commit()
+                    logger.info(f'تم تنفيذ الإجراء {action} على المستخدم {updated_user[0]}')
 
                     if updated_user and updated_user[1]:  # إرسال إشعار للمستخدم
                         try:
@@ -417,4 +434,57 @@ def modify_user(user_id, action):
             'status': 'error',
             'message': 'حدث خطأ أثناء تعديل صلاحيات المستخدم',
             'code': 'internal_error'
+        }), 500
+
+
+@admin_bp.route('/api/admin/test-mail', methods=['POST'])
+@admin_required
+def test_mail():
+    """اختبار إرسال البريد الإلكتروني للتحقق من الإعدادات"""
+    try:
+        if not mail:
+            logger.error("خدمة البريد الإلكتروني غير مهيأة")
+            return jsonify({
+                'status': 'error',
+                'message': 'خدمة البريد الإلكتروني غير مهيأة',
+                'code': 'mail_not_initialized'
+            }), 500
+
+        test_email = request.json.get('email')
+        if not test_email:
+            return jsonify({
+                'status': 'error',
+                'message': 'البريد الإلكتروني مطلوب',
+                'code': 'missing_email'
+            }), 400
+
+        # إنشاء رسالة اختبار
+        msg = Message(
+            'اختبار نظام البريد الإلكتروني - سيلفاريوم',
+            recipients=[test_email]
+        )
+        msg.html = f"""
+        <div dir="rtl" style="font-family: Arial, sans-serif;">
+            <h2>اختبار نظام البريد الإلكتروني</h2>
+            <p>مرحباً،</p>
+            <p>هذه رسالة اختبار للتأكد من عمل نظام البريد الإلكتروني بشكل صحيح.</p>
+            <br>
+            <p>مع تحيات،<br>فريق سيلفاريوم</p>
+        </div>
+        """
+
+        mail.send(msg)
+        logger.info(f'تم إرسال بريد اختبار إلى {test_email}')
+
+        return jsonify({
+            'status': 'success',
+            'message': 'تم إرسال بريد الاختبار بنجاح'
+        }), 200
+
+    except Exception as e:
+        logger.error(f'خطأ في اختبار البريد الإلكتروني: {str(e)}', exc_info=True)
+        return jsonify({
+            'status': 'error',
+            'message': 'حدث خطأ في إرسال بريد الاختبار',
+            'code': 'mail_error'
         }), 500
