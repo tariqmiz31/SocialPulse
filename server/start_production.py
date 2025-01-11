@@ -24,7 +24,7 @@ from server.blueprints.auth import auth_bp
 from server import logger, User
 
 def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
-    """Wait for port availability"""
+    """Wait for port availability with proper logging"""
     start_time = time.time()
     logger.info(f"بدء انتظار المنفذ {port}...")
 
@@ -33,20 +33,17 @@ def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                 sock.bind((host, port))
                 sock.close()
-                logger.info(f"المنفذ {port} متاح")
-                # Signal ready for workflow
-                print('ready')
-                sys.stdout.flush()
+                logger.info(f"المنفذ {port} متاح للاستخدام")
                 return True
-        except socket.error:
+        except socket.error as e:
             if time.time() - start_time >= timeout:
-                logger.error(f"المنفذ {port} غير متاح بعد {timeout} ثانية")
+                logger.error(f"المنفذ {port} غير متاح بعد {timeout} ثانية. السبب: {str(e)}")
                 return False
             time.sleep(1)
-            logger.debug(f"انتظار المنفذ {port}...")
+            logger.debug(f"جاري انتظار المنفذ {port}...")
 
 def create_app(testing=False):
-    """Create Flask application"""
+    """Create Flask application with proper initialization sequence"""
     try:
         # Load environment variables
         load_dotenv()
@@ -58,7 +55,7 @@ def create_app(testing=False):
             logger.error(f"المتغيرات البيئية التالية مفقودة: {', '.join(missing_vars)}")
             return None
 
-        # Create Flask app with static folder configuration
+        # Create Flask app
         static_folder = os.path.abspath(os.path.join(project_root, 'client', 'dist'))
         app = Flask(__name__, static_folder=static_folder, static_url_path='/')
 
@@ -80,7 +77,7 @@ def create_app(testing=False):
             MAIL_USERNAME=os.getenv('MAIL_USERNAME'),
             MAIL_PASSWORD=os.getenv('MAIL_PASSWORD'),
             MAIL_DEFAULT_SENDER=os.getenv('MAIL_USERNAME'),
-            WAIT_FOR_PORT=True,  # Enable port waiting
+            WAIT_FOR_PORT=True,
             WAIT_FOR_PORT_TIMEOUT=120
         )
 
@@ -89,7 +86,7 @@ def create_app(testing=False):
             os.makedirs(app.config['SESSION_FILE_DIR'])
             logger.info("تم إنشاء دليل الجلسات")
 
-        # Initialize extensions in correct order
+        # Initialize components in correct order
         # 1. Session
         session_interface = Session()
         session_interface.init_app(app)
@@ -109,11 +106,11 @@ def create_app(testing=False):
         logger.info("تم تهيئة نظام تسجيل الدخول")
 
         # 3. Mail
-        flask_mail = Mail()
-        flask_mail.init_app(app)
+        mail = Mail()
+        mail.init_app(app)
         logger.info("تم تهيئة خدمة البريد الإلكتروني")
 
-        # Setup CORS
+        # Setup CORS with proper configuration
         CORS(app, 
              supports_credentials=True,
              resources={
@@ -131,29 +128,18 @@ def create_app(testing=False):
         if not db:
             logger.error("فشل في تهيئة قاعدة البيانات")
             return None
-        logger.info("تم الاتصال بقاعدة البيانات")
+        logger.info("تم الاتصال بقاعدة البيانات بنجاح")
 
-        @app.before_request
-        def before_request():
-            """تنفيذ قبل كل طلب"""
-            try:
-                g.db = get_db()
-                if 'user_id' in session:
-                    session['last_activity'] = time.time()
-                    session.modified = True
-            except Exception as e:
-                logger.error(f"خطأ في معالجة الطلب: {str(e)}", exc_info=True)
-                return jsonify({"error": "حدث خطأ في معالجة الطلب"}), 500
-
+        # Add database cleanup to app context
         @app.teardown_appcontext
-        def teardown_db(exception):
-            """تنظيف موارد قاعدة البيانات"""
+        def cleanup(exc):
+            """Clean up database resources"""
             db = g.pop('db', None)
             if db is not None:
                 db.close()
 
         # Register blueprints
-        init_mail(flask_mail)
+        init_mail(mail)
         app.register_blueprint(admin_bp)
         app.register_blueprint(auth_bp)
         logger.info("تم تسجيل المسارات")
@@ -195,7 +181,7 @@ def main():
         except Exception as e:
             logger.warning(f"فشل في بدء خادم المقاييس: {str(e)}")
 
-        # Start server using waitress
+        # Start server using waitress for production
         from waitress import serve
         serve(
             app,

@@ -1,79 +1,40 @@
+"""Flask application factory"""
 import os
 import sys
 import logging
-from logging.handlers import RotatingFileHandler
-from flask import Flask, request, jsonify, session, g
+from flask import Flask, session, g, jsonify
 from flask_cors import CORS
 from flask_mail import Mail
-from flask_session import Session
 from flask_login import LoginManager
-from dotenv import load_dotenv
 from datetime import timedelta
-import time
-import socket
-
-# Add the project root to the Python path
-current_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(current_dir)
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
-
+from dotenv import load_dotenv
+from flask_session import Session
+from server.database import get_db, init_db
 from server.blueprints.admin import admin_bp, init_mail
-from server.routes import register_routes
-from server.database import init_db, get_db
+from server.blueprints.auth import auth_bp
 from server import logger, User
 
-def init_extensions(app):
-    """تهيئة امتدادات Flask بالترتيب الصحيح"""
-    try:
-        # 1. تهيئة Session أولاً
-        flask_session = Session()
-        flask_session.init_app(app)
-        logger.info("تم تهيئة إدارة الجلسات")
-
-        # 2. تهيئة نظام تسجيل الدخول
-        login_manager = LoginManager()
-        login_manager.init_app(app)
-        login_manager.login_view = 'auth.login'
-
-        @login_manager.user_loader
-        def load_user(user_id):
-            return User.get(user_id)
-
-        logger.info("تم تهيئة نظام تسجيل الدخول")
-
-        # 3. تهيئة خدمة البريد الإلكتروني
-        flask_mail = Mail()
-        flask_mail.init_app(app)
-        logger.info("تم تهيئة خدمة البريد الإلكتروني")
-
-        return flask_session, login_manager, flask_mail
-    except Exception as e:
-        logger.error(f"خطأ في تهيئة الامتدادات: {str(e)}", exc_info=True)
-        raise
-
 def create_app(testing=False):
-    """إنشاء تطبيق Flask"""
+    """Create Flask application with proper initialization sequence"""
     try:
-        # تحميل المتغيرات البيئية
+        # Load environment variables
         load_dotenv()
 
-        # التحقق من المتغيرات البيئية المطلوبة
+        # Check required environment variables
         required_vars = ['MAIL_USERNAME', 'MAIL_PASSWORD', 'DATABASE_URL']
         missing_vars = [var for var in required_vars if not os.getenv(var)]
         if missing_vars:
             logger.error(f"المتغيرات البيئية التالية مفقودة: {', '.join(missing_vars)}")
             return None
 
-        # إنشاء تطبيق Flask
-        app = Flask(__name__, static_folder='../client/dist', static_url_path='/')
+        # Create Flask app
+        static_folder = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'client', 'dist'))
+        app = Flask(__name__, static_folder=static_folder, static_url_path='/')
 
-        # الإعدادات الأساسية
-        app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', os.urandom(24).hex())
-        app.config['JSON_AS_ASCII'] = False
-
-        # إعدادات الجلسة
+        # Basic Configuration
         app.config.update(
+            SECRET_KEY=os.getenv('SECRET_KEY', os.urandom(24).hex()),
+            JSON_AS_ASCII=False,
             SESSION_TYPE='filesystem',
             SESSION_FILE_DIR='/tmp/flask_session',
             SESSION_FILE_THRESHOLD=500,
@@ -81,28 +42,45 @@ def create_app(testing=False):
             PERMANENT_SESSION_LIFETIME=timedelta(days=1),
             SESSION_COOKIE_SECURE=True,
             SESSION_COOKIE_HTTPONLY=True,
-            SESSION_COOKIE_SAMESITE='Lax'
-        )
-
-        # إعدادات البريد الإلكتروني
-        app.config.update(
+            SESSION_COOKIE_SAMESITE='Lax',
             MAIL_SERVER='smtp.gmail.com',
             MAIL_PORT=587,
             MAIL_USE_TLS=True,
             MAIL_USERNAME=os.getenv('MAIL_USERNAME'),
             MAIL_PASSWORD=os.getenv('MAIL_PASSWORD'),
-            MAIL_DEFAULT_SENDER=os.getenv('MAIL_USERNAME')
+            MAIL_DEFAULT_SENDER=os.getenv('MAIL_USERNAME'),
+            WAIT_FOR_PORT=True
         )
 
-        # التأكد من وجود مجلد الجلسات
+        # Ensure session directory exists
         if not os.path.exists(app.config['SESSION_FILE_DIR']):
             os.makedirs(app.config['SESSION_FILE_DIR'])
             logger.info("تم إنشاء دليل الجلسات")
 
-        # تهيئة الامتدادات
-        flask_session, login_manager, flask_mail = init_extensions(app)
+        # 1. Initialize Session first
+        session_interface = Session()
+        session_interface.init_app(app)
+        logger.info("تم تهيئة إدارة الجلسات")
 
-        # تكوين CORS
+        # 2. Initialize Login Manager
+        login_manager = LoginManager()
+        login_manager.init_app(app)
+        login_manager.login_view = 'auth.login'
+        login_manager.login_message = 'يجب تسجيل الدخول للوصول إلى هذه الصفحة'
+        login_manager.login_message_category = 'error'
+
+        @login_manager.user_loader
+        def load_user(user_id):
+            return User.get(user_id)
+
+        logger.info("تم تهيئة نظام تسجيل الدخول")
+
+        # 3. Initialize Mail
+        mail = Mail()
+        mail.init_app(app)
+        logger.info("تم تهيئة خدمة البريد الإلكتروني")
+
+        # Setup CORS
         CORS(app, 
              supports_credentials=True,
              resources={
@@ -115,7 +93,7 @@ def create_app(testing=False):
                  }
              })
 
-        # تهيئة قاعدة البيانات
+        # Initialize database
         db = init_db(app)
         if not db:
             logger.error("فشل في تهيئة قاعدة البيانات")
@@ -124,11 +102,9 @@ def create_app(testing=False):
 
         @app.before_request
         def before_request():
-            """تنفيذ قبل كل طلب"""
+            """Execute before each request"""
             try:
                 g.db = get_db()
-
-                # تحديث وقت النشاط في الجلسة
                 if 'user_id' in session:
                     session['last_activity'] = time.time()
                     session.modified = True
@@ -138,32 +114,20 @@ def create_app(testing=False):
 
         @app.teardown_appcontext
         def teardown_db(exception):
-            """تنظيف موارد قاعدة البيانات"""
+            """Clean up database resources"""
             db = g.pop('db', None)
             if db is not None:
                 db.close()
 
-        # تسجيل المسارات
-        init_mail(flask_mail)
+        # Register blueprints
+        init_mail(mail)
         app.register_blueprint(admin_bp)
+        app.register_blueprint(auth_bp)
         logger.info("تم تسجيل المسارات")
 
-        # تكوين التسجيل (من الكود الأصلي)
-        if not os.path.exists('logs'):
-            os.makedirs('logs')
-
-        file_handler = RotatingFileHandler(
-            'logs/silvarium.log',
-            maxBytes=10240,
-            backupCount=10
-        )
-        file_handler.setFormatter(logging.Formatter(
-            '%(asctime)s %(levelname)s: %(message)s'
-        ))
-        file_handler.setLevel(logging.INFO)
-        app.logger.addHandler(file_handler)
-        app.logger.setLevel(logging.INFO)
-
+        # Signal ready for workflow
+        print('ready')
+        sys.stdout.flush()
 
         return app
 
@@ -181,8 +145,6 @@ def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
                 sock.bind((host, port))
                 sock.close()
                 logger.info(f"المنفذ {port} متاح")
-                print('ready')  # Signal ready for workflow
-                sys.stdout.flush()
                 return True
         except socket.error:
             if time.time() - start_time >= timeout:
@@ -192,20 +154,20 @@ def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
             logger.info(f"انتظار المنفذ {port}...")
 
 def main():
-    """الدالة الرئيسية لبدء الخادم"""
+    """The main function to start the server"""
     try:
-        # تحديد المنفذ
+        # Determine the port
         port = int(os.getenv('PORT', '5000'))
         logger.info(f"بدء تهيئة الخادم على المنفذ {port}")
 
-        # انتظار توفر المنفذ
+        # Wait for port availability
         if not wait_for_port(port):
             logger.error(f"فشل في انتظار المنفذ {port}")
             return None, None
 
         logger.info(f"المنفذ {port} جاهز للاستخدام")
 
-        # إنشاء التطبيق
+        # Create the application
         app = create_app()
         if not app:
             logger.error("فشل في إنشاء تطبيق Flask")
@@ -217,6 +179,7 @@ def main():
         logger.error(f"خطأ في بدء الخادم: {str(e)}", exc_info=True)
         return None, None
 
+import socket
 if __name__ == "__main__":
     app, port = main()
     if app and port:
