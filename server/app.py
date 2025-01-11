@@ -22,7 +22,7 @@ log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
 if not os.path.exists(log_dir):
     os.makedirs(log_dir)
 
-def wait_for_port(port=5000, host='0.0.0.0', timeout=60):
+def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
     """انتظار حتى يصبح المنفذ متاحاً"""
     start_time = time.time()
     while time.time() - start_time < timeout:
@@ -73,11 +73,6 @@ def create_app(testing=False):
             MAIL_DEFAULT_SENDER=os.getenv('MAIL_USERNAME')
         )
 
-        # التأكد من وجود مجلد الجلسات
-        if not os.path.exists(app.config['SESSION_FILE_DIR']):
-            os.makedirs(app.config['SESSION_FILE_DIR'])
-            logger.info("✓ تم إنشاء مجلد الجلسات")
-
         try:
             # تهيئة المكونات الأساسية
             session_interface = Session()
@@ -107,27 +102,6 @@ def create_app(testing=False):
                 raise Exception("فشل في تهيئة قاعدة البيانات")
             logger.info("✓ تم تهيئة قاعدة البيانات")
 
-            # إضافة تنظيف موارد قاعدة البيانات
-            @app.teardown_appcontext
-            def cleanup(exc):
-                """تنظيف موارد قاعدة البيانات"""
-                db = g.pop('db', None)
-                if db is not None:
-                    db.close()
-
-            # إضافة معالجات الطلبات
-            @app.before_request
-            def before_request():
-                """تنفيذ قبل كل طلب"""
-                try:
-                    g.db = get_db()
-                    if 'user_id' in session:
-                        session['last_activity'] = time.time()
-                        session.modified = True
-                except Exception as e:
-                    logger.error(f"خطأ في معالجة الطلب: {str(e)}", exc_info=True)
-                    return jsonify({"error": "حدث خطأ في معالجة الطلب"}), 500
-
             # تهيئة CORS
             CORS(app, 
                 supports_credentials=True,
@@ -141,6 +115,19 @@ def create_app(testing=False):
                     }
                 })
             logger.info("✓ تم تهيئة CORS")
+
+            # إضافة معالجات الطلبات
+            @app.before_request
+            def before_request():
+                """تنفيذ قبل كل طلب"""
+                try:
+                    g.db = get_db()
+                    if not g.db:
+                        logger.error("فشل في الاتصال بقاعدة البيانات")
+                        return jsonify({"error": "فشل الاتصال بقاعدة البيانات"}), 500
+                except Exception as e:
+                    logger.error(f"خطأ في معالجة الطلب: {str(e)}", exc_info=True)
+                    return jsonify({"error": "حدث خطأ في معالجة الطلب"}), 500
 
             # تسجيل المسارات
             init_mail(mail)
@@ -186,5 +173,5 @@ def create_app(testing=False):
 if __name__ == "__main__":
     app = create_app()
     if app:
-        port = int(os.getenv('PORT', '5000'))
+        port = int(os.getenv('PORT', '8080'))
         app.run(host="0.0.0.0", port=port)

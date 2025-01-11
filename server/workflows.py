@@ -15,6 +15,7 @@ import signal
 from server.auth import setup_auth
 from server.routes import setup_routes
 from dotenv import load_dotenv
+from server.production_config import PRODUCTION_CONFIG
 
 # تكوين المقاييس | Configure metrics
 REQUEST_COUNT = Counter('http_requests_total', 'Total HTTP Requests')
@@ -41,7 +42,7 @@ def setup_workflow_logging():
     return logger
 
 def cleanup_port(port: int, logger):
-    """محاولة تحرير المنفذ إذا كان مشغولاً | Try to free port if busy"""
+    """محاولة تحرير المنفذ إذا كان مشغولاً"""
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -54,7 +55,7 @@ def cleanup_port(port: int, logger):
         return False
 
 def is_port_in_use(port: int, logger) -> bool:
-    """التحقق مما إذا كان المنفذ قيد الاستخدام | Check if port is in use"""
+    """التحقق مما إذا كان المنفذ قيد الاستخدام"""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         try:
             s.bind(('0.0.0.0', port))
@@ -64,38 +65,37 @@ def is_port_in_use(port: int, logger) -> bool:
             return True
 
 def wait_for_port(port: int, logger, timeout=120):
-    """انتظار حتى يصبح المنفذ متاحاً | Wait until port becomes available"""
-    logger.info(f"بدء انتظار المنفذ {port}... | Starting to wait for port {port}...")
+    """انتظار حتى يصبح المنفذ متاحاً"""
+    logger.info(f"بدء انتظار المنفذ {port}...")
     start_time = time.time()
-    host = "0.0.0.0"
 
     while time.time() - start_time < timeout:
-        try:
-            with socket.create_connection((host, port), timeout=1) as sock:
-                sock.close()
-                logger.info(f"المنفذ {port} مشغول، محاولة تحريره... | Port {port} is busy, trying to free it...")
-                return False
-        except (socket.timeout, ConnectionRefusedError):
-            logger.info(f"المنفذ {port} متاح الآن | Port {port} is now available")
+        # التحقق من استخدام المنفذ
+        if is_port_in_use(port, logger):
+            logger.info(f"المنفذ {port} مشغول، محاولة تحريره...")
+            if cleanup_port(port, logger):
+                logger.info(f"تم تحرير المنفذ {port} بنجاح")
+                break
+            logger.debug(f"المنفذ {port} مشغول، انتظار...")
+            time.sleep(2)
+        else:
+            logger.info(f"المنفذ {port} متاح للاستخدام")
             return True
-        except Exception as e:
-            logger.debug(f"خطأ أثناء فحص المنفذ {port}: {str(e)} | Error checking port {port}: {str(e)}")
-        time.sleep(1)
 
-    logger.error(f"انتهت مهلة انتظار المنفذ {port} | Port {port} wait timeout")
+    logger.error(f"انتهت مهلة انتظار المنفذ {port}")
     return False
 
 def create_app():
-    """إنشاء وإعداد تطبيق Flask | Create and setup Flask application"""
+    """إنشاء وإعداد تطبيق Flask"""
     app = Flask(__name__, static_folder='../client/dist', static_url_path='/')
     app.config['PROPAGATE_EXCEPTIONS'] = True
 
-    # تكوين CORS | Configure CORS
+    # تكوين CORS
     CORS(app, 
          supports_credentials=True, 
          resources={
              r"/api/*": {
-                 "origins": ["https://*.repl.co", "https://*.repl.dev"],
+                 "origins": ["https://*.repl.co", "https://*.repl.dev", "http://0.0.0.0:8080"],
                  "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
                  "allow_headers": ["Content-Type", "Authorization"],
                  "expose_headers": ["Content-Range", "X-Content-Range"],
@@ -103,7 +103,7 @@ def create_app():
              }
          })
 
-    # تكوين الجلسة | Configure session
+    # تكوين الجلسة
     app.config.update(
         SESSION_TYPE='filesystem',
         SESSION_COOKIE_SECURE=True,
@@ -114,7 +114,7 @@ def create_app():
     )
     Session(app)
 
-    # إضافة مقاييس Prometheus | Add Prometheus metrics
+    # إضافة مقاييس Prometheus
     @app.before_request
     def before_request():
         REQUEST_COUNT.inc()
@@ -125,78 +125,79 @@ def create_app():
         REQUEST_LATENCY.observe(time.time() - request.start_time)
         return response
 
-    # إعداد المصادقة والمسارات | Setup authentication and routes
+    # إعداد المصادقة والمسارات
     app = setup_auth(app)
     app = setup_routes(app)
 
     return app
 
 def handle_shutdown(signum, frame, logger):
-    """معالجة إشارات إيقاف التشغيل | Handle shutdown signals"""
-    logger.info("تم استلام إشارة إيقاف التشغيل، جاري إغلاق التطبيق... | Received shutdown signal, closing application...")
+    """معالجة إشارات إيقاف التشغيل"""
+    logger.info("تم استلام إشارة إيقاف التشغيل، جاري إغلاق التطبيق...")
     sys.exit(0)
 
 def start_server():
-    """بدء تشغيل الخادم مع التعامل مع الأخطاء وإدارة المنافذ | Start server with error handling and port management"""
+    """بدء تشغيل الخادم مع التعامل مع الأخطاء وإدارة المنافذ"""
     logger = setup_workflow_logging()
     try:
-        # تحميل متغيرات البيئة | Load environment variables
+        # تحميل متغيرات البيئة
         load_dotenv()
 
-        # تسجيل معالجات الإشارات | Register signal handlers
+        # تسجيل معالجات الإشارات
         signal.signal(signal.SIGTERM, lambda s, f: handle_shutdown(s, f, logger))
         signal.signal(signal.SIGINT, lambda s, f: handle_shutdown(s, f, logger))
 
-        logger.info("بدء تشغيل خادم Silvarium Social... | Starting Silvarium Social server...")
+        logger.info("بدء تشغيل خادم Silvarium Social...")
 
-        # تحديد المنفذ | Determine port
-        port = int(os.getenv("PORT", "5001"))
+        # تحديد المنفذ من الإعدادات
+        port = PRODUCTION_CONFIG.get('port', 8080)
 
-        # انتظار حتى يصبح المنفذ متاحاً | Wait until port becomes available
-        if not wait_for_port(port, logger, timeout=120):
-            logger.error(f"فشل في انتظار المنفذ {port} | Failed waiting for port {port}")
+        # انتظار حتى يصبح المنفذ متاحاً
+        if not wait_for_port(port, logger, timeout=PRODUCTION_CONFIG.get('wait_for_port_timeout', 120)):
+            logger.error(f"فشل في انتظار المنفذ {port}")
             return False
 
-        # بدء خادم المقاييس | Start metrics server
+        # بدء خادم المقاييس
         metrics_port = port + 1
         prometheus_client.start_http_server(metrics_port)
-        logger.info(f"تم بدء خادم المقاييس على المنفذ {metrics_port} | Started metrics server on port {metrics_port}")
+        logger.info(f"تم بدء خادم المقاييس على المنفذ {metrics_port}")
 
-        # إنشاء وتكوين التطبيق | Create and configure application
+        # إنشاء وتكوين التطبيق
         app = create_app()
-        logger.info("تم إنشاء التطبيق بنجاح | Application created successfully")
+        logger.info("تم إنشاء التطبيق بنجاح")
 
-        # تأكد من عمل قاعدة البيانات | Verify database connection
+        # تأكد من عمل قاعدة البيانات
         try:
             conn = psycopg2.connect(os.getenv('DATABASE_URL'))
             conn.close()
-            logger.info("تم التحقق من الاتصال بقاعدة البيانات بنجاح | Database connection verified successfully")
+            logger.info("تم التحقق من الاتصال بقاعدة البيانات بنجاح")
         except Exception as e:
-            logger.error(f"فشل الاتصال بقاعدة البيانات: {e} | Database connection failed: {e}")
+            logger.error(f"فشل الاتصال بقاعدة البيانات: {e}")
             return False
 
-        # Signal ready state
+        # Signal ready state for workflow
+        logger.info("التطبيق جاهز للتشغيل")
         print("ready")
         sys.stdout.flush()
 
-        # بدء التشغيل | Start server
-        logger.info(f"بدء تشغيل الخادم على المنفذ {port} | Starting server on port {port}")
+        # بدء التشغيل
+        logger.info(f"بدء تشغيل الخادم على المنفذ {port}")
         serve(
             app,
-            host="0.0.0.0",
+            host=PRODUCTION_CONFIG.get('host', '0.0.0.0'),
             port=port,
-            url_scheme='https',
-            threads=4,
-            connection_limit=1000,
-            channel_timeout=30,
-            cleanup_interval=30,
-            _quiet=False  # تمكين سجلات Waitress | Enable Waitress logs
+            url_scheme=PRODUCTION_CONFIG.get('url_scheme', 'https'),
+            threads=PRODUCTION_CONFIG.get('threads', 4),
+            connection_limit=PRODUCTION_CONFIG.get('connection_limit', 1000),
+            channel_timeout=PRODUCTION_CONFIG.get('channel_timeout', 30),
+            cleanup_interval=PRODUCTION_CONFIG.get('cleanup_interval', 30),
+            _quiet=False  # تمكين سجلات Waitress
         )
 
         return True
 
     except Exception as e:
-        logger.error(f"خطأ في بدء الخادم: {str(e)} | Error starting server: {str(e)}")
+        logger.error(f"خطأ في بدء الخادم: {str(e)}")
         raise
 
 if __name__ == "__main__":

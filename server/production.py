@@ -87,12 +87,12 @@ def main() -> int:
 
         logger.info("بدء تشغيل خادم سيلفاريوم الاجتماعي")
 
-        # Use configured port or default to 5000
+        # Use configured port or default to 8080
         try:
-            port = int(os.getenv('PORT', '5000'))
+            port = int(os.getenv('PORT', '8080'))
         except ValueError:
-            logger.warning("قيمة PORT غير صالحة، استخدام المنفذ الافتراضي 5000")
-            port = 5000
+            logger.warning("قيمة PORT غير صالحة، استخدام المنفذ الافتراضي 8080")
+            port = 8080
 
         host = '0.0.0.0'
         setup_signal_handlers()
@@ -117,7 +117,7 @@ def main() -> int:
             return 1
         logger.info("تم تهيئة جداول التحقق بنجاح")
 
-        # Signal ready state
+        # Signal ready state - IMPORTANT for workflow
         logger.info('الخادم جاهز للتشغيل')
         print('ready')
         sys.stdout.flush()

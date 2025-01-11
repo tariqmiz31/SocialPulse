@@ -23,7 +23,7 @@ file_handler.setFormatter(logging.Formatter(
 # تكوين خادم الإنتاج
 PRODUCTION_CONFIG = {
     'host': '0.0.0.0',
-    'port': int(os.getenv('PORT', '5000')),
+    'port': int(os.getenv('PORT', '8080')),
     'threads': 4,
     'url_scheme': 'https',
     'connection_limit': 1000,
@@ -31,7 +31,9 @@ PRODUCTION_CONFIG = {
     'channel_timeout': 60,
     'log_untrusted_proxy_headers': True,
     'trusted_proxy': '*',
-    'log_socket_errors': True
+    'log_socket_errors': True,
+    'wait_for_port': True,
+    'wait_for_port_timeout': 120,
 }
 
 # تكوين التطبيق
@@ -44,5 +46,5 @@ APP_CONFIG = {
     'JSON_AS_ASCII': False,
     'JSON_SORT_KEYS': False,
     'PROPAGATE_EXCEPTIONS': True,
-    'PRESERVE_CONTEXT_ON_EXCEPTION': True
+    'PRESERVE_CONTEXT_ON_EXCEPTION': True,
 }
