@@ -5,35 +5,37 @@ from functools import wraps
 import secrets
 import datetime
 import logging
+from flask_cors import CORS
 
 # Initialize Flask-Mail and logger
 mail = Mail()
 logger = logging.getLogger('silvarium')
 
-def login_required(f):
-    """تأكد من تسجيل دخول المستخدم"""
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if not request.user or not request.user.is_authenticated:
-            return jsonify({'message': 'يجب تسجيل الدخول'}), 401
-        return f(*args, **kwargs)
-    return decorated_function
-
-def admin_required(f):
-    """تأكد من أن المستخدم مشرف"""
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if not request.user or not request.user.is_authenticated:
-            return jsonify({'message': 'يجب تسجيل الدخول'}), 401
-        if request.user.role != 'admin':
-            return jsonify({'message': 'غير مصرح بهذا الإجراء'}), 403
-        return f(*args, **kwargs)
-    return decorated_function
-
 def register_routes(app: Flask) -> Flask:
     """تسجيل مسارات التطبيق"""
+
     # تهيئة خدمة البريد الإلكتروني
     mail.init_app(app)
+
+    # تكوين CORS للمسارات
+    CORS(app, 
+         supports_credentials=True,
+         resources={
+             r"/api/*": {
+                 "origins": ["http://localhost:5000", "https://*.repl.co", "http://0.0.0.0:5000"],
+                 "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+                 "allow_headers": ["Content-Type", "Authorization"],
+                 "expose_headers": ["Content-Type"],
+                 "supports_credentials": True
+             }
+         })
+
+    @app.before_request
+    def handle_preflight():
+        """معالجة طلبات CORS المسبقة"""
+        if request.method == "OPTIONS":
+            response = app.make_default_options_response()
+            return response
 
     # المسار الرئيسي وخدمة الملفات الثابتة
     @app.route('/', defaults={'path': ''})

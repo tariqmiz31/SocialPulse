@@ -4,7 +4,7 @@ import sys
 import logging
 import socket
 from dotenv import load_dotenv
-from flask import Flask
+from flask import Flask, session
 from flask_cors import CORS
 from flask_mail import Mail
 from logging.handlers import RotatingFileHandler
@@ -14,6 +14,7 @@ import psycopg2
 from werkzeug.security import generate_password_hash
 from flask_session import Session
 from datetime import timedelta
+from flask_login import LoginManager
 
 # Add project root to Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -23,6 +24,7 @@ if project_root not in sys.path:
 
 from server.database import init_db
 from server.blueprints.admin import admin_bp, init_mail
+from server.blueprints.auth import auth_bp
 from server import logger
 
 def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
@@ -49,7 +51,7 @@ def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
 def create_app(testing=False):
     """Create Flask application"""
     try:
-        # Load environment variables first
+        # Load environment variables
         load_dotenv()
 
         # Create Flask app
@@ -71,65 +73,47 @@ def create_app(testing=False):
             SECRET_KEY=os.getenv('SECRET_KEY', os.urandom(24).hex()),
             SESSION_FILE_DIR='/tmp/flask_session',
             SESSION_FILE_THRESHOLD=500,
-            SESSION_COOKIE_SECURE=True,
+            SESSION_COOKIE_SECURE=False,  # Set to False for development
             SESSION_COOKIE_HTTPONLY=True,
             SESSION_COOKIE_SAMESITE='Lax',
-            WAIT_FOR_PORT=True,
-            WAIT_FOR_PORT_TIMEOUT=120
+            JSON_AS_ASCII=False
         )
-
-        # Setup CORS
-        CORS(app, supports_credentials=True)
-
-        # Initialize Flask-Mail
-        mail = Mail(app)
 
         # Setup Session directory
         if not os.path.exists(app.config['SESSION_FILE_DIR']):
             os.makedirs(app.config['SESSION_FILE_DIR'])
-        Session(app)
 
-        # Setup logging
-        if not os.path.exists('logs'):
-            os.makedirs('logs')
+        # Initialize Flask extensions
+        mail = Mail(app)
+        session = Session(app)
+        login_manager = LoginManager(app)
+        login_manager.login_view = 'auth.login'
 
-        file_handler = RotatingFileHandler(
-            'logs/silvarium.log',
-            maxBytes=10240,
-            backupCount=10
-        )
-        file_handler.setFormatter(logging.Formatter(
-            '%(asctime)s %(levelname)s: %(message)s'
-        ))
-        file_handler.setLevel(logging.INFO)
-        app.logger.addHandler(file_handler)
-        app.logger.setLevel(logging.INFO)
+        # Setup CORS with proper configuration
+        CORS(app, 
+             supports_credentials=True,
+             resources={
+                 r"/api/*": {
+                     "origins": ["http://localhost:5000", "https://*.repl.co", "http://0.0.0.0:5000"],
+                     "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+                     "allow_headers": ["Content-Type", "Authorization"],
+                     "expose_headers": ["Content-Type"],
+                     "supports_credentials": True
+                 }
+             })
 
         # Initialize database
         db = init_db(app)
         if not db:
             logger.error("فشل في تهيئة قاعدة البيانات")
             return None
+        logger.info("تم الاتصال بقاعدة البيانات بنجاح")
 
-        # Initialize admin blueprint with mail
+        # Register blueprints
         init_mail(mail)
         app.register_blueprint(admin_bp)
-
-        # Initialize routes
-        from server.routes import register_routes
-        register_routes(app)
-
-        # Start metrics server
-        metrics_port = app.config['PORT'] + 1
-        try:
-            prometheus_client.start_http_server(metrics_port)
-            logger.info(f"تم بدء خادم المقاييس على المنفذ {metrics_port}")
-        except Exception as e:
-            logger.warning(f"فشل في بدء خادم المقاييس: {str(e)}")
-
-        logger.info('الخادم جاهز | Server is ready')
-        print('ready')
-        sys.stdout.flush()
+        app.register_blueprint(auth_bp)
+        logger.info("تم تسجيل المسارات بنجاح")
 
         return app
 
@@ -158,11 +142,13 @@ def create_admin_user():
         user_id = cur.fetchone()[0]
         conn.commit()
 
-        logger.info(f"تم إنشاء حساب المشرف Tariq بنجاح (ID: {user_id})")
+        logger.info(f"تم إنشاء/تحديث حساب المشرف Tariq بنجاح (ID: {user_id})")
         return user_id
 
     except Exception as e:
         logger.error(f"خطأ في إنشاء حساب المشرف: {str(e)}")
+        if 'conn' in locals():
+            conn.rollback()
         raise
     finally:
         if 'cur' in locals():
@@ -187,7 +173,6 @@ def main():
 
         # إنشاء/تحديث مستخدم مشرف
         create_admin_user()
-
 
         # Start server
         app.run(host='0.0.0.0', port=port, debug=True)
