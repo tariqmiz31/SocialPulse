@@ -4,6 +4,7 @@ import sys
 import logging
 import socket
 import time
+from logging.handlers import RotatingFileHandler
 from flask import Flask, session, g, jsonify
 from flask_cors import CORS
 from flask_mail import Mail
@@ -15,6 +16,24 @@ from server.database import get_db, init_db
 from server.blueprints.admin import admin_bp, init_mail
 from server.blueprints.auth import auth_bp
 from server import logger, User
+
+# إعداد مجلد السجلات
+log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
+if not os.path.exists(log_dir):
+    os.makedirs(log_dir)
+
+# إعداد ملف السجلات الدوار
+file_handler = RotatingFileHandler(
+    os.path.join(log_dir, 'app.log'),
+    maxBytes=1024 * 1024,  # 1MB
+    backupCount=10,
+    encoding='utf-8'
+)
+file_handler.setFormatter(logging.Formatter(
+    '%(asctime)s [%(levelname)s] %(message)s',
+    '%Y-%m-%d %H:%M:%S'
+))
+logger.addHandler(file_handler)
 
 def init_app_components(app: Flask):
     """تهيئة مكونات التطبيق بالترتيب الصحيح مع التحقق من كل خطوة"""
@@ -153,6 +172,21 @@ def create_app(testing=False):
             app.register_blueprint(auth_bp)
             logger.info("✓ تم تسجيل المسارات بنجاح")
 
+            # إضافة نقطة نهاية للتحقق من حالة الخادم
+            @app.route('/api/server/status')
+            def server_status():
+                """التحقق من حالة الخادم"""
+                return jsonify({
+                    'status': 'running',
+                    'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
+                    'ready': getattr(app, 'ready', False),
+                    'components_status': {
+                        'database': bool(g.get('db')),
+                        'mail': bool(components.get('mail')),
+                        'session': bool(components.get('session'))
+                    }
+                })
+
             # تأكيد جاهزية التطبيق
             app.ready = True
             logger.info("✓ تم تهيئة التطبيق بنجاح وهو جاهز للعمل")
@@ -167,8 +201,22 @@ def create_app(testing=False):
         logger.error(f"خطأ في تهيئة التطبيق: {str(e)}", exc_info=True)
         return None
 
+def wait_for_port(host='0.0.0.0', port=5000, timeout=60):
+    """انتظار حتى يصبح المنفذ متاحاً"""
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        try:
+            with socket.create_connection((host, port), timeout=1):
+                logger.info(f"المنفذ {port} متاح للاستخدام")
+                return True
+        except (socket.timeout, ConnectionRefusedError, OSError) as e:
+            logger.debug(f"انتظار المنفذ {port}: {str(e)}")
+            time.sleep(1)
+    logger.error(f"المنفذ {port} غير متاح بعد {timeout} ثانية")
+    return False
+
 def main():
-    """The main function to start the server"""
+    """النقطة الرئيسية لبدء الخادم"""
     try:
         # تحديد المنفذ
         port = int(os.getenv('PORT', '5000'))
@@ -180,9 +228,13 @@ def main():
             logger.error("فشل في إنشاء تطبيق Flask")
             return None, None
 
-        logger.info(f"المنفذ {port} جاهز للاستخدام")
+        # انتظار حتى يصبح المنفذ متاحاً
+        if not wait_for_port(port=port):
+            logger.error(f"المنفذ {port} غير متاح بعد انتهاء المهلة")
+            return None, None
 
         # تأكيد جاهزية التطبيق
+        logger.info("التطبيق جاهز للتشغيل")
         print('ready')
         sys.stdout.flush()
 

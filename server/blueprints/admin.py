@@ -9,21 +9,37 @@ from server.database import get_db
 
 # Setup logging
 logger = logging.getLogger('silvarium')
+logger.setLevel(logging.INFO)
 
 admin_bp = Blueprint('admin', __name__)
 mail = None  # Will be initialized by the application
 
 def init_mail(mail_instance):
-    """Initialize mail instance for the blueprint with proper logging"""
+    """تهيئة خدمة البريد مع التحقق الشامل والتسجيل"""
     global mail
     try:
         if not mail_instance:
             logger.error("فشل في تهيئة خدمة البريد: لم يتم توفير نسخة البريد")
             return False
 
+        # التحقق من إعدادات البريد
+        if not current_app.config.get('MAIL_USERNAME') or not current_app.config.get('MAIL_PASSWORD'):
+            logger.error("فشل في تهيئة خدمة البريد: بيانات اعتماد البريد غير متوفرة")
+            return False
+
         mail = mail_instance
+
+        # اختبار اتصال خدمة البريد
+        try:
+            with mail.connect() as conn:
+                logger.info("تم الاتصال بخادم البريد بنجاح")
+        except Exception as e:
+            logger.error(f"فشل في الاتصال بخادم البريد: {str(e)}")
+            return False
+
         logger.info("تم تهيئة خدمة البريد بنجاح في مسارات المشرف")
         return True
+
     except Exception as e:
         logger.error(f"خطأ في تهيئة خدمة البريد: {str(e)}")
         return False
@@ -143,7 +159,7 @@ def modify_user(user_id, action):
                     cursor.execute("""
                         SELECT COUNT(*) 
                         FROM verification_attempts 
-                        WHERE email = %s 
+                        WHERE email = %s AND success = false
                         AND attempt_time > NOW() - INTERVAL '1 hour'
                     """, (email,))
                     attempt_count = cursor.fetchone()[0]
@@ -178,9 +194,14 @@ def modify_user(user_id, action):
 
                     # تسجيل محاولة التحقق
                     cursor.execute("""
-                        INSERT INTO verification_attempts (email, attempt_time)
-                        VALUES (%s, NOW())
-                    """, (email,))
+                        INSERT INTO verification_attempts 
+                        (email, attempt_time, ip_address, user_agent, verification_type)
+                        VALUES (%s, NOW(), %s, %s, 'role_change')
+                    """, (
+                        email,
+                        request.remote_addr,
+                        request.user_agent.string
+                    ))
 
                     # إرسال رمز التحقق بالبريد
                     try:
@@ -251,6 +272,17 @@ def modify_user(user_id, action):
 
                     verification = cursor.fetchone()
                     if not verification:
+                        # تسجيل محاولة فاشلة
+                        cursor.execute("""
+                            UPDATE verification_attempts 
+                            SET success = false
+                            WHERE email = %s 
+                            AND verification_type = 'role_change'
+                            AND attempt_time > NOW() - INTERVAL '1 hour'
+                            ORDER BY attempt_time DESC
+                            LIMIT 1
+                        """, (email,))
+
                         logger.warning(f'محاولة تحقق فاشلة: رمز غير صالح أو منتهي الصلاحية')
                         return jsonify({
                             'status': 'error',
@@ -287,6 +319,25 @@ def modify_user(user_id, action):
                             request.remote_addr,
                             request.user_agent.string
                         ))
+
+                        # تحديث حالة رمز التحقق
+                        cursor.execute("""
+                            UPDATE verification_codes
+                            SET verified = true,
+                                verified_at = NOW()
+                            WHERE id = %s
+                        """, (session['verification_id'],))
+
+                        # تسجيل محاولة ناجحة
+                        cursor.execute("""
+                            UPDATE verification_attempts 
+                            SET success = true
+                            WHERE email = %s 
+                            AND verification_type = 'role_change'
+                            AND attempt_time > NOW() - INTERVAL '1 hour'
+                            ORDER BY attempt_time DESC
+                            LIMIT 1
+                        """, (email,))
 
                         # مسح معلومات التحقق من الجلسة
                         session.pop('verification_id', None)
@@ -369,8 +420,7 @@ def modify_user(user_id, action):
                     elif action == 'approve':
                         cursor.execute("""
                             UPDATE users 
-                            SET is_approved = true,
-                                status = 'active',
+                            SET status = 'active',
                                 updated_at = NOW()
                             WHERE id = %s
                             RETURNING username, email
@@ -436,17 +486,34 @@ def modify_user(user_id, action):
             'code': 'internal_error'
         }), 500
 
+def verify_mail_config():
+    """التحقق من صحة إعدادات البريد الإلكتروني"""
+    if not mail:
+        logger.error("خدمة البريد الإلكتروني غير مهيأة")
+        return False, "خدمة البريد الإلكتروني غير مهيأة"
+
+    if not current_app.config.get('MAIL_USERNAME'):
+        logger.error("اسم مستخدم البريد الإلكتروني غير معرف")
+        return False, "إعدادات البريد الإلكتروني غير مكتملة"
+
+    if not current_app.config.get('MAIL_PASSWORD'):
+        logger.error("كلمة مرور البريد الإلكتروني غير معرفة")
+        return False, "إعدادات البريد الإلكتروني غير مكتملة"
+
+    return True, "إعدادات البريد الإلكتروني صحيحة"
 
 @admin_bp.route('/api/admin/test-mail', methods=['POST'])
 @admin_required
 def test_mail():
     """اختبار إرسال البريد الإلكتروني للتحقق من الإعدادات"""
     try:
-        if not mail:
-            logger.error("خدمة البريد الإلكتروني غير مهيأة")
+        # التحقق من إعدادات البريد
+        is_valid, message = verify_mail_config()
+        if not is_valid:
             return jsonify({
                 'status': 'error',
-                'message': 'خدمة البريد الإلكتروني غير مهيأة',
+                'message': message,
+                'email_configured': False,
                 'code': 'mail_not_initialized'
             }), 500
 
@@ -473,18 +540,99 @@ def test_mail():
         </div>
         """
 
-        mail.send(msg)
-        logger.info(f'تم إرسال بريد اختبار إلى {test_email}')
+        try:
+            mail.send(msg)
+            logger.info(f'تم إرسال بريد اختبار إلى {test_email}')
 
-        return jsonify({
-            'status': 'success',
-            'message': 'تم إرسال بريد الاختبار بنجاح'
-        }), 200
+            return jsonify({
+                'status': 'success',
+                'message': 'تم إرسال بريد الاختبار بنجاح',
+                'email_configured': True
+            }), 200
+
+        except Exception as mail_error:
+            logger.error(f'خطأ في إرسال البريد: {str(mail_error)}')
+            return jsonify({
+                'status': 'error',
+                'message': f'فشل في إرسال البريد: {str(mail_error)}',
+                'email_configured': False,
+                'code': 'mail_send_error'
+            }), 500
 
     except Exception as e:
-        logger.error(f'خطأ في اختبار البريد الإلكتروني: {str(e)}', exc_info=True)
+        logger.error(f'خطأ في اختبار نظام التحقق: {str(e)}', exc_info=True)
         return jsonify({
             'status': 'error',
-            'message': 'حدث خطأ في إرسال بريد الاختبار',
-            'code': 'mail_error'
+            'message': str(e),
+            'email_configured': False,
+            'code': 'verification_error'
+        }), 500
+
+@admin_bp.route('/api/admin/verify-email-setup', methods=['POST'])
+@admin_required
+def verify_email_setup():
+    """التحقق من إعدادات البريد الإلكتروني"""
+    try:
+        # التحقق من إعدادات البريد
+        is_valid, message = verify_mail_config()
+        if not is_valid:
+            return jsonify({
+                'status': 'error',
+                'message': message,
+                'email_configured': False,
+                'code': 'mail_not_initialized'
+            }), 500
+
+        test_email = request.json.get('email')
+        if not test_email:
+            return jsonify({
+                'status': 'error',
+                'message': 'البريد الإلكتروني مطلوب',
+                'code': 'missing_email'
+            }), 400
+
+        # إنشاء رمز تحقق تجريبي
+        verification_code = ''.join(secrets.choice('0123456789') for _ in range(6))
+
+        msg = Message(
+            'اختبار نظام التحقق - سيلفاريوم',
+            recipients=[test_email]
+        )
+        msg.html = f"""
+        <div dir="rtl" style="font-family: Arial, sans-serif;">
+            <h2>اختبار نظام التحقق</h2>
+            <p>مرحباً،</p>
+            <p>هذا اختبار لنظام التحقق في سيلفاريوم.</p>
+            <p>رمز التحقق التجريبي هو: <strong>{verification_code}</strong></p>
+            <br>
+            <p>مع تحيات،<br>فريق سيلفاريوم</p>
+        </div>
+        """
+
+        try:
+            mail.send(msg)
+            logger.info(f'تم إرسال رمز التحقق التجريبي إلى {test_email}')
+
+            return jsonify({
+                'status': 'success',
+                'message': 'تم إرسال رمز التحقق التجريبي بنجاح',
+                'email_configured': True
+            }), 200
+
+        except Exception as mail_error:
+            logger.error(f'خطأ في إرسال البريد: {str(mail_error)}')
+            return jsonify({
+                'status': 'error',
+                'message': f'فشل في إرسال البريد: {str(mail_error)}',
+                'email_configured': False,
+                'code': 'mail_send_error'
+            }), 500
+
+    except Exception as e:
+        logger.error(f'خطأ في اختبار نظام التحقق: {str(e)}', exc_info=True)
+        return jsonify({
+            'status': 'error',
+            'message': str(e),
+            'email_configured': False,
+            'code': 'verification_error'
         }), 500
