@@ -4,6 +4,7 @@ import sys
 from flask import Flask
 from flask_cors import CORS
 from flask_mail import Mail
+from flask_login import LoginManager, UserMixin
 from datetime import timedelta
 import logging
 import socket
@@ -13,10 +14,45 @@ from server.routes import register_routes
 from server.blueprints.admin import admin_bp, init_mail
 from dotenv import load_dotenv
 from flask_session import Session
+from server.database import get_db
+from server.blueprints.auth import auth_bp
 
 # Setup logging
 logger = logging.getLogger('silvarium')
 logger.setLevel(logging.INFO)
+
+# Initialize Flask extensions
+mail = Mail()
+sess = Session()
+login_manager = LoginManager()
+
+class User(UserMixin):
+    def __init__(self, user_data):
+        self.id = user_data[0]
+        self.username = user_data[1]
+        self.email = user_data[2]
+        self.role = user_data[3]
+        self.status = user_data[4]
+
+@login_manager.user_loader
+def load_user(user_id):
+    db = get_db()
+    if db:
+        cur = db.cursor()
+        try:
+            cur.execute("""
+                SELECT id, username, email, role, status
+                FROM users
+                WHERE id = %s AND status = 'active'
+            """, (user_id,))
+            user_data = cur.fetchone()
+            if user_data:
+                return User(user_data)
+        except Exception as e:
+            logger.error(f"Error loading user: {str(e)}")
+        finally:
+            cur.close()
+    return None
 
 def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
     """Wait for port availability | انتظار جاهزية المنفذ"""
@@ -36,10 +72,6 @@ def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
 
     logger.error(f"المنفذ {port} غير متاح بعد {timeout} ثانية")
     return False
-
-# Initialize Flask-Mail
-mail = Mail()
-sess = Session()
 
 def create_app(testing=False):
     """Create and configure Flask application"""
@@ -112,13 +144,16 @@ def create_app(testing=False):
         # Setup CORS
         CORS(app, supports_credentials=True)
 
-        # Initialize Flask-Mail
+        # Initialize Flask extensions
         mail.init_app(app)
         logger.info("تم تهيئة خدمة البريد الإلكتروني بنجاح")
 
-        # Initialize Flask-Session
         sess.init_app(app)
         logger.info("تم تهيئة إدارة الجلسات بنجاح")
+
+        login_manager.init_app(app)
+        login_manager.login_view = 'auth.login'
+        logger.info("تم تهيئة نظام تسجيل الدخول بنجاح")
 
         # Initialize database connection
         from server.database import init_db
@@ -131,7 +166,8 @@ def create_app(testing=False):
         # Register blueprints after initializing mail
         init_mail(mail)  # Pass mail instance to admin blueprint
         app.register_blueprint(admin_bp)
-        logger.info("تم تسجيل المسارات الإدارية بنجاح")
+        app.register_blueprint(auth_bp)
+        logger.info("تم تسجيل المسارات الإدارية ومسارات التحقق بنجاح")
 
         # Initialize routes
         app = register_routes(app)

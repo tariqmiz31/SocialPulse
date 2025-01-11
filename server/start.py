@@ -121,8 +121,11 @@ def create_app(testing=False):
 
         # Start metrics server
         metrics_port = app.config['PORT'] + 1
-        prometheus_client.start_http_server(metrics_port)
-        logger.info(f"تم بدء خادم المقاييس على المنفذ {metrics_port}")
+        try:
+            prometheus_client.start_http_server(metrics_port)
+            logger.info(f"تم بدء خادم المقاييس على المنفذ {metrics_port}")
+        except Exception as e:
+            logger.warning(f"فشل في بدء خادم المقاييس: {str(e)}")
 
         logger.info('الخادم جاهز | Server is ready')
         print('ready')

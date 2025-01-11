@@ -1,5 +1,6 @@
 from flask import Blueprint, jsonify, request, session
 from flask_mail import Message
+from flask_login import login_required, current_user
 from functools import wraps
 import secrets
 import datetime
@@ -20,10 +21,11 @@ def init_mail(mail_instance):
 def admin_required(f):
     """تأكد من أن المستخدم مشرف"""
     @wraps(f)
+    @login_required
     def decorated_function(*args, **kwargs):
-        if not request.user or not request.user.is_authenticated:
+        if not current_user.is_authenticated:
             return jsonify({'message': 'يجب تسجيل الدخول'}), 401
-        if request.user.role != 'admin':
+        if current_user.role != 'admin':
             return jsonify({'message': 'غير مصرح بهذا الإجراء'}), 403
         return f(*args, **kwargs)
     return decorated_function
@@ -37,35 +39,50 @@ def modify_user(user_id, action):
         cursor = db.cursor()
 
         # التحقق من وجود المستخدم
-        cursor.execute(
-            """
+        cursor.execute("""
             SELECT id, username, email, role, status 
             FROM users 
             WHERE id = %s
-            """,
-            (user_id,)
-        )
+        """, (user_id,))
         user = cursor.fetchone()
 
         if not user:
             return jsonify({'message': 'المستخدم غير موجود'}), 404
 
-        if action not in ['promote', 'demote', 'block', 'unblock', 'approve']:
+        if action not in ['promote', 'demote', 'block', 'unblock', 'approve', 'delete']:
             return jsonify({'message': 'إجراء غير صالح'}), 400
 
-        if user[1] == 'Tariq':
+        if user[1] == 'Tariq':  # التحقق من اسم المستخدم
             return jsonify({'message': 'لا يمكن تعديل صلاحيات المستخدم الرئيسي'}), 403
 
         verification_step = request.json.get('verificationStep', 'initial')
         email = request.json.get('email')
 
-        # التحقق من المراحل
+        # التحقق من المراحل لتغيير الصلاحيات
         if action in ['promote', 'demote']:
             if verification_step == 'initial':
                 logger.info(f"بدء عملية تغيير صلاحيات المستخدم {user[1]}")
 
                 if not email:
-                    return jsonify({'message': 'البريد الإلكتروني مطلوب'}), 400
+                    return jsonify({'message': 'البريد الإلكتروني مطلوب للتحقق'}), 400
+
+                # التحقق من عدد محاولات التحقق
+                cursor.execute("""
+                    SELECT COUNT(*) 
+                    FROM verification_attempts 
+                    WHERE email = %s 
+                    AND attempt_time > NOW() - INTERVAL '1 hour'
+                """, (email,))
+                attempt_count = cursor.fetchone()[0]
+
+                if attempt_count >= 5:
+                    return jsonify({'message': 'تم تجاوز الحد الأقصى لمحاولات التحقق. الرجاء المحاولة لاحقاً'}), 429
+
+                # تسجيل محاولة التحقق
+                cursor.execute("""
+                    INSERT INTO verification_attempts (email, attempt_time)
+                    VALUES (%s, NOW())
+                """, (email,))
 
                 # إنشاء رمز تحقق
                 verification_code = ''.join(secrets.choice('0123456789') for _ in range(6))
@@ -78,7 +95,7 @@ def modify_user(user_id, action):
                         (user_id, code, type, expires_at, created_at) 
                         VALUES (%s, %s, 'role_change', %s, NOW())
                         RETURNING id
-                    """, (request.user.id, verification_code, expires_at))
+                    """, (current_user.id, verification_code, expires_at))
 
                     verification_id = cursor.fetchone()[0]
                     db.commit()
@@ -94,7 +111,7 @@ def modify_user(user_id, action):
                         return jsonify({'message': 'خطأ في إعداد البريد الإلكتروني'}), 500
 
                     msg = Message(
-                        'تأكيد تغيير الصلاحيات - سيلفاريوم',
+                        'رمز التحقق لتغيير الصلاحيات - سيلفاريوم',
                         recipients=[email]
                     )
                     msg.html = f"""
@@ -104,7 +121,7 @@ def modify_user(user_id, action):
                         <p>لقد تلقينا طلباً لتغيير صلاحيات مستخدم في نظام سيلفاريوم.</p>
                         <p>رمز التحقق الخاص بك هو: <strong>{verification_code}</strong></p>
                         <p>هذا الرمز صالح لمدة 10 دقائق فقط.</p>
-                        <p>إذا لم تقم بطلب هذا التغيير، يرجى تجاهل هذا البريد الإلكتروني.</p>
+                        <p>إذا لم تقم بطلب هذا التغيير، يرجى تجاهل هذا البريد الإلكتروني وإبلاغ المسؤول.</p>
                         <br>
                         <p>مع تحيات،<br>فريق سيلفاريوم</p>
                     </div>
@@ -113,7 +130,8 @@ def modify_user(user_id, action):
                     logger.info(f'تم إرسال رمز التحقق إلى {email}')
 
                     return jsonify({
-                        'message': 'تم إرسال رمز التحقق إلى بريدك الإلكتروني'
+                        'message': 'تم إرسال رمز التحقق إلى بريدك الإلكتروني',
+                        'expiry': expires_at.isoformat()
                     }), 200
 
                 except Exception as e:
@@ -123,29 +141,29 @@ def modify_user(user_id, action):
                         'message': 'حدث خطأ في إرسال رمز التحقق'
                     }), 500
 
-            elif verification_step == 'email_verified':
-                # التحقق من وجود معلومات التحقق في الجلسة
-                if not all(key in session for key in ['verification_id', 'role_change_action', 'target_user_id']):
+            elif verification_step == 'verify_code':
+                # التحقق من وجود معرف الرمز في الجلسة
+                if 'verification_id' not in session:
                     return jsonify({'message': 'جلسة التحقق غير صالحة'}), 400
 
-                if session['target_user_id'] != user_id:
-                    return jsonify({'message': 'خطأ في معلومات المستخدم'}), 400
-
-                verification_id = session['verification_id']
+                verification_code = request.json.get('code')
+                if not verification_code:
+                    return jsonify({'message': 'رمز التحقق مطلوب'}), 400
 
                 # التحقق من صحة الرمز
                 cursor.execute("""
                     SELECT id 
                     FROM verification_codes 
                     WHERE id = %s 
+                    AND code = %s 
                     AND expires_at > NOW() 
                     AND verified = false
                     AND type = 'role_change'
-                """, (verification_id,))
+                """, (session['verification_id'], verification_code))
 
                 verification = cursor.fetchone()
                 if not verification:
-                    return jsonify({'message': 'رمز التحقق غير صالح أو منتهي الصلاحية'}), 400
+                    return jsonify({'message': 'رمز التحقق غير صحيح أو منتهي الصلاحية'}), 400
 
                 try:
                     # تحديث حالة الرمز
@@ -172,7 +190,7 @@ def modify_user(user_id, action):
                         INSERT INTO role_change_history 
                         (user_id, admin_id, old_role, new_role, verification_id, created_at)
                         VALUES (%s, %s, %s, %s, %s, NOW())
-                    """, (user_id, request.user.id, user[3], new_role, verification[0]))
+                    """, (user_id, current_user.id, user[3], new_role, verification[0]))
 
                     # مسح معلومات التحقق من الجلسة
                     session.pop('verification_id', None)
@@ -215,7 +233,7 @@ def modify_user(user_id, action):
                 return jsonify({'message': 'خطوة تحقق غير صالحة'}), 400
 
         else:
-            # باقي الإجراءات (block, unblock, approve)
+            # باقي الإجراءات (block, unblock, approve, delete)
             try:
                 if action == 'block':
                     cursor.execute("""
@@ -247,6 +265,16 @@ def modify_user(user_id, action):
                         RETURNING username, email
                     """, (user_id,))
                     message = 'تمت الموافقة على المستخدم بنجاح'
+
+                elif action == 'delete':
+                    cursor.execute("""
+                        UPDATE users 
+                        SET status = 'deleted',
+                            updated_at = NOW()
+                        WHERE id = %s
+                        RETURNING username, email
+                    """, (user_id,))
+                    message = 'تم حذف المستخدم بنجاح'
 
                 updated_user = cursor.fetchone()
                 db.commit()

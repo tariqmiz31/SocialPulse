@@ -12,6 +12,7 @@ from flask_mail import Mail
 from flask_session import Session
 from dotenv import load_dotenv
 from datetime import timedelta
+import psycopg2
 
 # Add project root to Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -33,7 +34,7 @@ def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                 sock.bind((host, port))
-                sock.close()  # Make sure to close the socket after checking
+                sock.close()
                 logger.info(f"المنفذ {port} متاح")
                 print('ready')  # Signal ready for workflow
                 sys.stdout.flush()
@@ -45,6 +46,34 @@ def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
             time.sleep(1)
             logger.info(f"انتظار المنفذ {port}...")
 
+def setup_database():
+    """Set up database tables if they don't exist"""
+    try:
+        conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+        cur = conn.cursor()
+
+        # Create verification_attempts table if it doesn't exist
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS verification_attempts (
+                id SERIAL PRIMARY KEY,
+                email TEXT NOT NULL,
+                attempt_time TIMESTAMP DEFAULT NOW()
+            );
+        """)
+
+        conn.commit()
+        logger.info("تم التحقق من وجود جداول قاعدة البيانات")
+        return True
+
+    except Exception as e:
+        logger.error(f"خطأ في إعداد قاعدة البيانات: {str(e)}")
+        return False
+    finally:
+        if 'cur' in locals():
+            cur.close()
+        if 'conn' in locals():
+            conn.close()
+
 def create_app(testing=False):
     """Create Flask application"""
     try:
@@ -52,10 +81,14 @@ def create_app(testing=False):
         load_dotenv()
 
         # Check required environment variables
-        required_vars = ['MAIL_USERNAME', 'MAIL_PASSWORD']
+        required_vars = ['MAIL_USERNAME', 'MAIL_PASSWORD', 'DATABASE_URL']
         missing_vars = [var for var in required_vars if not os.getenv(var)]
         if missing_vars:
             logger.error(f"المتغيرات البيئية التالية مفقودة: {', '.join(missing_vars)}")
+            return None
+
+        # Setup database tables
+        if not setup_database():
             return None
 
         # Create Flask app
@@ -64,6 +97,8 @@ def create_app(testing=False):
 
         # Configure app
         app.config.update(
+            WAIT_FOR_PORT=True,
+            WAIT_FOR_PORT_TIMEOUT=120,
             DEBUG=False,
             TESTING=testing,
             MAIL_SERVER='smtp.gmail.com',
@@ -113,8 +148,8 @@ def main():
         # Set production mode
         os.environ['FLASK_ENV'] = 'production'
 
-        # Use fixed port for production
-        port = 5000
+        # Use port from environment
+        port = int(os.getenv('PORT', '5000'))
 
         # Wait for port availability
         if not wait_for_port(port):
@@ -130,8 +165,11 @@ def main():
 
         # Start metrics server on a different port
         metrics_port = port + 1
-        start_http_server(metrics_port)
-        logger.info(f"تم بدء خادم المقاييس على المنفذ {metrics_port}")
+        try:
+            start_http_server(metrics_port)
+            logger.info(f"تم بدء خادم المقاييس على المنفذ {metrics_port}")
+        except Exception as e:
+            logger.warning(f"فشل في بدء خادم المقاييس: {str(e)}")
 
         # Start production server with waitress
         logger.info(f"بدء تشغيل الخادم على المنفذ {port}")

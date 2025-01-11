@@ -25,7 +25,6 @@ const waitForPort = (port: number, host: string = '0.0.0.0', timeout: number = 6
         logger.info(`Port ${port} is available | المنفذ ${port} متاح`);
         // After port is available, signal ready
         console.log('ready');
-        process.stdout.flush();
         resolve(true);
       });
 
@@ -56,7 +55,7 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      connectSrc: ["'self'", process.env.NODE_ENV === 'development' ? "*" : undefined].filter(Boolean),
+      connectSrc: ["'self'", process.env.NODE_ENV === 'development' ? "*" : undefined].filter(Boolean) as string[],
       scriptSrc: ["'self'", "'unsafe-inline'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
       imgSrc: ["'self'", "data:", "blob:"],
@@ -71,13 +70,13 @@ app.use(helmet({
 app.use(compression());
 
 // Configure CORS
-const allowedOrigins = process.env.NODE_ENV === 'production' 
-  ? [process.env.APP_URL].filter(Boolean) as string[]
-  : ['http://localhost:5000', 'http://0.0.0.0:5000'];
-
 app.use(cors({
-  origin: allowedOrigins,
-  credentials: true
+  origin: process.env.NODE_ENV === 'production' 
+    ? [process.env.APP_URL].filter(Boolean) as string[]
+    : ['http://localhost:5000', 'http://0.0.0.0:5000'],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
 // Add performance monitoring
@@ -142,9 +141,7 @@ app.get("/api/monitoring/status", async (_req, res) => {
       });
     });
 
-    // importantly only setup vite in development and after
-    // setting up all the other routes so the catch-all route
-    // doesn't interfere with the other routes
+    // Setup vite in development
     if (process.env.NODE_ENV !== 'production') {
       await setupVite(app, server);
     } else {
@@ -162,6 +159,8 @@ app.get("/api/monitoring/status", async (_req, res) => {
     server.listen(PORT, "0.0.0.0", () => {
       logger.info(`Server running on port ${PORT} in ${process.env.NODE_ENV || 'development'} mode | الخادم يعمل على المنفذ ${PORT}`);
       logger.info(`Database connected successfully | تم الاتصال بقاعدة البيانات بنجاح`);
+      // Signal ready to workflow
+      console.log('ready');
     });
 
     // Handle cleanup on shutdown
