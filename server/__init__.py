@@ -51,15 +51,12 @@ class User(UserMixin):
 def init_extensions(app):
     """تهيئة امتدادات Flask بالترتيب الصحيح"""
     try:
-        extensions = {}
-
-        # 1. تهيئة Session أولاً
+        # تهيئة Session أولاً
         session_interface = Session()
         session_interface.init_app(app)
-        extensions['session'] = session_interface
         logger.info("تم تهيئة إدارة الجلسات")
 
-        # 2. تهيئة نظام تسجيل الدخول
+        # تهيئة نظام تسجيل الدخول
         login_manager = LoginManager()
         login_manager.init_app(app)
         login_manager.login_view = 'auth.login'
@@ -70,23 +67,20 @@ def init_extensions(app):
         def load_user(user_id):
             return User.get(user_id)
 
-        extensions['login_manager'] = login_manager
         logger.info("تم تهيئة نظام تسجيل الدخول")
 
-        # 3. تهيئة خدمة البريد الإلكتروني
+        # تهيئة خدمة البريد الإلكتروني
         mail = Mail()
         mail.init_app(app)
-        extensions['mail'] = mail
         logger.info("تم تهيئة خدمة البريد الإلكتروني")
 
-        # 4. تهيئة قاعدة البيانات
+        # تهيئة قاعدة البيانات
         db = init_db(app)
         if not db:
             raise Exception("فشل في تهيئة قاعدة البيانات")
-        extensions['db'] = db
         logger.info("تم تهيئة قاعدة البيانات")
 
-        return extensions
+        return mail
     except Exception as e:
         logger.error(f"خطأ في تهيئة الامتدادات: {str(e)}", exc_info=True)
         raise
@@ -97,16 +91,8 @@ def create_app(testing=False):
         # Load environment variables
         load_dotenv()
 
-        # Check required environment variables
-        required_vars = ['MAIL_USERNAME', 'MAIL_PASSWORD', 'DATABASE_URL']
-        missing_vars = [var for var in required_vars if not os.getenv(var)]
-        if missing_vars:
-            logger.error(f"المتغيرات البيئية التالية مفقودة: {', '.join(missing_vars)}")
-            return None
-
         # Create Flask app
-        static_folder = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'client', 'dist'))
-        app = Flask(__name__, static_folder=static_folder, static_url_path='/')
+        app = Flask(__name__)
 
         # Basic Configuration
         app.config.update(
@@ -114,8 +100,6 @@ def create_app(testing=False):
             JSON_AS_ASCII=False,
             SESSION_TYPE='filesystem',
             SESSION_FILE_DIR='/tmp/flask_session',
-            SESSION_FILE_THRESHOLD=500,
-            SESSION_PERMANENT=True,
             PERMANENT_SESSION_LIFETIME=timedelta(days=1),
             SESSION_COOKIE_SECURE=True,
             SESSION_COOKIE_HTTPONLY=True,
@@ -124,25 +108,19 @@ def create_app(testing=False):
             MAIL_PORT=587,
             MAIL_USE_TLS=True,
             MAIL_USERNAME=os.getenv('MAIL_USERNAME'),
-            MAIL_PASSWORD=os.getenv('MAIL_PASSWORD'),
-            MAIL_DEFAULT_SENDER=os.getenv('MAIL_USERNAME')
+            MAIL_PASSWORD=os.getenv('MAIL_PASSWORD')
         )
 
-        # Ensure session directory exists
-        if not os.path.exists(app.config['SESSION_FILE_DIR']):
-            os.makedirs(app.config['SESSION_FILE_DIR'])
-            logger.info("تم إنشاء دليل الجلسات")
-
         try:
-            # Initialize extensions in correct order
-            extensions = init_extensions(app)
+            # Initialize extensions
+            mail = init_extensions(app)
 
             # Setup CORS
             CORS(app, 
                  supports_credentials=True,
                  resources={
                      r"/api/*": {
-                         "origins": ["http://localhost:5000", "https://*.repl.co", "http://0.0.0.0:5000"],
+                         "origins": ["http://localhost:5000", "https://*.repl.co"],
                          "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
                          "allow_headers": ["Content-Type", "Authorization"],
                          "expose_headers": ["Content-Type"],
@@ -156,7 +134,6 @@ def create_app(testing=False):
                 try:
                     g.db = get_db()
                     if 'user_id' in session:
-                        session['last_activity'] = time.time()
                         session.modified = True
                 except Exception as e:
                     logger.error(f"خطأ في معالجة الطلب: {str(e)}", exc_info=True)
@@ -169,13 +146,15 @@ def create_app(testing=False):
                 if db is not None:
                     db.close()
 
-            # Register blueprints after all extensions are initialized
+            # Register blueprints
             from server.blueprints.admin import admin_bp, init_mail
             from server.blueprints.auth import auth_bp
+            from server.blueprints.admin.roles import roles_bp
 
-            init_mail(extensions['mail'])
+            init_mail(mail)
             app.register_blueprint(admin_bp)
             app.register_blueprint(auth_bp)
+            app.register_blueprint(roles_bp)
             logger.info("تم تسجيل المسارات")
 
             # Signal ready for workflow

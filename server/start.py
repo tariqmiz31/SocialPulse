@@ -23,7 +23,9 @@ if project_root not in sys.path:
 from server.database import init_db, get_db
 from server.blueprints.admin import admin_bp, init_mail
 from server.blueprints.auth import auth_bp
+from server.blueprints.admin.roles import roles_bp
 from server import logger, User
+from server.blueprints.auth.verification import verification_manager
 
 def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
     """Wait for port availability with proper logging and workflow signaling"""
@@ -131,10 +133,16 @@ def create_app(testing=False):
                  }
              })
 
+        # Initialize verification manager within application context
+        with app.app_context():
+            verification_manager._get_db()
+            logger.info("تم تهيئة مدير التحقق")
+
         # Register blueprints
         init_mail(mail)
         app.register_blueprint(admin_bp)
         app.register_blueprint(auth_bp)
+        app.register_blueprint(roles_bp)
         logger.info("تم تسجيل المسارات")
 
         return app
