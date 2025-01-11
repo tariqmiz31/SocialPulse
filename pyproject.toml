@@ -31,4 +31,6 @@ dependencies = [
     "twilio>=9.4.1",
     "flask-mail>=0.10.0",
     "email-validator>=2.2.0",
+    "prometheus-flask-exporter>=0.23.1",
+    "wait-for-it>=2.3.0",
 ]

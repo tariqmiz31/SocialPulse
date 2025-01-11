@@ -4,7 +4,7 @@ import sys
 import logging
 import socket
 from dotenv import load_dotenv
-from flask import Flask, session, g
+from flask import Flask, session, g, jsonify
 from flask_cors import CORS
 from flask_mail import Mail
 from logging.handlers import RotatingFileHandler
@@ -25,74 +25,80 @@ from server.blueprints.admin import admin_bp, init_mail
 from server.blueprints.auth import auth_bp
 from server.blueprints.admin.roles import roles_bp
 from server import logger, User
-from server.blueprints.auth.verification import verification_manager
 
-def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
-    """Wait for port availability with proper logging and workflow signaling"""
+def setup_logging():
+    """تهيئة إعدادات التسجيل"""
+    if not os.path.exists('logs'):
+        os.makedirs('logs')
+
+    file_handler = RotatingFileHandler(
+        'logs/app.log',
+        maxBytes=1024 * 1024,  # 1 MB
+        backupCount=10
+    )
+    file_handler.setFormatter(logging.Formatter(
+        '%(asctime)s [%(levelname)s] %(message)s'
+    ))
+    logger.addHandler(file_handler)
+    logger.setLevel(logging.INFO)
+
+def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 60) -> bool:
+    """انتظار حتى يصبح المنفذ متاحاً"""
     start_time = time.time()
-    logger.info(f"بدء انتظار المنفذ {port}...")
+    logger.info(f"انتظار المنفذ {port} ليصبح متاحاً...")
 
     while True:
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                 sock.settimeout(1)
                 result = sock.connect_ex((host, port))
-                if result != 0:  # Port is available
-                    logger.info(f"المنفذ {port} متاح للاستخدام")
+                if result != 0:  # المنفذ متاح
+                    logger.info(f"المنفذ {port} متاح")
                     return True
-                if time.time() - start_time >= timeout:
-                    logger.error(f"المنفذ {port} مشغول بعد {timeout} ثانية")
-                    return False
         except socket.error as e:
-            if time.time() - start_time >= timeout:
-                logger.error(f"خطأ في فحص المنفذ {port}: {str(e)}")
-                return False
+            logger.error(f"خطأ في فحص المنفذ {port}: {str(e)}")
+
+        if time.time() - start_time > timeout:
+            logger.error(f"انتهت مهلة انتظار المنفذ {port}")
+            return False
+
         time.sleep(1)
-        logger.debug(f"جاري انتظار المنفذ {port}...")
 
 def create_app(testing=False):
-    """Create Flask application with proper initialization sequence"""
+    """إنشاء تطبيق Flask"""
     try:
-        # Load environment variables
+        # تحميل المتغيرات البيئية وإعداد التسجيل
         load_dotenv()
+        setup_logging()
 
-        # Check required environment variables
-        required_vars = ['DATABASE_URL']
-        missing_vars = [var for var in required_vars if not os.getenv(var)]
-        if missing_vars:
-            logger.error(f"المتغيرات البيئية التالية مفقودة: {', '.join(missing_vars)}")
-            return None
+        logger.info("بدء تهيئة التطبيق...")
 
-        # Create Flask app
-        static_folder = os.path.abspath(os.path.join(project_root, 'client', 'dist'))
-        app = Flask(__name__, static_folder=static_folder, static_url_path='/')
+        # إنشاء تطبيق Flask
+        app = Flask(__name__)
 
-        # Basic Configuration
+        # التكوين الأساسي
         app.config.update(
             SECRET_KEY=os.getenv('SECRET_KEY', os.urandom(24).hex()),
             JSON_AS_ASCII=False,
             SESSION_TYPE='filesystem',
             SESSION_FILE_DIR='/tmp/flask_session',
-            SESSION_FILE_THRESHOLD=500,
-            SESSION_PERMANENT=True,
             PERMANENT_SESSION_LIFETIME=timedelta(days=1),
             SESSION_COOKIE_SECURE=True,
             SESSION_COOKIE_HTTPONLY=True,
-            SESSION_COOKIE_SAMESITE='Lax'
+            SESSION_COOKIE_SAMESITE='Lax',
+            DEBUG=True if os.getenv('FLASK_ENV') == 'development' else False
         )
 
-        # Ensure session directory exists
+        # إنشاء مجلد الجلسات إذا لم يكن موجوداً
         if not os.path.exists(app.config['SESSION_FILE_DIR']):
             os.makedirs(app.config['SESSION_FILE_DIR'])
-            logger.info("تم إنشاء دليل الجلسات")
+            logger.info("تم إنشاء مجلد الجلسات")
 
-        # Initialize components in correct order
-        # 1. Session
-        session_interface = Session()
-        session_interface.init_app(app)
+        # تهيئة إدارة الجلسات
+        Session(app)
         logger.info("تم تهيئة إدارة الجلسات")
 
-        # 2. Login Manager
+        # تهيئة مدير تسجيل الدخول
         login_manager = LoginManager()
         login_manager.init_app(app)
         login_manager.login_view = 'auth.login'
@@ -103,62 +109,69 @@ def create_app(testing=False):
         def load_user(user_id):
             return User.get(user_id)
 
-        logger.info("تم تهيئة نظام تسجيل الدخول")
+        logger.info("تم تهيئة مدير تسجيل الدخول")
 
-        # 3. Mail
+        # تهيئة خدمة البريد الإلكتروني إذا كانت المتغيرات البيئية متوفرة
         if os.getenv('MAIL_USERNAME') and os.getenv('MAIL_PASSWORD'):
             app.config.update(
                 MAIL_SERVER='smtp.gmail.com',
                 MAIL_PORT=587,
                 MAIL_USE_TLS=True,
                 MAIL_USERNAME=os.getenv('MAIL_USERNAME'),
-                MAIL_PASSWORD=os.getenv('MAIL_PASSWORD'),
-                MAIL_DEFAULT_SENDER=os.getenv('MAIL_USERNAME')
+                MAIL_PASSWORD=os.getenv('MAIL_PASSWORD')
             )
-            mail = Mail()
-            mail.init_app(app)
+            mail = Mail(app)
             logger.info("تم تهيئة خدمة البريد الإلكتروني")
         else:
             mail = None
             logger.warning("لم يتم تكوين خدمة البريد الإلكتروني")
 
-        # 4. Database
+        # تهيئة قاعدة البيانات
         db = init_db(app)
         if not db:
-            logger.error("فشل في تهيئة قاعدة البيانات")
-            return None
-        logger.info("تم الاتصال بقاعدة البيانات بنجاح")
+            raise Exception("فشل في تهيئة قاعدة البيانات")
+        logger.info("تم تهيئة قاعدة البيانات")
 
-        # 5. CORS
-        CORS(app, 
+        # إعداد CORS
+        CORS(app,
              supports_credentials=True,
              resources={
                  r"/api/*": {
-                     "origins": ["http://localhost:5000", "https://*.repl.co", "http://0.0.0.0:5000"],
+                     "origins": ["http://localhost:8080", "https://*.repl.co"],
                      "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
                      "allow_headers": ["Content-Type", "Authorization"],
                      "expose_headers": ["Content-Type"],
                      "supports_credentials": True
                  }
              })
+        logger.info("تم تطبيق إعدادات CORS")
 
-        # Initialize verification manager within application context
-        with app.app_context():
-            verification_manager._get_db()
-            logger.info("تم تهيئة مدير التحقق")
-
-        # Register blueprints
+        # تسجيل المسارات البرمجية
         if mail:
             init_mail(mail)
         app.register_blueprint(admin_bp)
         app.register_blueprint(auth_bp)
         app.register_blueprint(roles_bp)
-        logger.info("تم تسجيل المسارات")
+        logger.info("تم تسجيل المسارات البرمجية")
 
-        # Add before request handler
         @app.before_request
         def before_request():
-            g.db = get_db()
+            """إعداد اتصال قاعدة البيانات لكل طلب"""
+            try:
+                g.db = get_db()
+                if g.db is None:
+                    return jsonify({"error": "فشل الاتصال بقاعدة البيانات"}), 500
+            except Exception as e:
+                logger.error(f"خطأ في معالجة الطلب: {str(e)}")
+                return jsonify({"error": "حدث خطأ في معالجة الطلب"}), 500
+
+        @app.errorhandler(500)
+        def handle_500(error):
+            logger.error(f"خطأ في الخادم: {str(error)}")
+            return jsonify({
+                "error": "حدث خطأ في الخادم",
+                "details": str(error) if app.debug else None
+            }), 500
 
         return app
 
@@ -167,24 +180,23 @@ def create_app(testing=False):
         return None
 
 def main():
-    """Main entry point"""
+    """نقطة الدخول الرئيسية"""
     try:
-        # Get port from environment
-        port = int(os.getenv('PORT', '5000'))
-        logger.info(f"بدء تهيئة الخادم على المنفذ {port}")
+        # الحصول على رقم المنفذ من المتغيرات البيئية
+        port = int(os.getenv('PORT', '8080'))
 
-        # Wait for port availability
+        # انتظار حتى يصبح المنفذ متاحاً
         if not wait_for_port(port):
             logger.error(f"المنفذ {port} غير متاح")
             return 1
 
-        # Create and configure app
+        # إنشاء وتكوين التطبيق
         app = create_app()
         if not app:
             logger.error("فشل في إنشاء تطبيق Flask")
             return 1
 
-        # Start metrics server
+        # إعداد خادم المقاييس
         metrics_port = port + 1
         try:
             prometheus_client.start_http_server(metrics_port)
@@ -192,12 +204,12 @@ def main():
         except Exception as e:
             logger.warning(f"فشل في بدء خادم المقاييس: {str(e)}")
 
-        # Signal ready for workflow
+        # الإشارة إلى جاهزية التطبيق
         print('ready')
         sys.stdout.flush()
 
-        # Start server
-        app.run(host='0.0.0.0', port=port, debug=True)
+        # بدء الخادم
+        app.run(host='0.0.0.0', port=port)
         return 0
 
     except Exception as e:
