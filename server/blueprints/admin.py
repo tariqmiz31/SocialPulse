@@ -1,4 +1,4 @@
-from flask import Blueprint, jsonify, request, session
+from flask import Blueprint, jsonify, request, session, g, current_app
 from flask_mail import Message
 from flask_login import login_required, current_user
 from functools import wraps
@@ -21,29 +21,52 @@ def init_mail(mail_instance):
 def admin_required(f):
     """تأكد من أن المستخدم مشرف"""
     @wraps(f)
-    @login_required
     def decorated_function(*args, **kwargs):
+        # 1. التحقق من تسجيل الدخول
         if not current_user.is_authenticated:
             logger.warning(f"محاولة وصول غير مصرح بها: المستخدم غير مسجل الدخول")
-            return jsonify({'message': 'يجب تسجيل الدخول'}), 401
+            return jsonify({
+                'status': 'error',
+                'message': 'يجب تسجيل الدخول للوصول إلى هذه الصفحة',
+                'code': 'unauthorized'
+            }), 401
 
+        # 2. التحقق من صلاحيات المشرف
         if not hasattr(current_user, 'role') or current_user.role != 'admin':
             logger.warning(f"محاولة وصول غير مصرح بها: المستخدم {current_user.username} ليس مشرفاً")
-            return jsonify({'message': 'غير مصرح بهذا الإجراء'}), 403
+            return jsonify({
+                'status': 'error',
+                'message': 'غير مصرح بهذا الإجراء - يجب أن تكون مشرفاً',
+                'code': 'forbidden'
+            }), 403
 
-        return f(*args, **kwargs)
+        # 3. تنفيذ الوظيفة المطلوبة
+        try:
+            return f(*args, **kwargs)
+        except Exception as e:
+            logger.error(f"خطأ في تنفيذ إجراء المشرف: {str(e)}", exc_info=True)
+            return jsonify({
+                'status': 'error',
+                'message': 'حدث خطأ أثناء تنفيذ الإجراء',
+                'code': 'internal_error'
+            }), 500
+
     return decorated_function
 
 @admin_bp.route('/api/admin/users/<int:user_id>/<action>', methods=['POST'])
 @admin_required
 def modify_user(user_id, action):
-    """تعديل صلاحيات المستخدم مع التحقق متعدد المراحل"""
+    """تعديل صلاحيات المستخدم مع التحقق متعدد المراحل وتسجيل التغييرات"""
     try:
         # Get database connection
         db = get_db()
         if not db:
             logger.error("فشل في الاتصال بقاعدة البيانات")
-            return jsonify({'message': 'خطأ في الاتصال بقاعدة البيانات'}), 500
+            return jsonify({
+                'status': 'error',
+                'message': 'خطأ في الاتصال بقاعدة البيانات',
+                'code': 'db_error'
+            }), 500
 
         cursor = db.cursor()
         try:
@@ -57,26 +80,50 @@ def modify_user(user_id, action):
 
             if not user:
                 logger.warning(f"محاولة تعديل مستخدم غير موجود: ID {user_id}")
-                return jsonify({'message': 'المستخدم غير موجود'}), 404
+                return jsonify({
+                    'status': 'error',
+                    'message': 'المستخدم غير موجود',
+                    'code': 'not_found'
+                }), 404
 
             if action not in ['promote', 'demote', 'block', 'unblock', 'approve', 'delete']:
                 logger.warning(f"محاولة تنفيذ إجراء غير صالح: {action}")
-                return jsonify({'message': 'إجراء غير صالح'}), 400
+                return jsonify({
+                    'status': 'error',
+                    'message': 'إجراء غير صالح',
+                    'code': 'invalid_action'
+                }), 400
 
             # التحقق من محاولة تعديل المستخدم الرئيسي
             if user[1] == 'Tariq':  # التحقق من اسم المستخدم
                 logger.warning(f"محاولة تعديل صلاحيات المستخدم الرئيسي")
-                return jsonify({'message': 'لا يمكن تعديل صلاحيات المستخدم الرئيسي'}), 403
+                return jsonify({
+                    'status': 'error',
+                    'message': 'لا يمكن تعديل صلاحيات المستخدم الرئيسي',
+                    'code': 'forbidden'
+                }), 403
 
             verification_step = request.json.get('verificationStep', 'initial')
             email = request.json.get('email')
+            change_reason = request.json.get('reason')
 
             # التحقق من المراحل لتغيير الصلاحيات
             if action in ['promote', 'demote']:
+                if not change_reason:
+                    return jsonify({
+                        'status': 'error',
+                        'message': 'يجب تحديد سبب تغيير الصلاحيات',
+                        'code': 'missing_reason'
+                    }), 400
+
                 # المرحلة الأولى: إرسال رمز التحقق
                 if verification_step == 'initial':
                     if not email:
-                        return jsonify({'message': 'البريد الإلكتروني مطلوب للتحقق'}), 400
+                        return jsonify({
+                            'status': 'error',
+                            'message': 'البريد الإلكتروني مطلوب للتحقق',
+                            'code': 'missing_email'
+                        }), 400
 
                     # التحقق من عدد محاولات التحقق
                     cursor.execute("""
@@ -89,13 +136,11 @@ def modify_user(user_id, action):
 
                     if attempt_count >= 5:
                         logger.warning(f"تم تجاوز عدد محاولات التحقق للبريد {email}")
-                        return jsonify({'message': 'تم تجاوز الحد الأقصى لمحاولات التحقق. الرجاء المحاولة لاحقاً'}), 429
-
-                    # تسجيل محاولة التحقق
-                    cursor.execute("""
-                        INSERT INTO verification_attempts (email, attempt_time)
-                        VALUES (%s, NOW())
-                    """, (email,))
+                        return jsonify({
+                            'status': 'error',
+                            'message': 'تم تجاوز الحد الأقصى لمحاولات التحقق. الرجاء المحاولة لاحقاً',
+                            'code': 'too_many_attempts'
+                        }), 429
 
                     # إنشاء رمز تحقق
                     verification_code = ''.join(secrets.choice('0123456789') for _ in range(6))
@@ -116,6 +161,12 @@ def modify_user(user_id, action):
                     session['role_change_action'] = action
                     session['target_user_id'] = user_id
                     session.modified = True
+
+                    # تسجيل محاولة التحقق
+                    cursor.execute("""
+                        INSERT INTO verification_attempts (email, attempt_time)
+                        VALUES (%s, NOW())
+                    """, (email,))
 
                     # إرسال رمز التحقق بالبريد
                     try:
@@ -140,6 +191,7 @@ def modify_user(user_id, action):
                         logger.info(f'تم إرسال رمز التحقق إلى {email}')
 
                         return jsonify({
+                            'status': 'success',
                             'message': 'تم إرسال رمز التحقق إلى بريدك الإلكتروني',
                             'expiry': expires_at.isoformat()
                         }), 200
@@ -147,17 +199,29 @@ def modify_user(user_id, action):
                     except Exception as e:
                         logger.error(f'خطأ في إرسال البريد الإلكتروني: {str(e)}')
                         db.rollback()
-                        return jsonify({'message': 'حدث خطأ في إرسال رمز التحقق'}), 500
+                        return jsonify({
+                            'status': 'error',
+                            'message': 'حدث خطأ في إرسال رمز التحقق',
+                            'code': 'email_error'
+                        }), 500
 
                 # المرحلة الثانية: التحقق من الرمز
                 elif verification_step == 'verify_code':
                     if 'verification_id' not in session:
                         logger.warning('محاولة تحقق بدون جلسة صالحة')
-                        return jsonify({'message': 'جلسة التحقق غير صالحة'}), 400
+                        return jsonify({
+                            'status': 'error',
+                            'message': 'جلسة التحقق غير صالحة',
+                            'code': 'invalid_session'
+                        }), 400
 
                     verification_code = request.json.get('code')
                     if not verification_code:
-                        return jsonify({'message': 'رمز التحقق مطلوب'}), 400
+                        return jsonify({
+                            'status': 'error',
+                            'message': 'رمز التحقق مطلوب',
+                            'code': 'missing_code'
+                        }), 400
 
                     # التحقق من صحة الرمز
                     cursor.execute("""
@@ -173,16 +237,13 @@ def modify_user(user_id, action):
                     verification = cursor.fetchone()
                     if not verification:
                         logger.warning(f'محاولة تحقق فاشلة: رمز غير صالح أو منتهي الصلاحية')
-                        return jsonify({'message': 'رمز التحقق غير صحيح أو منتهي الصلاحية'}), 400
+                        return jsonify({
+                            'status': 'error',
+                            'message': 'رمز التحقق غير صحيح أو منتهي الصلاحية',
+                            'code': 'invalid_code'
+                        }), 400
 
                     try:
-                        # تحديث حالة الرمز
-                        cursor.execute("""
-                            UPDATE verification_codes 
-                            SET verified = true 
-                            WHERE id = %s
-                        """, (verification[0],))
-
                         # تحديث دور المستخدم
                         new_role = 'admin' if action == 'promote' else 'user'
                         cursor.execute("""
@@ -195,12 +256,22 @@ def modify_user(user_id, action):
 
                         updated_user = cursor.fetchone()
 
-                        # تسجيل التغيير في السجل
+                        # تسجيل التغيير في السجل مع معلومات إضافية
                         cursor.execute("""
                             INSERT INTO role_change_history 
-                            (user_id, admin_id, old_role, new_role, verification_id, created_at)
-                            VALUES (%s, %s, %s, %s, %s, NOW())
-                        """, (user_id, current_user.id, user[3], new_role, verification[0]))
+                            (user_id, admin_id, old_role, new_role, verification_id, 
+                             change_reason, client_ip, user_agent, created_at)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                        """, (
+                            user_id, 
+                            current_user.id, 
+                            user[3], 
+                            new_role, 
+                            session['verification_id'],
+                            change_reason,
+                            request.remote_addr,
+                            request.user_agent.string
+                        ))
 
                         # مسح معلومات التحقق من الجلسة
                         session.pop('verification_id', None)
@@ -222,6 +293,7 @@ def modify_user(user_id, action):
                                 <p>مرحباً {updated_user[0]}،</p>
                                 <p>نود إعلامك أنه تم تحديث صلاحياتك في نظام سيلفاريوم.</p>
                                 <p>دورك الجديد: <strong>{'مشرف' if new_role == 'admin' else 'مستخدم'}</strong></p>
+                                <p>سبب التغيير: {change_reason}</p>
                                 <br>
                                 <p>مع تحيات،<br>فريق سيلفاريوم</p>
                             </div>
@@ -233,6 +305,7 @@ def modify_user(user_id, action):
                                 logger.warning(f'فشل في إرسال إشعار تحديث الصلاحيات: {str(e)}')
 
                         return jsonify({
+                            'status': 'success',
                             'message': f'تم تحديث صلاحيات المستخدم {updated_user[0]} بنجاح'
                         }), 200
 
@@ -240,12 +313,18 @@ def modify_user(user_id, action):
                         db.rollback()
                         logger.error(f'خطأ في تحديث صلاحيات المستخدم: {str(e)}')
                         return jsonify({
-                            'message': 'حدث خطأ في تحديث صلاحيات المستخدم'
+                            'status': 'error',
+                            'message': 'حدث خطأ في تحديث صلاحيات المستخدم',
+                            'code': 'update_error'
                         }), 500
 
                 else:
                     logger.warning(f'خطوة تحقق غير صالحة: {verification_step}')
-                    return jsonify({'message': 'خطوة تحقق غير صالحة'}), 400
+                    return jsonify({
+                        'status': 'error',
+                        'message': 'خطوة تحقق غير صالحة',
+                        'code': 'invalid_step'
+                    }), 400
 
             else:
                 # باقي الإجراءات (block, unblock, approve, delete)
@@ -315,13 +394,18 @@ def modify_user(user_id, action):
                         except Exception as e:
                             logger.warning(f'فشل في إرسال إشعار تحديث الحالة: {str(e)}')
 
-                    return jsonify({'message': message}), 200
+                    return jsonify({
+                        'status': 'success',
+                        'message': message
+                    }), 200
 
                 except Exception as e:
                     db.rollback()
                     logger.error(f'خطأ في تنفيذ الإجراء {action}: {str(e)}')
                     return jsonify({
-                        'message': f'حدث خطأ في تنفيذ الإجراء {action}'
+                        'status': 'error',
+                        'message': f'حدث خطأ في تنفيذ الإجراء {action}',
+                        'code': 'action_error'
                     }), 500
 
         finally:
@@ -330,5 +414,7 @@ def modify_user(user_id, action):
     except Exception as e:
         logger.error(f'خطأ في تعديل صلاحيات المستخدم: {str(e)}', exc_info=True)
         return jsonify({
-            'message': 'حدث خطأ أثناء تعديل صلاحيات المستخدم'
+            'status': 'error',
+            'message': 'حدث خطأ أثناء تعديل صلاحيات المستخدم',
+            'code': 'internal_error'
         }), 500

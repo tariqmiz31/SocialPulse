@@ -25,9 +25,7 @@ if project_root not in sys.path:
 from server.database import init_db
 from server.blueprints.admin import admin_bp, init_mail
 from server.blueprints.auth import auth_bp
-from server import logger
-from server.models import User # Assuming User model is defined here
-
+from server import logger, User
 
 def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
     """Wait for port availability"""
@@ -48,7 +46,7 @@ def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
                 logger.error(f"المنفذ {port} غير متاح بعد {timeout} ثانية")
                 return False
             time.sleep(1)
-            logger.info(f"انتظار المنفذ {port}...")
+            logger.debug(f"انتظار المنفذ {port}...")
 
 def init_extensions(app):
     """تهيئة امتدادات Flask بالترتيب الصحيح"""
@@ -65,7 +63,7 @@ def init_extensions(app):
 
         @login_manager.user_loader
         def load_user(user_id):
-            return User.get(user_id) # Assuming User model has a get method
+            return User.get(user_id)
 
         logger.info("تم تهيئة نظام تسجيل الدخول")
 
@@ -112,7 +110,7 @@ def create_app(testing=False):
             SECRET_KEY=os.getenv('SECRET_KEY', os.urandom(24).hex()),
             SESSION_FILE_DIR='/tmp/flask_session',
             SESSION_FILE_THRESHOLD=500,
-            SESSION_COOKIE_SECURE=True, # Changed to True for better security
+            SESSION_COOKIE_SECURE=True,
             SESSION_COOKIE_HTTPONLY=True,
             SESSION_COOKIE_SAMESITE='Lax',
             JSON_AS_ASCII=False,
@@ -120,7 +118,7 @@ def create_app(testing=False):
             WAIT_FOR_PORT_TIMEOUT=120
         )
 
-        # Setup Session directory
+        # Ensure session directory exists
         if not os.path.exists(app.config['SESSION_FILE_DIR']):
             os.makedirs(app.config['SESSION_FILE_DIR'])
 
@@ -153,8 +151,8 @@ def create_app(testing=False):
         app.register_blueprint(auth_bp)
         logger.info("تم تسجيل المسارات بنجاح")
 
-        # Signal ready for workflow
-        if app.config.get('WAIT_FOR_PORT', False):
+        # Signal ready for workflow if configured
+        if app.config.get('WAIT_FOR_PORT', True):
             print('ready')
             sys.stdout.flush()
 
@@ -190,13 +188,13 @@ def create_admin_user():
 
     except Exception as e:
         logger.error(f"خطأ في إنشاء حساب المشرف: {str(e)}")
-        if 'conn' in locals():
+        if conn:
             conn.rollback()
         raise
     finally:
-        if 'cur' in locals():
+        if cur:
             cur.close()
-        if 'conn' in locals():
+        if conn:
             conn.close()
 
 def main():
@@ -204,10 +202,11 @@ def main():
     try:
         # Get port from environment
         port = int(os.getenv('PORT', '5000'))
+        logger.info(f"بدء تهيئة الخادم على المنفذ {port}")
 
         # Wait for port availability
         if not wait_for_port(port):
-            logger.error(f"المنفذ {port} غير متاح بعد {120} ثانية")
+            logger.error(f"المنفذ {port} غير متاح")
             return 1
 
         # Create and configure app
@@ -228,7 +227,7 @@ def main():
             logger.warning(f"فشل في بدء خادم المقاييس: {str(e)}")
 
         # Start server
-        app.run(host='0.0.0.0', port=port, debug=True)
+        app.run(host='0.0.0.0', port=port)
         return 0
 
     except Exception as e:
