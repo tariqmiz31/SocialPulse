@@ -54,6 +54,13 @@ def create_app(testing=False):
         # Load environment variables
         load_dotenv()
 
+        # Check required environment variables
+        required_vars = ['MAIL_USERNAME', 'MAIL_PASSWORD', 'DATABASE_URL']
+        missing_vars = [var for var in required_vars if not os.getenv(var)]
+        if missing_vars:
+            logger.error(f"المتغيرات البيئية التالية مفقودة: {', '.join(missing_vars)}")
+            return None
+
         # Create Flask app
         static_folder = os.path.abspath(os.path.join(project_root, 'client', 'dist'))
         app = Flask(__name__, static_folder=static_folder, static_url_path='/')
@@ -76,18 +83,25 @@ def create_app(testing=False):
             SESSION_COOKIE_SECURE=False,  # Set to False for development
             SESSION_COOKIE_HTTPONLY=True,
             SESSION_COOKIE_SAMESITE='Lax',
-            JSON_AS_ASCII=False
+            JSON_AS_ASCII=False,
+            WAIT_FOR_PORT=True,
+            WAIT_FOR_PORT_TIMEOUT=120
         )
 
         # Setup Session directory
         if not os.path.exists(app.config['SESSION_FILE_DIR']):
             os.makedirs(app.config['SESSION_FILE_DIR'])
 
-        # Initialize Flask extensions
+        # Initialize Flask extensions in the correct order
         mail = Mail(app)
+        logger.info("تم تهيئة خدمة البريد الإلكتروني بنجاح")
+
         session = Session(app)
+        logger.info("تم تهيئة إدارة الجلسات بنجاح")
+
         login_manager = LoginManager(app)
         login_manager.login_view = 'auth.login'
+        logger.info("تم تهيئة نظام تسجيل الدخول بنجاح")
 
         # Setup CORS with proper configuration
         CORS(app, 
@@ -114,6 +128,10 @@ def create_app(testing=False):
         app.register_blueprint(admin_bp)
         app.register_blueprint(auth_bp)
         logger.info("تم تسجيل المسارات بنجاح")
+
+        # Signal ready for workflow
+        print('ready')
+        sys.stdout.flush()
 
         return app
 
@@ -164,15 +182,25 @@ def main():
 
         # Wait for port availability
         if not wait_for_port(port):
+            logger.error(f"المنفذ {port} غير متاح بعد {120} ثانية")
             return 1
 
         # Create and configure app
         app = create_app()
         if not app:
+            logger.error("فشل في إنشاء تطبيق Flask")
             return 1
 
         # إنشاء/تحديث مستخدم مشرف
         create_admin_user()
+
+        # Start metrics server
+        metrics_port = port + 1
+        try:
+            prometheus_client.start_http_server(metrics_port)
+            logger.info(f"تم بدء خادم المقاييس على المنفذ {metrics_port}")
+        except Exception as e:
+            logger.warning(f"فشل في بدء خادم المقاييس: {str(e)}")
 
         # Start server
         app.run(host='0.0.0.0', port=port, debug=True)

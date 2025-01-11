@@ -15,6 +15,8 @@ from dotenv import load_dotenv
 from flask_session import Session
 from server.database import get_db, init_db
 from server.blueprints.auth import auth_bp
+import socket
+import time
 
 # Setup logging
 logger = logging.getLogger('silvarium')
@@ -55,6 +57,27 @@ def load_user(user_id):
         logger.error(f"Error loading user: {str(e)}")
     return None
 
+def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
+    """Wait for port availability"""
+    start_time = time.time()
+    logger.info(f"بدء انتظار المنفذ {port}...")
+
+    while True:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.bind((host, port))
+                sock.close()  # Make sure to close the socket
+                logger.info(f"المنفذ {port} متاح")
+                print('ready')  # Signal ready for workflow
+                sys.stdout.flush()
+                return True
+        except socket.error:
+            if time.time() - start_time >= timeout:
+                logger.error(f"المنفذ {port} غير متاح بعد {timeout} ثانية")
+                return False
+            time.sleep(1)
+            logger.info(f"انتظار المنفذ {port}...")
+
 def create_app(testing=False):
     """Create Flask application"""
     try:
@@ -89,7 +112,9 @@ def create_app(testing=False):
             MAIL_USERNAME=os.getenv('MAIL_USERNAME'),
             MAIL_PASSWORD=os.getenv('MAIL_PASSWORD'),
             MAIL_DEFAULT_SENDER=os.getenv('MAIL_USERNAME'),
-            JSON_AS_ASCII=False
+            JSON_AS_ASCII=False,
+            WAIT_FOR_PORT=True,
+            WAIT_FOR_PORT_TIMEOUT=120
         )
 
         # Setup Session directory
@@ -143,6 +168,10 @@ def create_app(testing=False):
         app.register_blueprint(auth_bp)
         logger.info("تم تسجيل المسارات الإدارية ومسارات التحقق بنجاح")
 
+        # Signal ready for workflow
+        print('ready')
+        sys.stdout.flush()
+
         return app
 
     except Exception as e:
@@ -153,4 +182,5 @@ if __name__ == '__main__':
     app = create_app()
     if app:
         port = int(os.getenv('PORT', '5000'))
-        app.run(host='0.0.0.0', port=port)
+        if wait_for_port(port):
+            app.run(host='0.0.0.0', port=port)

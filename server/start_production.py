@@ -13,6 +13,7 @@ from flask_session import Session
 from dotenv import load_dotenv
 from datetime import timedelta
 import psycopg2
+from flask_login import LoginManager
 
 # Add project root to Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -21,8 +22,9 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 # Import local modules after path setup
-from server.routes import register_routes
+from server.database import init_db
 from server.blueprints.admin import admin_bp, init_mail
+from server.blueprints.auth import auth_bp
 from server import logger
 
 def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
@@ -36,8 +38,6 @@ def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
                 sock.bind((host, port))
                 sock.close()
                 logger.info(f"المنفذ {port} متاح")
-                print('ready')  # Signal ready for workflow
-                sys.stdout.flush()
                 return True
         except socket.error:
             if time.time() - start_time >= timeout:
@@ -45,34 +45,6 @@ def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
                 return False
             time.sleep(1)
             logger.info(f"انتظار المنفذ {port}...")
-
-def setup_database():
-    """Set up database tables if they don't exist"""
-    try:
-        conn = psycopg2.connect(os.getenv('DATABASE_URL'))
-        cur = conn.cursor()
-
-        # Create verification_attempts table if it doesn't exist
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS verification_attempts (
-                id SERIAL PRIMARY KEY,
-                email TEXT NOT NULL,
-                attempt_time TIMESTAMP DEFAULT NOW()
-            );
-        """)
-
-        conn.commit()
-        logger.info("تم التحقق من وجود جداول قاعدة البيانات")
-        return True
-
-    except Exception as e:
-        logger.error(f"خطأ في إعداد قاعدة البيانات: {str(e)}")
-        return False
-    finally:
-        if 'cur' in locals():
-            cur.close()
-        if 'conn' in locals():
-            conn.close()
 
 def create_app(testing=False):
     """Create Flask application"""
@@ -85,10 +57,6 @@ def create_app(testing=False):
         missing_vars = [var for var in required_vars if not os.getenv(var)]
         if missing_vars:
             logger.error(f"المتغيرات البيئية التالية مفقودة: {', '.join(missing_vars)}")
-            return None
-
-        # Setup database tables
-        if not setup_database():
             return None
 
         # Create Flask app
@@ -115,26 +83,50 @@ def create_app(testing=False):
             SESSION_FILE_THRESHOLD=500,
             SESSION_COOKIE_SECURE=True,
             SESSION_COOKIE_HTTPONLY=True,
-            SESSION_COOKIE_SAMESITE='Lax'
+            SESSION_COOKIE_SAMESITE='Lax',
+            JSON_AS_ASCII=False
         )
 
-        # Initialize extensions
-        mail = Mail(app)
-
-        # Setup Session directory and initialize
+        # Setup Session directory
         if not os.path.exists(app.config['SESSION_FILE_DIR']):
             os.makedirs(app.config['SESSION_FILE_DIR'])
-        Session(app)
+
+        # Initialize Flask extensions in the correct order
+        mail = Mail(app)
+        logger.info("تم تهيئة خدمة البريد الإلكتروني بنجاح")
+
+        session = Session(app)
+        logger.info("تم تهيئة إدارة الجلسات بنجاح")
+
+        login_manager = LoginManager(app)
+        login_manager.login_view = 'auth.login'
+        logger.info("تم تهيئة نظام تسجيل الدخول بنجاح")
 
         # Setup CORS
-        CORS(app, supports_credentials=True)
+        CORS(app, 
+             supports_credentials=True,
+             resources={
+                 r"/api/*": {
+                     "origins": ["https://*.repl.co", "https://*.repl.dev"],
+                     "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+                     "allow_headers": ["Content-Type", "Authorization"],
+                     "expose_headers": ["Content-Type"],
+                     "supports_credentials": True
+                 }
+             })
 
-        # Initialize admin blueprint with mail
-        init_mail(mail)
+        # Initialize database
+        db = init_db(app)
+        if not db:
+            logger.error("فشل في تهيئة قاعدة البيانات")
+            return None
+        logger.info("تم الاتصال بقاعدة البيانات بنجاح")
+
+        # Register blueprints after all initializations
+        init_mail(mail)  # Initialize mail for admin blueprint
         app.register_blueprint(admin_bp)
-
-        # Register routes
-        register_routes(app)
+        app.register_blueprint(auth_bp)
+        logger.info("تم تسجيل المسارات بنجاح")
 
         return app
 
@@ -147,6 +139,7 @@ def main():
     try:
         # Set production mode
         os.environ['FLASK_ENV'] = 'production'
+        os.environ['SERVER_SOFTWARE'] = 'Waitress'
 
         # Use port from environment
         port = int(os.getenv('PORT', '5000'))
@@ -162,6 +155,10 @@ def main():
         if not app:
             logger.error("فشل في إنشاء تطبيق Flask")
             return 1
+
+        # Signal ready for workflow after port is available and app is created
+        print('ready')
+        sys.stdout.flush()
 
         # Start metrics server on a different port
         metrics_port = port + 1
