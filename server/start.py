@@ -20,7 +20,7 @@ project_root = os.path.dirname(current_dir)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from server.database import init_db
+from server.database import init_db, get_db
 from server.blueprints.admin import admin_bp, init_mail
 from server.blueprints.auth import auth_bp
 from server import logger, User
@@ -33,6 +33,7 @@ def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
     while True:
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.settimeout(1)
                 sock.bind((host, port))
                 sock.close()
                 logger.info(f"المنفذ {port} متاح للاستخدام")
@@ -78,9 +79,7 @@ def create_app(testing=False):
             MAIL_USE_TLS=True,
             MAIL_USERNAME=os.getenv('MAIL_USERNAME'),
             MAIL_PASSWORD=os.getenv('MAIL_PASSWORD'),
-            MAIL_DEFAULT_SENDER=os.getenv('MAIL_USERNAME'),
-            WAIT_FOR_PORT=True,
-            WAIT_FOR_PORT_TIMEOUT=120
+            MAIL_DEFAULT_SENDER=os.getenv('MAIL_USERNAME')
         )
 
         # Ensure session directory exists
@@ -112,7 +111,14 @@ def create_app(testing=False):
         mail.init_app(app)
         logger.info("تم تهيئة خدمة البريد الإلكتروني")
 
-        # Setup CORS
+        # 4. Database
+        db = init_db(app)
+        if not db:
+            logger.error("فشل في تهيئة قاعدة البيانات")
+            return None
+        logger.info("تم الاتصال بقاعدة البيانات بنجاح")
+
+        # 5. CORS
         CORS(app, 
              supports_credentials=True,
              resources={
@@ -124,13 +130,6 @@ def create_app(testing=False):
                      "supports_credentials": True
                  }
              })
-
-        # Initialize database
-        db = init_db(app)
-        if not db:
-            logger.error("فشل في تهيئة قاعدة البيانات")
-            return None
-        logger.info("تم الاتصال بقاعدة البيانات بنجاح")
 
         # Register blueprints
         init_mail(mail)

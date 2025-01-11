@@ -13,7 +13,7 @@ def get_db():
         try:
             g.db = pool.getconn() if pool else None
             if g.db:
-                logger.info("تم الحصول على اتصال جديد من المجمع")
+                logger.debug("تم الحصول على اتصال جديد من المجمع")
                 return g.db
             else:
                 logger.error("لم يتم تهيئة مجمع الاتصالات")
@@ -29,7 +29,7 @@ def close_db(e=None):
     if db is not None and pool:
         try:
             pool.putconn(db)
-            logger.info("تم إرجاع الاتصال إلى المجمع")
+            logger.debug("تم إرجاع الاتصال إلى المجمع")
         except Exception as e:
             logger.error(f"خطأ في إرجاع الاتصال إلى المجمع: {str(e)}")
             try:
@@ -38,34 +38,70 @@ def close_db(e=None):
                 pass
 
 def init_db(app):
-    """Initialize database connection pool"""
+    """Initialize database connection pool with proper error handling and connection testing"""
     global pool
     try:
         database_url = os.getenv('DATABASE_URL')
         if not database_url:
             raise ValueError("DATABASE_URL environment variable is not set")
 
-        pool = SimpleConnectionPool(
-            minconn=1,
-            maxconn=20,
-            dsn=database_url
-        )
+        # Create connection pool with retry mechanism
+        retry_count = 0
+        max_retries = 3
+        while retry_count < max_retries:
+            try:
+                pool = SimpleConnectionPool(
+                    minconn=1,
+                    maxconn=20,
+                    dsn=database_url,
+                    connect_timeout=10
+                )
 
-        # Test the connection
-        conn = pool.getconn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute('SELECT version()')
-                version = cur.fetchone()[0]
-                logger.info(f"تم الاتصال بقاعدة البيانات بنجاح: {version}")
-            pool.putconn(conn)
-        except Exception as e:
-            if conn:
+                # Test the connection
+                conn = pool.getconn()
                 try:
+                    with conn.cursor() as cur:
+                        cur.execute('SELECT version()')
+                        version = cur.fetchone()[0]
+                        logger.info(f"تم الاتصال بقاعدة البيانات بنجاح: {version}")
+
+                        # التحقق من وجود الجداول المطلوبة
+                        cur.execute("""
+                            SELECT table_name 
+                            FROM information_schema.tables 
+                            WHERE table_schema = 'public'
+                        """)
+                        existing_tables = {row[0] for row in cur.fetchall()}
+                        required_tables = {
+                            'verification_codes', 
+                            'role_change_history', 
+                            'verification_attempts'
+                        }
+
+                        missing_tables = required_tables - existing_tables
+                        if missing_tables:
+                            logger.warning(f"الجداول المفقودة: {', '.join(missing_tables)}")
+                            # لا نقوم بإنشاء الجداول تلقائياً لتجنب تغيير هيكل قاعدة البيانات
+                        else:
+                            logger.info("جميع الجداول المطلوبة موجودة")
+
                     pool.putconn(conn)
-                except:
-                    pass
-            raise e
+                    break
+                except Exception as e:
+                    if conn:
+                        try:
+                            pool.putconn(conn)
+                        except:
+                            pass
+                    raise e
+
+            except Exception as e:
+                retry_count += 1
+                if retry_count == max_retries:
+                    raise Exception(f"فشل الاتصال بقاعدة البيانات بعد {max_retries} محاولات: {str(e)}")
+                logger.warning(f"فشلت محاولة الاتصال {retry_count} من {max_retries}: {str(e)}")
+                import time
+                time.sleep(2 ** retry_count)  # exponential backoff
 
         # Register connection cleanup
         app.teardown_appcontext(close_db)
@@ -78,4 +114,4 @@ def init_db(app):
                 pool.closeall()
             except:
                 pass
-        raise
+        return None

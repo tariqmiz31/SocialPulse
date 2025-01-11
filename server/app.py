@@ -2,17 +2,92 @@
 import os
 import sys
 import logging
+import socket
+import time
 from flask import Flask, session, g, jsonify
 from flask_cors import CORS
 from flask_mail import Mail
 from flask_login import LoginManager
 from datetime import timedelta
+from logging.handlers import RotatingFileHandler
 from dotenv import load_dotenv
 from flask_session import Session
 from server.database import get_db, init_db
 from server.blueprints.admin import admin_bp, init_mail
 from server.blueprints.auth import auth_bp
 from server import logger, User
+
+def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 60) -> bool:
+    """انتظار توفر المنفذ مع تسجيل مناسب"""
+    start_time = time.time()
+    logger.info(f"بدء انتظار المنفذ {port}...")
+
+    while True:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.settimeout(1)
+                sock.bind((host, port))
+                sock.close()
+                logger.info(f"المنفذ {port} متاح للاستخدام")
+                return True
+        except socket.error as e:
+            if time.time() - start_time >= timeout:
+                logger.error(f"المنفذ {port} غير متاح بعد {timeout} ثانية. السبب: {str(e)}")
+                return False
+            time.sleep(1)
+            logger.debug(f"جاري انتظار المنفذ {port}...")
+
+def init_app_components(app: Flask):
+    """تهيئة مكونات التطبيق بالترتيب الصحيح"""
+    try:
+        # 1. Session
+        session_interface = Session()
+        session_interface.init_app(app)
+        logger.info("تم تهيئة إدارة الجلسات")
+
+        # 2. Database
+        db = init_db(app)
+        if not db:
+            raise Exception("فشل في تهيئة قاعدة البيانات")
+        logger.info("تم تهيئة قاعدة البيانات")
+
+        # 3. Login Manager
+        login_manager = LoginManager()
+        login_manager.init_app(app)
+        login_manager.login_view = 'auth.login'
+        login_manager.login_message = 'يجب تسجيل الدخول للوصول إلى هذه الصفحة'
+        login_manager.login_message_category = 'error'
+
+        @login_manager.user_loader
+        def load_user(user_id):
+            return User.get(user_id)
+
+        logger.info("تم تهيئة نظام تسجيل الدخول")
+
+        # 4. Mail
+        mail = Mail()
+        mail.init_app(app)
+        logger.info("تم تهيئة خدمة البريد الإلكتروني")
+
+        # 5. CORS
+        CORS(app, 
+             supports_credentials=True,
+             resources={
+                 r"/api/*": {
+                     "origins": ["http://localhost:5000", "https://*.repl.co", "http://0.0.0.0:5000"],
+                     "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+                     "allow_headers": ["Content-Type", "Authorization"],
+                     "expose_headers": ["Content-Type"],
+                     "supports_credentials": True
+                 }
+             })
+        logger.info("تم تهيئة CORS")
+
+        return db, mail
+
+    except Exception as e:
+        logger.error(f"خطأ في تهيئة مكونات التطبيق: {str(e)}", exc_info=True)
+        raise
 
 def create_app(testing=False):
     """Create Flask application with proper initialization sequence"""
@@ -48,8 +123,7 @@ def create_app(testing=False):
             MAIL_USE_TLS=True,
             MAIL_USERNAME=os.getenv('MAIL_USERNAME'),
             MAIL_PASSWORD=os.getenv('MAIL_PASSWORD'),
-            MAIL_DEFAULT_SENDER=os.getenv('MAIL_USERNAME'),
-            WAIT_FOR_PORT=True
+            MAIL_DEFAULT_SENDER=os.getenv('MAIL_USERNAME')
         )
 
         # Ensure session directory exists
@@ -57,101 +131,50 @@ def create_app(testing=False):
             os.makedirs(app.config['SESSION_FILE_DIR'])
             logger.info("تم إنشاء دليل الجلسات")
 
-        # 1. Initialize Session first
-        session_interface = Session()
-        session_interface.init_app(app)
-        logger.info("تم تهيئة إدارة الجلسات")
+        try:
+            # Initialize components
+            db, mail = init_app_components(app)
 
-        # 2. Initialize Login Manager
-        login_manager = LoginManager()
-        login_manager.init_app(app)
-        login_manager.login_view = 'auth.login'
-        login_manager.login_message = 'يجب تسجيل الدخول للوصول إلى هذه الصفحة'
-        login_manager.login_message_category = 'error'
+            # Add database cleanup
+            @app.teardown_appcontext
+            def cleanup(exc):
+                """تنظيف موارد قاعدة البيانات"""
+                db = g.pop('db', None)
+                if db is not None:
+                    db.close()
 
-        @login_manager.user_loader
-        def load_user(user_id):
-            return User.get(user_id)
+            # Add request handlers
+            @app.before_request
+            def before_request():
+                """تنفيذ قبل كل طلب"""
+                try:
+                    g.db = get_db()
+                    if 'user_id' in session:
+                        session['last_activity'] = time.time()
+                        session.modified = True
+                except Exception as e:
+                    logger.error(f"خطأ في معالجة الطلب: {str(e)}", exc_info=True)
+                    return jsonify({"error": "حدث خطأ في معالجة الطلب"}), 500
 
-        logger.info("تم تهيئة نظام تسجيل الدخول")
+            # Register blueprints
+            init_mail(mail)
+            app.register_blueprint(admin_bp)
+            app.register_blueprint(auth_bp)
+            logger.info("تم تسجيل المسارات")
 
-        # 3. Initialize Mail
-        mail = Mail()
-        mail.init_app(app)
-        logger.info("تم تهيئة خدمة البريد الإلكتروني")
+            # Set application as ready
+            app.ready = True
+            logger.info("تم تهيئة التطبيق بنجاح وهو جاهز للعمل")
 
-        # Setup CORS
-        CORS(app, 
-             supports_credentials=True,
-             resources={
-                 r"/api/*": {
-                     "origins": ["http://localhost:5000", "https://*.repl.co", "http://0.0.0.0:5000"],
-                     "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-                     "allow_headers": ["Content-Type", "Authorization"],
-                     "expose_headers": ["Content-Type"],
-                     "supports_credentials": True
-                 }
-             })
+            return app
 
-        # Initialize database
-        db = init_db(app)
-        if not db:
-            logger.error("فشل في تهيئة قاعدة البيانات")
+        except Exception as e:
+            logger.error(f"خطأ في إعداد التطبيق: {str(e)}", exc_info=True)
             return None
-        logger.info("تم الاتصال بقاعدة البيانات")
-
-        @app.before_request
-        def before_request():
-            """Execute before each request"""
-            try:
-                g.db = get_db()
-                if 'user_id' in session:
-                    session['last_activity'] = time.time()
-                    session.modified = True
-            except Exception as e:
-                logger.error(f"خطأ في معالجة الطلب: {str(e)}", exc_info=True)
-                return jsonify({"error": "حدث خطأ في معالجة الطلب"}), 500
-
-        @app.teardown_appcontext
-        def teardown_db(exception):
-            """Clean up database resources"""
-            db = g.pop('db', None)
-            if db is not None:
-                db.close()
-
-        # Register blueprints
-        init_mail(mail)
-        app.register_blueprint(admin_bp)
-        app.register_blueprint(auth_bp)
-        logger.info("تم تسجيل المسارات")
-
-        # Signal ready for workflow
-        print('ready')
-        sys.stdout.flush()
-
-        return app
 
     except Exception as e:
         logger.error(f"خطأ في تهيئة التطبيق: {str(e)}", exc_info=True)
         return None
-
-def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
-    """Wait for port availability"""
-    start_time = time.time()
-    logger.info(f"بدء انتظار المنفذ {port}...")
-    while True:
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                sock.bind((host, port))
-                sock.close()
-                logger.info(f"المنفذ {port} متاح")
-                return True
-        except socket.error:
-            if time.time() - start_time >= timeout:
-                logger.error(f"المنفذ {port} غير متاح بعد {timeout} ثانية")
-                return False
-            time.sleep(1)
-            logger.info(f"انتظار المنفذ {port}...")
 
 def main():
     """The main function to start the server"""
@@ -173,13 +196,16 @@ def main():
             logger.error("فشل في إنشاء تطبيق Flask")
             return None, None
 
+        # Signal ready for workflow
+        print('ready')
+        sys.stdout.flush()
+
         return app, port
 
     except Exception as e:
         logger.error(f"خطأ في بدء الخادم: {str(e)}", exc_info=True)
         return None, None
 
-import socket
 if __name__ == "__main__":
     app, port = main()
     if app and port:

@@ -2,18 +2,16 @@
 import os
 import sys
 import logging
+import time
 from flask import Flask, session, g, jsonify
 from flask_cors import CORS
 from flask_mail import Mail
 from flask_login import LoginManager, UserMixin
 from datetime import timedelta
 from logging.handlers import RotatingFileHandler
-from server.routes import register_routes
-from server.blueprints.admin import admin_bp, init_mail
 from dotenv import load_dotenv
 from flask_session import Session
 from server.database import get_db, init_db
-from server.blueprints.auth import auth_bp
 
 # Setup logging
 logger = logging.getLogger('silvarium')
@@ -52,9 +50,12 @@ class User(UserMixin):
 def init_extensions(app):
     """تهيئة امتدادات Flask بالترتيب الصحيح"""
     try:
+        extensions = {}
+
         # 1. تهيئة Session أولاً
         session_interface = Session()
         session_interface.init_app(app)
+        extensions['session'] = session_interface
         logger.info("تم تهيئة إدارة الجلسات")
 
         # 2. تهيئة نظام تسجيل الدخول
@@ -68,14 +69,23 @@ def init_extensions(app):
         def load_user(user_id):
             return User.get(user_id)
 
+        extensions['login_manager'] = login_manager
         logger.info("تم تهيئة نظام تسجيل الدخول")
 
         # 3. تهيئة خدمة البريد الإلكتروني
         mail = Mail()
         mail.init_app(app)
+        extensions['mail'] = mail
         logger.info("تم تهيئة خدمة البريد الإلكتروني")
 
-        return session_interface, login_manager, mail
+        # 4. تهيئة قاعدة البيانات
+        db = init_db(app)
+        if not db:
+            raise Exception("فشل في تهيئة قاعدة البيانات")
+        extensions['db'] = db
+        logger.info("تم تهيئة قاعدة البيانات")
+
+        return extensions
     except Exception as e:
         logger.error(f"خطأ في تهيئة الامتدادات: {str(e)}", exc_info=True)
         raise
@@ -123,8 +133,8 @@ def create_app(testing=False):
             logger.info("تم إنشاء دليل الجلسات")
 
         try:
-            # Initialize extensions
-            session_interface, login_manager, mail = init_extensions(app)
+            # Initialize extensions in correct order
+            extensions = init_extensions(app)
 
             # Setup CORS
             CORS(app, 
@@ -138,13 +148,6 @@ def create_app(testing=False):
                          "supports_credentials": True
                      }
                  })
-
-            # Initialize database
-            db = init_db(app)
-            if not db:
-                logger.error("فشل في تهيئة قاعدة البيانات")
-                return None
-            logger.info("تم الاتصال بقاعدة البيانات")
 
             @app.before_request
             def before_request():
@@ -165,11 +168,18 @@ def create_app(testing=False):
                 if db is not None:
                     db.close()
 
-            # Register blueprints
-            init_mail(mail)
+            # Register blueprints after all extensions are initialized
+            from server.blueprints.admin import admin_bp, init_mail
+            from server.blueprints.auth import auth_bp
+
+            init_mail(extensions['mail'])
             app.register_blueprint(admin_bp)
             app.register_blueprint(auth_bp)
             logger.info("تم تسجيل المسارات")
+
+            # Signal ready for workflow
+            print('ready')
+            sys.stdout.flush()
 
             return app
 

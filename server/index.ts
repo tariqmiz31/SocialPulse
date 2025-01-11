@@ -15,7 +15,7 @@ import { sql } from "drizzle-orm";
 import net from "net";
 
 // Function to check if a port is available
-const waitForPort = (port: number, host: string = '0.0.0.0', timeout: number = 60000): Promise<boolean> => {
+const waitForPort = (port: number, host: string = '0.0.0.0', timeout: number = 60): Promise<boolean> => {
   return new Promise((resolve) => {
     const startTime = Date.now();
     const checkPort = () => {
@@ -31,7 +31,7 @@ const waitForPort = (port: number, host: string = '0.0.0.0', timeout: number = 6
 
       socket.on('connect', () => {
         socket.destroy();
-        if (Date.now() - startTime >= timeout) {
+        if (Date.now() - startTime >= timeout * 1000) {
           logger.error(`Port ${port} is not available after timeout | المنفذ ${port} غير متاح بعد انتهاء المهلة`);
           resolve(false);
           return;

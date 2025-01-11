@@ -23,14 +23,15 @@ from server.blueprints.admin import admin_bp, init_mail
 from server.blueprints.auth import auth_bp
 from server import logger, User
 
-def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
-    """Wait for port availability with proper logging"""
+def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 60) -> bool:
+    """Wait for port availability with proper logging and workflow signaling"""
     start_time = time.time()
     logger.info(f"بدء انتظار المنفذ {port}...")
 
     while True:
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.settimeout(1)
                 sock.bind((host, port))
                 sock.close()
                 logger.info(f"المنفذ {port} متاح للاستخدام")
@@ -42,7 +43,66 @@ def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
             time.sleep(1)
             logger.debug(f"جاري انتظار المنفذ {port}...")
 
-def create_app(testing=False):
+def init_app_components(app: Flask):
+    """تهيئة مكونات التطبيق بالترتيب الصحيح"""
+    try:
+        components = {}
+
+        # 1. Session
+        session_interface = Session()
+        session_interface.init_app(app)
+        components['session'] = session_interface
+        logger.info("تم تهيئة إدارة الجلسات")
+
+        # 2. Database
+        db = init_db(app)
+        if not db:
+            raise Exception("فشل في تهيئة قاعدة البيانات")
+        components['db'] = db
+        logger.info("تم تهيئة قاعدة البيانات")
+
+        # 3. Login Manager
+        login_manager = LoginManager()
+        login_manager.init_app(app)
+        login_manager.login_view = 'auth.login'
+        login_manager.login_message = 'يجب تسجيل الدخول للوصول إلى هذه الصفحة'
+        login_manager.login_message_category = 'error'
+
+        @login_manager.user_loader
+        def load_user(user_id):
+            return User.get(user_id)
+
+        components['login_manager'] = login_manager
+        logger.info("تم تهيئة نظام تسجيل الدخول")
+
+        # 4. Mail
+        mail = Mail()
+        mail.init_app(app)
+        components['mail'] = mail
+        logger.info("تم تهيئة خدمة البريد الإلكتروني")
+
+        # 5. CORS
+        cors = CORS(app, 
+            supports_credentials=True,
+            resources={
+                r"/api/*": {
+                    "origins": ["http://localhost:5000", "https://*.repl.co", "http://0.0.0.0:5000"],
+                    "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+                    "allow_headers": ["Content-Type", "Authorization"],
+                    "expose_headers": ["Content-Type"],
+                    "supports_credentials": True
+                }
+            })
+        components['cors'] = cors
+        logger.info("تم تهيئة CORS")
+
+        return components
+
+    except Exception as e:
+        logger.error(f"خطأ في تهيئة المكونات: {str(e)}", exc_info=True)
+        raise
+
+def create_app():
     """Create Flask application with proper initialization sequence"""
     try:
         # Load environment variables
@@ -76,9 +136,7 @@ def create_app(testing=False):
             MAIL_USE_TLS=True,
             MAIL_USERNAME=os.getenv('MAIL_USERNAME'),
             MAIL_PASSWORD=os.getenv('MAIL_PASSWORD'),
-            MAIL_DEFAULT_SENDER=os.getenv('MAIL_USERNAME'),
-            WAIT_FOR_PORT=True,
-            WAIT_FOR_PORT_TIMEOUT=120
+            MAIL_DEFAULT_SENDER=os.getenv('MAIL_USERNAME')
         )
 
         # Ensure session directory exists
@@ -86,69 +144,46 @@ def create_app(testing=False):
             os.makedirs(app.config['SESSION_FILE_DIR'])
             logger.info("تم إنشاء دليل الجلسات")
 
-        # Initialize components in correct order
-        # 1. Session
-        session_interface = Session()
-        session_interface.init_app(app)
-        logger.info("تم تهيئة إدارة الجلسات")
+        try:
+            # Initialize all components
+            components = init_app_components(app)
 
-        # 2. Login Manager
-        login_manager = LoginManager()
-        login_manager.init_app(app)
-        login_manager.login_view = 'auth.login'
-        login_manager.login_message = 'يجب تسجيل الدخول للوصول إلى هذه الصفحة'
-        login_manager.login_message_category = 'error'
+            # Add database cleanup
+            @app.teardown_appcontext
+            def cleanup(exc):
+                """تنظيف موارد قاعدة البيانات"""
+                db = g.pop('db', None)
+                if db is not None:
+                    db.close()
 
-        @login_manager.user_loader
-        def load_user(user_id):
-            return User.get(user_id)
+            # Add request handlers
+            @app.before_request
+            def before_request():
+                """تنفيذ قبل كل طلب"""
+                try:
+                    g.db = get_db()
+                    if 'user_id' in session:
+                        session['last_activity'] = time.time()
+                        session.modified = True
+                except Exception as e:
+                    logger.error(f"خطأ في معالجة الطلب: {str(e)}", exc_info=True)
+                    return jsonify({"error": "حدث خطأ في معالجة الطلب"}), 500
 
-        logger.info("تم تهيئة نظام تسجيل الدخول")
+            # Register blueprints after all components are initialized
+            init_mail(components['mail'])
+            app.register_blueprint(admin_bp)
+            app.register_blueprint(auth_bp)
+            logger.info("تم تسجيل المسارات")
 
-        # 3. Mail
-        mail = Mail()
-        mail.init_app(app)
-        logger.info("تم تهيئة خدمة البريد الإلكتروني")
+            # Application is ready
+            app.ready = True
+            logger.info("تم تهيئة التطبيق بنجاح وهو جاهز للعمل")
 
-        # Setup CORS with proper configuration
-        CORS(app, 
-             supports_credentials=True,
-             resources={
-                 r"/api/*": {
-                     "origins": ["http://localhost:5000", "https://*.repl.co", "http://0.0.0.0:5000"],
-                     "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-                     "allow_headers": ["Content-Type", "Authorization"],
-                     "expose_headers": ["Content-Type"],
-                     "supports_credentials": True
-                 }
-             })
+            return app
 
-        # Initialize database
-        db = init_db(app)
-        if not db:
-            logger.error("فشل في تهيئة قاعدة البيانات")
+        except Exception as e:
+            logger.error(f"خطأ في إعداد التطبيق: {str(e)}", exc_info=True)
             return None
-        logger.info("تم الاتصال بقاعدة البيانات بنجاح")
-
-        # Add database cleanup to app context
-        @app.teardown_appcontext
-        def cleanup(exc):
-            """Clean up database resources"""
-            db = g.pop('db', None)
-            if db is not None:
-                db.close()
-
-        # Register blueprints
-        init_mail(mail)
-        app.register_blueprint(admin_bp)
-        app.register_blueprint(auth_bp)
-        logger.info("تم تسجيل المسارات")
-
-        # Signal ready for workflow
-        print('ready')
-        sys.stdout.flush()
-
-        return app
 
     except Exception as e:
         logger.error(f"خطأ في تهيئة التطبيق: {str(e)}", exc_info=True)
@@ -172,14 +207,9 @@ def main():
             logger.error("فشل في إنشاء تطبيق Flask")
             return 1
 
-        # Start metrics server
-        metrics_port = port + 1
-        try:
-            from prometheus_client import start_http_server
-            start_http_server(metrics_port)
-            logger.info(f"تم بدء خادم المقاييس على المنفذ {metrics_port}")
-        except Exception as e:
-            logger.warning(f"فشل في بدء خادم المقاييس: {str(e)}")
+        # Signal ready for workflow
+        print('ready')
+        sys.stdout.flush()
 
         # Start server using waitress for production
         from waitress import serve
