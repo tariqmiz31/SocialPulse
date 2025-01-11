@@ -36,16 +36,19 @@ def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                 sock.settimeout(1)
-                sock.bind((host, port))
-                sock.close()
-                logger.info(f"المنفذ {port} متاح للاستخدام")
-                return True
+                result = sock.connect_ex((host, port))
+                if result != 0:  # Port is available
+                    logger.info(f"المنفذ {port} متاح للاستخدام")
+                    return True
+                if time.time() - start_time >= timeout:
+                    logger.error(f"المنفذ {port} مشغول بعد {timeout} ثانية")
+                    return False
         except socket.error as e:
             if time.time() - start_time >= timeout:
-                logger.error(f"المنفذ {port} غير متاح بعد {timeout} ثانية. السبب: {str(e)}")
+                logger.error(f"خطأ في فحص المنفذ {port}: {str(e)}")
                 return False
-            time.sleep(1)
-            logger.debug(f"جاري انتظار المنفذ {port}...")
+        time.sleep(1)
+        logger.debug(f"جاري انتظار المنفذ {port}...")
 
 def create_app(testing=False):
     """Create Flask application with proper initialization sequence"""
@@ -54,7 +57,7 @@ def create_app(testing=False):
         load_dotenv()
 
         # Check required environment variables
-        required_vars = ['MAIL_USERNAME', 'MAIL_PASSWORD', 'DATABASE_URL']
+        required_vars = ['DATABASE_URL']
         missing_vars = [var for var in required_vars if not os.getenv(var)]
         if missing_vars:
             logger.error(f"المتغيرات البيئية التالية مفقودة: {', '.join(missing_vars)}")
@@ -75,13 +78,7 @@ def create_app(testing=False):
             PERMANENT_SESSION_LIFETIME=timedelta(days=1),
             SESSION_COOKIE_SECURE=True,
             SESSION_COOKIE_HTTPONLY=True,
-            SESSION_COOKIE_SAMESITE='Lax',
-            MAIL_SERVER='smtp.gmail.com',
-            MAIL_PORT=587,
-            MAIL_USE_TLS=True,
-            MAIL_USERNAME=os.getenv('MAIL_USERNAME'),
-            MAIL_PASSWORD=os.getenv('MAIL_PASSWORD'),
-            MAIL_DEFAULT_SENDER=os.getenv('MAIL_USERNAME')
+            SESSION_COOKIE_SAMESITE='Lax'
         )
 
         # Ensure session directory exists
@@ -109,9 +106,21 @@ def create_app(testing=False):
         logger.info("تم تهيئة نظام تسجيل الدخول")
 
         # 3. Mail
-        mail = Mail()
-        mail.init_app(app)
-        logger.info("تم تهيئة خدمة البريد الإلكتروني")
+        if os.getenv('MAIL_USERNAME') and os.getenv('MAIL_PASSWORD'):
+            app.config.update(
+                MAIL_SERVER='smtp.gmail.com',
+                MAIL_PORT=587,
+                MAIL_USE_TLS=True,
+                MAIL_USERNAME=os.getenv('MAIL_USERNAME'),
+                MAIL_PASSWORD=os.getenv('MAIL_PASSWORD'),
+                MAIL_DEFAULT_SENDER=os.getenv('MAIL_USERNAME')
+            )
+            mail = Mail()
+            mail.init_app(app)
+            logger.info("تم تهيئة خدمة البريد الإلكتروني")
+        else:
+            mail = None
+            logger.warning("لم يتم تكوين خدمة البريد الإلكتروني")
 
         # 4. Database
         db = init_db(app)
@@ -139,11 +148,17 @@ def create_app(testing=False):
             logger.info("تم تهيئة مدير التحقق")
 
         # Register blueprints
-        init_mail(mail)
+        if mail:
+            init_mail(mail)
         app.register_blueprint(admin_bp)
         app.register_blueprint(auth_bp)
         app.register_blueprint(roles_bp)
         logger.info("تم تسجيل المسارات")
+
+        # Add before request handler
+        @app.before_request
+        def before_request():
+            g.db = get_db()
 
         return app
 
@@ -182,7 +197,7 @@ def main():
         sys.stdout.flush()
 
         # Start server
-        app.run(host='0.0.0.0', port=port)
+        app.run(host='0.0.0.0', port=port, debug=True)
         return 0
 
     except Exception as e:
