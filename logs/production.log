@@ -1,0 +1,120 @@
+2025-01-11 15:51:49 [INFO] بدء تهيئة الخادم على المنفذ 5000
+2025-01-11 15:51:49 [INFO] جاري تهيئة قاعدة البيانات...
+2025-01-11 15:51:51 [INFO] تم الاتصال بقاعدة البيانات بنجاح: PostgreSQL 16.6 on x86_64-pc-linux-gnu, compiled by gcc (Debian 10.2.1-6) 10.2.1 20210110, 64-bit
+2025-01-11 15:51:52 [INFO] تم إنشاء/التحقق من وجود جميع الجداول المطلوبة
+2025-01-11 15:51:52 [INFO] ✓ تم تهيئة قاعدة البيانات بنجاح
+2025-01-11 15:51:52 [INFO] جاري تهيئة نظام الجلسات...
+2025-01-11 15:51:52 [ERROR] خطأ في تهيئة المكونات: Unrecognized value for SESSION_TYPE: null
+Traceback (most recent call last):
+  File "/home/runner/workspace/server/start_production.py", line 50, in init_app_components
+    session_interface.init_app(app)
+  File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/flask_session/__init__.py", line 41, in init_app
+    app.session_interface = self._get_interface(app)
+                            ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/flask_session/__init__.py", line 184, in _get_interface
+    raise ValueError(f"Unrecognized value for SESSION_TYPE: {SESSION_TYPE}")
+ValueError: Unrecognized value for SESSION_TYPE: null
+2025-01-11 15:51:52 [ERROR] خطأ في إعداد التطبيق: Unrecognized value for SESSION_TYPE: null
+Traceback (most recent call last):
+  File "/home/runner/workspace/server/start_production.py", line 99, in create_app
+    components = init_app_components(app)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/workspace/server/start_production.py", line 50, in init_app_components
+    session_interface.init_app(app)
+  File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/flask_session/__init__.py", line 41, in init_app
+    app.session_interface = self._get_interface(app)
+                            ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/flask_session/__init__.py", line 184, in _get_interface
+    raise ValueError(f"Unrecognized value for SESSION_TYPE: {SESSION_TYPE}")
+ValueError: Unrecognized value for SESSION_TYPE: null
+2025-01-11 15:51:52 [ERROR] فشل في إنشاء تطبيق Flask
+2025-01-11 15:54:56 [INFO] بدء تهيئة الخادم على المنفذ 5000
+2025-01-11 15:54:56 [INFO] جاري تهيئة قاعدة البيانات...
+2025-01-11 15:54:58 [INFO] تم الاتصال بقاعدة البيانات بنجاح: PostgreSQL 16.6 on x86_64-pc-linux-gnu, compiled by gcc (Debian 10.2.1-6) 10.2.1 20210110, 64-bit
+2025-01-11 15:54:59 [INFO] تم إنشاء/التحقق من وجود جميع الجداول المطلوبة
+2025-01-11 15:54:59 [INFO] ✓ تم تهيئة قاعدة البيانات بنجاح
+2025-01-11 15:54:59 [INFO] جاري تهيئة نظام الجلسات...
+2025-01-11 15:54:59 [ERROR] خطأ في تهيئة المكونات: Unrecognized value for SESSION_TYPE: null
+Traceback (most recent call last):
+  File "/home/runner/workspace/server/start_production.py", line 50, in init_app_components
+    session_interface.init_app(app)
+  File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/flask_session/__init__.py", line 41, in init_app
+    app.session_interface = self._get_interface(app)
+                            ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/flask_session/__init__.py", line 184, in _get_interface
+    raise ValueError(f"Unrecognized value for SESSION_TYPE: {SESSION_TYPE}")
+ValueError: Unrecognized value for SESSION_TYPE: null
+2025-01-11 15:54:59 [ERROR] خطأ في إعداد التطبيق: Unrecognized value for SESSION_TYPE: null
+Traceback (most recent call last):
+  File "/home/runner/workspace/server/start_production.py", line 99, in create_app
+    components = init_app_components(app)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/workspace/server/start_production.py", line 50, in init_app_components
+    session_interface.init_app(app)
+  File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/flask_session/__init__.py", line 41, in init_app
+    app.session_interface = self._get_interface(app)
+                            ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/flask_session/__init__.py", line 184, in _get_interface
+    raise ValueError(f"Unrecognized value for SESSION_TYPE: {SESSION_TYPE}")
+ValueError: Unrecognized value for SESSION_TYPE: null
+2025-01-11 15:54:59 [ERROR] فشل في إنشاء تطبيق Flask
+2025-01-11 15:56:17 [INFO] بدء تهيئة الخادم على المنفذ 5000
+2025-01-11 15:56:17 [INFO] جاري تهيئة قاعدة البيانات...
+2025-01-11 15:56:19 [INFO] تم الاتصال بقاعدة البيانات بنجاح: PostgreSQL 16.6 on x86_64-pc-linux-gnu, compiled by gcc (Debian 10.2.1-6) 10.2.1 20210110, 64-bit
+2025-01-11 15:56:20 [INFO] تم إنشاء/التحقق من وجود جميع الجداول المطلوبة
+2025-01-11 15:56:20 [INFO] ✓ تم تهيئة قاعدة البيانات بنجاح
+2025-01-11 15:56:20 [INFO] جاري تهيئة نظام الجلسات...
+2025-01-11 15:56:20 [ERROR] خطأ في تهيئة المكونات: Unrecognized value for SESSION_TYPE: null
+Traceback (most recent call last):
+  File "/home/runner/workspace/server/start_production.py", line 50, in init_app_components
+    session_interface.init_app(app)
+  File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/flask_session/__init__.py", line 41, in init_app
+    app.session_interface = self._get_interface(app)
+                            ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/flask_session/__init__.py", line 184, in _get_interface
+    raise ValueError(f"Unrecognized value for SESSION_TYPE: {SESSION_TYPE}")
+ValueError: Unrecognized value for SESSION_TYPE: null
+2025-01-11 15:56:20 [ERROR] خطأ في إعداد التطبيق: Unrecognized value for SESSION_TYPE: null
+Traceback (most recent call last):
+  File "/home/runner/workspace/server/start_production.py", line 99, in create_app
+    components = init_app_components(app)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/workspace/server/start_production.py", line 50, in init_app_components
+    session_interface.init_app(app)
+  File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/flask_session/__init__.py", line 41, in init_app
+    app.session_interface = self._get_interface(app)
+                            ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/flask_session/__init__.py", line 184, in _get_interface
+    raise ValueError(f"Unrecognized value for SESSION_TYPE: {SESSION_TYPE}")
+ValueError: Unrecognized value for SESSION_TYPE: null
+2025-01-11 15:56:20 [ERROR] فشل في إنشاء تطبيق Flask
+2025-01-11 15:57:17 [INFO] بدء تهيئة الخادم على المنفذ 5000
+2025-01-11 15:57:17 [INFO] جاري تهيئة قاعدة البيانات...
+2025-01-11 15:57:19 [INFO] تم الاتصال بقاعدة البيانات بنجاح: PostgreSQL 16.6 on x86_64-pc-linux-gnu, compiled by gcc (Debian 10.2.1-6) 10.2.1 20210110, 64-bit
+2025-01-11 15:57:20 [INFO] تم إنشاء/التحقق من وجود جميع الجداول المطلوبة
+2025-01-11 15:57:20 [INFO] ✓ تم تهيئة قاعدة البيانات بنجاح
+2025-01-11 15:57:20 [INFO] جاري تهيئة نظام الجلسات...
+2025-01-11 15:57:20 [ERROR] خطأ في تهيئة المكونات: Unrecognized value for SESSION_TYPE: null
+Traceback (most recent call last):
+  File "/home/runner/workspace/server/start_production.py", line 64, in init_app_components
+    session_interface.init_app(app)
+  File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/flask_session/__init__.py", line 41, in init_app
+    app.session_interface = self._get_interface(app)
+                            ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/flask_session/__init__.py", line 184, in _get_interface
+    raise ValueError(f"Unrecognized value for SESSION_TYPE: {SESSION_TYPE}")
+ValueError: Unrecognized value for SESSION_TYPE: null
+2025-01-11 15:57:20 [ERROR] خطأ في إعداد التطبيق: Unrecognized value for SESSION_TYPE: null
+Traceback (most recent call last):
+  File "/home/runner/workspace/server/start_production.py", line 113, in create_app
+    components = init_app_components(app)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/workspace/server/start_production.py", line 64, in init_app_components
+    session_interface.init_app(app)
+  File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/flask_session/__init__.py", line 41, in init_app
+    app.session_interface = self._get_interface(app)
+                            ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/workspace/.pythonlibs/lib/python3.11/site-packages/flask_session/__init__.py", line 184, in _get_interface
+    raise ValueError(f"Unrecognized value for SESSION_TYPE: {SESSION_TYPE}")
+ValueError: Unrecognized value for SESSION_TYPE: null
+2025-01-11 15:57:20 [ERROR] فشل في إنشاء تطبيق Flask

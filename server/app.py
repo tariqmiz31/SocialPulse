@@ -22,66 +22,19 @@ log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
 if not os.path.exists(log_dir):
     os.makedirs(log_dir)
 
-# إعداد ملف السجلات الدوار
-file_handler = RotatingFileHandler(
-    os.path.join(log_dir, 'app.log'),
-    maxBytes=1024 * 1024,  # 1MB
-    backupCount=10,
-    encoding='utf-8'
-)
-file_handler.setFormatter(logging.Formatter(
-    '%(asctime)s [%(levelname)s] %(message)s',
-    '%Y-%m-%d %H:%M:%S'
-))
-logger.addHandler(file_handler)
-
-def init_app_components(app: Flask):
-    """تهيئة مكونات التطبيق بالترتيب الصحيح مع التحقق من كل خطوة"""
-    try:
-        components = {}
-
-        # 1. تهيئة قاعدة البيانات (أولاً لأنها أساسية)
-        logger.info("جاري تهيئة قاعدة البيانات...")
-        db = init_db(app)
-        if not db:
-            raise Exception("فشل في تهيئة قاعدة البيانات")
-        components['db'] = db
-        logger.info("✓ تم تهيئة قاعدة البيانات بنجاح")
-
-        # 2. تهيئة إدارة الجلسات
-        logger.info("جاري تهيئة نظام الجلسات...")
-        session_interface = Session()
-        session_interface.init_app(app)
-        components['session'] = session_interface
-        logger.info("✓ تم تهيئة نظام الجلسات بنجاح")
-
-        # 3. تهيئة نظام المصادقة وتسجيل الدخول
-        logger.info("جاري تهيئة نظام المصادقة...")
-        login_manager = LoginManager()
-        login_manager.init_app(app)
-        login_manager.login_view = 'auth.login'
-        login_manager.login_message = 'يجب تسجيل الدخول للوصول إلى هذه الصفحة'
-        login_manager.login_message_category = 'error'
-
-        @login_manager.user_loader
-        def load_user(user_id):
-            return User.get(user_id)
-
-        components['login_manager'] = login_manager
-        logger.info("✓ تم تهيئة نظام المصادقة بنجاح")
-
-        # 4. تهيئة خدمة البريد الإلكتروني
-        logger.info("جاري تهيئة خدمة البريد الإلكتروني...")
-        mail = Mail()
-        mail.init_app(app)
-        components['mail'] = mail
-        logger.info("✓ تم تهيئة خدمة البريد الإلكتروني بنجاح")
-
-        return components
-
-    except Exception as e:
-        logger.error(f"خطأ في تهيئة المكونات: {str(e)}", exc_info=True)
-        raise
+def wait_for_port(port=5000, host='0.0.0.0', timeout=60):
+    """انتظار حتى يصبح المنفذ متاحاً"""
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        try:
+            with socket.create_connection((host, port), timeout=1):
+                logger.info(f"المنفذ {port} متاح للاستخدام")
+                return True
+        except (socket.timeout, ConnectionRefusedError, OSError) as e:
+            logger.debug(f"انتظار المنفذ {port}: {str(e)}")
+            time.sleep(1)
+    logger.error(f"المنفذ {port} غير متاح بعد {timeout} ثانية")
+    return False
 
 def create_app(testing=False):
     """إنشاء وتهيئة تطبيق Flask مع التحقق المناسب من كل خطوة"""
@@ -127,7 +80,32 @@ def create_app(testing=False):
 
         try:
             # تهيئة المكونات الأساسية
-            components = init_app_components(app)
+            session_interface = Session()
+            session_interface.init_app(app)
+            logger.info("✓ تم تهيئة نظام الجلسات")
+
+            login_manager = LoginManager()
+            login_manager.init_app(app)
+            login_manager.login_view = 'auth.login'
+            login_manager.login_message = 'يجب تسجيل الدخول للوصول إلى هذه الصفحة'
+            login_manager.login_message_category = 'error'
+
+            @login_manager.user_loader
+            def load_user(user_id):
+                return User.get(user_id)
+
+            logger.info("✓ تم تهيئة نظام تسجيل الدخول")
+
+            # تهيئة خدمة البريد الإلكتروني
+            mail = Mail()
+            mail.init_app(app)
+            logger.info("✓ تم تهيئة خدمة البريد الإلكتروني")
+
+            # تهيئة قاعدة البيانات
+            db = init_db(app)
+            if not db:
+                raise Exception("فشل في تهيئة قاعدة البيانات")
+            logger.info("✓ تم تهيئة قاعدة البيانات")
 
             # إضافة تنظيف موارد قاعدة البيانات
             @app.teardown_appcontext
@@ -151,7 +129,6 @@ def create_app(testing=False):
                     return jsonify({"error": "حدث خطأ في معالجة الطلب"}), 500
 
             # تهيئة CORS
-            logger.info("جاري تهيئة CORS...")
             CORS(app, 
                 supports_credentials=True,
                 resources={
@@ -163,33 +140,38 @@ def create_app(testing=False):
                         "supports_credentials": True
                     }
                 })
-            logger.info("✓ تم تهيئة CORS بنجاح")
+            logger.info("✓ تم تهيئة CORS")
 
-            # تسجيل المسارات بعد تهيئة قاعدة البيانات
-            logger.info("جاري تسجيل المسارات...")
-            init_mail(components['mail'])
+            # تسجيل المسارات
+            init_mail(mail)
             app.register_blueprint(admin_bp)
             app.register_blueprint(auth_bp)
-            logger.info("✓ تم تسجيل المسارات بنجاح")
+            logger.info("✓ تم تسجيل المسارات")
 
-            # إضافة نقطة نهاية للتحقق من حالة الخادم
+            # نقطة نهاية لحالة الخادم
             @app.route('/api/server/status')
             def server_status():
                 """التحقق من حالة الخادم"""
                 return jsonify({
                     'status': 'running',
                     'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
-                    'ready': getattr(app, 'ready', False),
-                    'components_status': {
+                    'components': {
                         'database': bool(g.get('db')),
-                        'mail': bool(components.get('mail')),
-                        'session': bool(components.get('session'))
+                        'mail': bool(mail),
+                        'session': bool(session_interface)
                     }
                 })
 
+            # انتظار جاهزية المنفذ قبل بدء الخدمة
+            port = int(os.getenv('PORT', '5000'))
+            if not wait_for_port(port=port):
+                logger.error(f"المنفذ {port} غير متاح بعد انتهاء المهلة")
+                return None
+
             # تأكيد جاهزية التطبيق
-            app.ready = True
-            logger.info("✓ تم تهيئة التطبيق بنجاح وهو جاهز للعمل")
+            print('ready')
+            sys.stdout.flush()
+            logger.info("✓ التطبيق جاهز للتشغيل")
 
             return app
 
@@ -201,50 +183,8 @@ def create_app(testing=False):
         logger.error(f"خطأ في تهيئة التطبيق: {str(e)}", exc_info=True)
         return None
 
-def wait_for_port(host='0.0.0.0', port=5000, timeout=60):
-    """انتظار حتى يصبح المنفذ متاحاً"""
-    start_time = time.time()
-    while time.time() - start_time < timeout:
-        try:
-            with socket.create_connection((host, port), timeout=1):
-                logger.info(f"المنفذ {port} متاح للاستخدام")
-                return True
-        except (socket.timeout, ConnectionRefusedError, OSError) as e:
-            logger.debug(f"انتظار المنفذ {port}: {str(e)}")
-            time.sleep(1)
-    logger.error(f"المنفذ {port} غير متاح بعد {timeout} ثانية")
-    return False
-
-def main():
-    """النقطة الرئيسية لبدء الخادم"""
-    try:
-        # تحديد المنفذ
-        port = int(os.getenv('PORT', '5000'))
-        logger.info(f"بدء تهيئة الخادم على المنفذ {port}")
-
-        # إنشاء وتهيئة التطبيق
-        app = create_app()
-        if not app:
-            logger.error("فشل في إنشاء تطبيق Flask")
-            return None, None
-
-        # انتظار حتى يصبح المنفذ متاحاً
-        if not wait_for_port(port=port):
-            logger.error(f"المنفذ {port} غير متاح بعد انتهاء المهلة")
-            return None, None
-
-        # تأكيد جاهزية التطبيق
-        logger.info("التطبيق جاهز للتشغيل")
-        print('ready')
-        sys.stdout.flush()
-
-        return app, port
-
-    except Exception as e:
-        logger.error(f"خطأ في بدء الخادم: {str(e)}", exc_info=True)
-        return None, None
-
 if __name__ == "__main__":
-    app, port = main()
-    if app and port:
-        app.run(host="0.0.0.0", port=port, debug=True)
+    app = create_app()
+    if app:
+        port = int(os.getenv('PORT', '5000'))
+        app.run(host="0.0.0.0", port=port)

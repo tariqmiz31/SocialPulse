@@ -29,6 +29,7 @@ class User(UserMixin):
     def get(user_id):
         """تحميل المستخدم من قاعدة البيانات"""
         try:
+            from .database import get_db
             db = get_db()
             if db:
                 cur = db.cursor()
