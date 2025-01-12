@@ -28,12 +28,14 @@ PRODUCTION_CONFIG = {
     'url_scheme': 'https',
     'connection_limit': 1000,
     'cleanup_interval': 30,
-    'channel_timeout': 60,
+    'channel_timeout': 30,
     'log_untrusted_proxy_headers': True,
     'trusted_proxy': '*',
     'log_socket_errors': True,
     'wait_for_port': True,
-    'wait_for_port_timeout': 120,
+    'wait_for_port_timeout': 60,  # تقليل مدة الانتظار إلى دقيقة واحدة
+    'port_cleanup_attempts': 5,  # عدد محاولات تنظيف المنفذ
+    'port_cleanup_interval': 2,  # الفاصل الزمني بين محاولات التنظيف بالثواني
 }
 
 # تكوين التطبيق

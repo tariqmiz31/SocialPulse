@@ -24,8 +24,6 @@ const waitForPort = (port: number, host: string = '0.0.0.0', timeout: number = 6
       socket.on('error', () => {
         socket.destroy();
         logger.info(`Port ${port} is available | المنفذ ${port} متاح`);
-        // Signal ready for workflow
-        console.log('ready');
         resolve(true);
       });
 
@@ -48,11 +46,21 @@ const waitForPort = (port: number, host: string = '0.0.0.0', timeout: number = 6
 // Create Express app
 const app = express();
 
-// Basic middleware
+// Basic middleware setup
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
-// Security Headers with configuration for development
+// Configure CORS before routes
+app.use(cors({
+  origin: process.env.NODE_ENV === 'production' 
+    ? [process.env.APP_URL].filter(Boolean) as string[]
+    : ['http://localhost:5000', 'http://0.0.0.0:5000'],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+// Security Headers
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -71,38 +79,38 @@ app.use(helmet({
 // Enable compression
 app.use(compression());
 
-// Configure CORS
-app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
-    ? [process.env.APP_URL].filter(Boolean) as string[]
-    : ['http://localhost:5000', 'http://0.0.0.0:5000'],
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
-
 // Add performance monitoring
 app.use(performanceMonitor);
 
-// Basic status endpoint for health checks
-app.get("/api/monitoring/status", async (_req, res) => {
-  try {
-    await db.execute(sql`SELECT 1`);
-    res.json({
-      server: "running",
-      database: "connected",
-      timestamp: new Date().toISOString(),
-      environment: process.env.NODE_ENV
-    });
-  } catch (error: any) {
-    logger.error('Error in status endpoint:', error);
-    res.status(500).json({ 
-      server: "running",
-      database: "error",
-      error: error.message,
-      timestamp: new Date().toISOString()
-    });
-  }
+// Request logging middleware
+app.use((req, res, next) => {
+  const start = Date.now();
+  const path = req.path;
+  let capturedJsonResponse: Record<string, any> | undefined = undefined;
+
+  const originalResJson = res.json;
+  res.json = function (bodyJson, ...args) {
+    capturedJsonResponse = bodyJson;
+    return originalResJson.apply(res, [bodyJson, ...args]);
+  };
+
+  res.on("finish", () => {
+    const duration = Date.now() - start;
+    if (path.startsWith("/api")) {
+      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
+      if (capturedJsonResponse) {
+        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
+      }
+
+      if (logLine.length > 80) {
+        logLine = logLine.slice(0, 79) + "…";
+      }
+
+      log(logLine);
+    }
+  });
+
+  next();
 });
 
 // Initialize server setup
@@ -116,7 +124,7 @@ app.get("/api/monitoring/status", async (_req, res) => {
     // Create HTTP server
     const server = createServer(app);
 
-    // Register routes
+    // Register routes BEFORE Vite setup
     registerRoutes(app);
 
     // Start monitoring
@@ -125,7 +133,7 @@ app.get("/api/monitoring/status", async (_req, res) => {
     // Setup scheduled tasks
     scheduleBackups();
 
-    // Error handling middleware
+    // Error handling middleware (must be after routes)
     app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
       const status = err.status || err.statusCode || 500;
       const message = err.message || "Internal Server Error";
@@ -160,7 +168,8 @@ app.get("/api/monitoring/status", async (_req, res) => {
 
     server.listen(PORT, "0.0.0.0", () => {
       logger.info(`Server running on port ${PORT} in ${process.env.NODE_ENV || 'development'} mode | الخادم يعمل على المنفذ ${PORT}`);
-      logger.info(`Database connected successfully | تم الاتصال بقاعدة البيانات بنجاح`);
+      // Signal ready for workflow
+      console.log('ready');
     });
 
     // Handle cleanup on shutdown

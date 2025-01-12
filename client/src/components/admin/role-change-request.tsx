@@ -5,15 +5,16 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { SelectUser } from "@db/schema";
+import type { RoleChangeRequest } from "@/types/admin";
 
 interface RoleChangeRequestProps {
   user: SelectUser;
-  onRequest: (data: { userId: number; newRole: string; adminEmail: string }) => void;
+  onRequest: (data: RoleChangeRequest) => void;
 }
 
 export function RoleChangeRequest({ user, onRequest }: RoleChangeRequestProps) {
   const [adminEmail, setAdminEmail] = useState("");
-  const [newRole, setNewRole] = useState(user.role === "admin" ? "user" : "admin");
+  const [newRole, setNewRole] = useState<"admin" | "user">(user.role === "admin" ? "user" : "admin");
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,7 +34,7 @@ export function RoleChangeRequest({ user, onRequest }: RoleChangeRequestProps) {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="role">الدور الجديد</Label>
-            <Select value={newRole} onValueChange={setNewRole}>
+            <Select value={newRole} onValueChange={(value: "admin" | "user") => setNewRole(value)}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>

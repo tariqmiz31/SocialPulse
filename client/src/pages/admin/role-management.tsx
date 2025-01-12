@@ -4,17 +4,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { VerificationProgress } from "@/components/admin/verification-progress";
-
-interface RoleChangeStep {
-  step: number;
-  totalSteps: number;
-  completed: boolean;
-  username: string;
-  currentRole: string;
-  newRole: string;
-}
+import { useAdminPermissions } from "@/hooks/use-admin-permissions";
+import type { RoleChangeRequest, VerificationStatus } from "@/types/admin";
 
 const VERIFICATION_STEPS = [
   { step: 1, label: "تقديم الطلب" },
@@ -24,18 +17,14 @@ const VERIFICATION_STEPS = [
 
 export default function RoleManagement() {
   const [verificationCode, setVerificationCode] = useState("");
-  const [verificationId, setVerificationId] = useState<string | null>(null);
+  const [currentVerification, setCurrentVerification] = useState<VerificationStatus | null>(null);
   const { toast } = useToast();
-
-  // استعلام عن حالة تغيير الصلاحيات
-  const { data: roleChangeStatus, refetch } = useQuery<RoleChangeStep>({
-    queryKey: ['/api/roles/change-status', verificationId],
-    enabled: !!verificationId,
-  });
+  const queryClient = useQueryClient();
+  const { data: permissions, isLoading } = useAdminPermissions();
 
   // طلب تغيير الصلاحيات
   const requestRoleChange = useMutation({
-    mutationFn: async (data: { userId: number; newRole: string; adminEmail: string }) => {
+    mutationFn: async (data: RoleChangeRequest) => {
       const response = await fetch('/api/roles/change-request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -47,11 +36,10 @@ export default function RoleManagement() {
         throw new Error(await response.text());
       }
 
-      const result = await response.json();
-      return result;
+      return response.json() as Promise<VerificationStatus>;
     },
     onSuccess: (data) => {
-      setVerificationId(data.verification_id);
+      setCurrentVerification(data);
       toast({
         title: "تم إرسال رمز التحقق",
         description: "يرجى التحقق من بريدك الإلكتروني",
@@ -72,7 +60,10 @@ export default function RoleManagement() {
       const response = await fetch('/api/roles/verify-change', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ verification_id: verificationId, code: verificationCode }),
+        body: JSON.stringify({ 
+          verification_id: currentVerification?.verificationCode,
+          code: verificationCode 
+        }),
         credentials: 'include',
       });
 
@@ -80,22 +71,23 @@ export default function RoleManagement() {
         throw new Error(await response.text());
       }
 
-      return response.json();
+      return response.json() as Promise<VerificationStatus>;
     },
     onSuccess: (data) => {
-      if (data.completed) {
+      setCurrentVerification(data);
+      if (data.step === data.totalSteps) {
         toast({
           title: "تم تغيير الصلاحيات بنجاح",
           description: data.message,
         });
-        setVerificationId(null);
+        setCurrentVerification(null);
         setVerificationCode("");
+        queryClient.invalidateQueries({ queryKey: ['/api/admin/check-permissions'] });
       } else {
         toast({
           title: `تم التحقق من الخطوة ${data.step}`,
-          description: `باقي ${data.total_steps - data.step} خطوات`,
+          description: `باقي ${data.totalSteps - data.step} خطوات`,
         });
-        refetch();
       }
     },
     onError: (error: Error) => {
@@ -107,10 +99,28 @@ export default function RoleManagement() {
     },
   });
 
+  if (isLoading) {
+    return (
+      <div className="flex justify-center items-center min-h-[60vh]">
+        <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
+      </div>
+    );
+  }
+
+  if (!permissions?.isAdmin) {
+    return (
+      <Alert variant="destructive">
+        <AlertDescription>
+          عذراً، لا تملك صلاحيات الوصول إلى هذه الصفحة
+        </AlertDescription>
+      </Alert>
+    );
+  }
+
   const currentSteps = VERIFICATION_STEPS.map((step) => ({
     ...step,
-    completed: roleChangeStatus ? roleChangeStatus.step > step.step : false,
-    current: roleChangeStatus ? roleChangeStatus.step === step.step : false,
+    completed: currentVerification ? currentVerification.step > step.step : false,
+    current: currentVerification ? currentVerification.step === step.step : false,
   }));
 
   return (
@@ -120,24 +130,15 @@ export default function RoleManagement() {
           <CardTitle>إدارة صلاحيات المستخدمين</CardTitle>
         </CardHeader>
         <CardContent>
-          {roleChangeStatus && (
-            <>
-              <Alert className="mb-4">
-                <AlertDescription>
-                  تغيير صلاحيات المستخدم {roleChangeStatus.username} 
-                  من {roleChangeStatus.currentRole} إلى {roleChangeStatus.newRole}
-                </AlertDescription>
-              </Alert>
-
-              <VerificationProgress
-                steps={currentSteps}
-                currentStep={roleChangeStatus.step}
-              />
-            </>
+          {currentVerification && (
+            <VerificationProgress
+              steps={currentSteps}
+              currentStep={currentVerification.step}
+            />
           )}
 
           <div className="space-y-4">
-            {verificationId && (
+            {currentVerification && (
               <div className="flex gap-4">
                 <Input
                   type="text"

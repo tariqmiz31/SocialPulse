@@ -18,12 +18,7 @@ from waitress import serve
 # Add project root to Python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from server.production_config import (
-    PRODUCTION_CONFIG,
-    APP_CONFIG,
-    file_handler,
-    LOG_DIR
-)
+from server.production_config import PRODUCTION_CONFIG, APP_CONFIG, file_handler
 from server.database import init_db, get_db
 from server.blueprints.admin import admin_bp, init_mail
 from server.blueprints.auth import auth_bp
@@ -32,53 +27,75 @@ from server import logger
 # إضافة معالج السجلات
 logger.addHandler(file_handler)
 
-def cleanup_port(port: int, host: str = '0.0.0.0') -> bool:
-    """تنظيف المنفذ إذا كان مشغولاً"""
+def kill_process_on_port(port: int) -> bool:
+    """قتل العملية التي تستخدم المنفذ المحدد"""
     try:
         for proc in psutil.process_iter(['pid', 'name', 'connections']):
             try:
-                connections = proc.connections()
-                for conn in connections:
+                for conn in proc.connections():
                     if hasattr(conn, 'laddr') and conn.laddr.port == port:
-                        logger.info(f"إنهاء العملية {proc.pid} التي تستخدم المنفذ {port}")
+                        logger.info(f"محاولة إنهاء العملية {proc.pid} على المنفذ {port}")
                         proc.terminate()
                         try:
                             proc.wait(timeout=3)
+                            return True
                         except psutil.TimeoutExpired:
                             proc.kill()
-                        return True
-            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.TimeoutExpired):
+                            return True
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
+        return True
     except Exception as e:
-        logger.error(f"خطأ في تنظيف المنفذ: {str(e)}")
+        logger.error(f"خطأ في قتل العملية: {str(e)}")
+        return False
+
+def cleanup_port(port: int) -> bool:
+    """تنظيف المنفذ بشكل متكرر"""
+    attempts = PRODUCTION_CONFIG['port_cleanup_attempts']
+    interval = PRODUCTION_CONFIG['port_cleanup_interval']
+
+    for attempt in range(attempts):
+        logger.info(f"محاولة تنظيف المنفذ {port} - محاولة {attempt + 1}/{attempts}")
+
+        if kill_process_on_port(port):
+            time.sleep(interval)  # انتظار لإتاحة وقت للنظام لتحرير المنفذ
+
+            # التحقق من أن المنفذ متاح الآن
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                    sock.bind(('0.0.0.0', port))
+                    sock.close()
+                    logger.info(f"تم تنظيف المنفذ {port} بنجاح")
+                    return True
+            except socket.error:
+                logger.debug(f"المنفذ {port} لا يزال مشغولاً بعد المحاولة {attempt + 1}")
+                time.sleep(interval)
+                continue
+
+    logger.error(f"فشل في تنظيف المنفذ {port} بعد {attempts} محاولات")
     return False
 
-def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
+def wait_for_port(port: int, timeout: int = 60) -> bool:
     """انتظار حتى يصبح المنفذ متاحاً"""
-    logger.info(f"بدء انتظار المنفذ {port}... | Starting to wait for port {port}...")
+    logger.info(f"بدء انتظار المنفذ {port}...")
     start_time = time.time()
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
     while time.time() - start_time < timeout:
-        try:
-            # محاولة تنظيف المنفذ أولاً
-            if cleanup_port(port, host):
-                logger.info(f"تم تنظيف المنفذ {port}")
-                time.sleep(1)  # انتظار لحظة للتأكد من تحرير المنفذ
-
-            # محاولة ربط المنفذ
-            sock.bind((host, port))
-            sock.close()
-            logger.info(f"المنفذ {port} متاح الآن")
-            return True
-
-        except socket.error as e:
-            if e.errno == socket.errno.EADDRINUSE:
-                logger.debug(f"المنفذ {port} مشغول، انتظار...")
+        # محاولة تنظيف المنفذ أولاً
+        if cleanup_port(port):
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                    sock.bind(('0.0.0.0', port))
+                    sock.close()
+                    logger.info(f"المنفذ {port} متاح الآن")
+                    return True
+            except socket.error as e:
+                logger.debug(f"فشل في ربط المنفذ {port}: {str(e)}")
                 time.sleep(2)
-            else:
-                logger.error(f"خطأ غير متوقع في المنفذ: {str(e)}")
-                return False
+                continue
+
+        logger.debug(f"انتظار المنفذ {port}...")
+        time.sleep(2)
 
     logger.error(f"انتهت مهلة انتظار المنفذ {port}")
     return False
@@ -105,25 +122,34 @@ def create_app():
             logger.error(f"المتغيرات البيئية التالية مفقودة: {', '.join(missing_vars)}")
             return None
 
-        # إنشاء تطبيق Flask
-        static_folder = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(__file__)), 'client', 'dist'))
-        app = Flask(__name__, static_folder=static_folder, static_url_path='/')
-
-        # تطبيق الإعدادات
+        app = Flask(__name__)
         app.config.update(APP_CONFIG)
-        app.config.update({
-            'SESSION_FILE_DIR': '/tmp/flask_session',
-            'SESSION_TYPE': 'filesystem',
-            'SECRET_KEY': os.getenv('SECRET_KEY', os.urandom(24).hex())
-        })
 
         try:
-            # تهيئة المكونات
-            components = init_app_components(app)
+            # تهيئة قاعدة البيانات
+            logger.info("جاري تهيئة قاعدة البيانات...")
+            db = init_db(app)
+            if not db:
+                raise Exception("فشل في تهيئة قاعدة البيانات")
+            logger.info("✓ تم تهيئة قاعدة البيانات")
+
+            # تهيئة نظام الجلسات
+            logger.info("جاري تهيئة نظام الجلسات...")
+            if not os.path.exists('/tmp/flask_session'):
+                os.makedirs('/tmp/flask_session')
+            session_interface = Session()
+            session_interface.init_app(app)
+            logger.info("✓ تم تهيئة نظام الجلسات")
+
+            # تهيئة خدمة البريد الإلكتروني
+            logger.info("جاري تهيئة خدمة البريد الإلكتروني...")
+            mail = Mail()
+            mail.init_app(app)
+            logger.info("✓ تم تهيئة خدمة البريد الإلكتروني")
 
             # تهيئة CORS
             logger.info("جاري تهيئة CORS...")
-            CORS(app, 
+            CORS(app,
                 supports_credentials=True,
                 resources={
                     r"/api/*": {
@@ -137,7 +163,7 @@ def create_app():
             logger.info("✓ تم تهيئة CORS")
 
             # تسجيل المسارات
-            init_mail(components['mail'])
+            init_mail(mail)
             app.register_blueprint(admin_bp)
             app.register_blueprint(auth_bp)
             logger.info("✓ تم تسجيل المسارات")
@@ -152,56 +178,17 @@ def create_app():
         logger.error(f"خطأ في تهيئة التطبيق: {str(e)}", exc_info=True)
         return None
 
-def init_app_components(app: Flask):
-    """تهيئة مكونات التطبيق"""
-    try:
-        components = {}
-
-        # تهيئة قاعدة البيانات
-        logger.info("جاري تهيئة قاعدة البيانات...")
-        db = init_db(app)
-        if not db:
-            raise Exception("فشل في تهيئة قاعدة البيانات")
-        components['db'] = db
-        logger.info("✓ تم تهيئة قاعدة البيانات بنجاح")
-
-        # تهيئة نظام الجلسات
-        logger.info("جاري تهيئة نظام الجلسات...")
-        if not os.path.exists(app.config['SESSION_FILE_DIR']):
-            os.makedirs(app.config['SESSION_FILE_DIR'])
-        session_interface = Session()
-        session_interface.init_app(app)
-        components['session'] = session_interface
-        logger.info("✓ تم تهيئة نظام الجلسات بنجاح")
-
-        # تهيئة خدمة البريد الإلكتروني
-        logger.info("جاري تهيئة خدمة البريد الإلكتروني...")
-        mail = Mail()
-        mail.init_app(app)
-        components['mail'] = mail
-        logger.info("✓ تم تهيئة خدمة البريد الإلكتروني بنجاح")
-
-        return components
-
-    except Exception as e:
-        logger.error(f"خطأ في تهيئة المكونات: {str(e)}", exc_info=True)
-        raise
-
 def main():
     """النقطة الرئيسية لبدء الخادم"""
     try:
-        # تحديد المتغيرات البيئية
-        os.environ['FLASK_ENV'] = 'production'
-
         # تحديد المنفذ
-        DEFAULT_PORT = 5000
-        port = int(os.getenv('PORT', str(DEFAULT_PORT)))
-        host = '0.0.0.0'
+        port = PRODUCTION_CONFIG['port']
+        host = PRODUCTION_CONFIG['host']
 
-        logger.info(f"بدء تهيئة الخادم على المنفذ {port}")
+        logger.info(f"بدء تهيئة الخادم على {host}:{port}")
 
         # تنظيف وانتظار المنفذ
-        if not wait_for_port(port, host, timeout=120):
+        if not wait_for_port(port, PRODUCTION_CONFIG['wait_for_port_timeout']):
             logger.error(f"المنفذ {port} غير متاح - إنهاء التطبيق")
             return 1
 
@@ -224,11 +211,11 @@ def main():
             app,
             host=host,
             port=port,
-            url_scheme='https',
-            threads=4,
-            connection_limit=1000,
-            channel_timeout=30,
-            cleanup_interval=30,
+            url_scheme=PRODUCTION_CONFIG['url_scheme'],
+            threads=PRODUCTION_CONFIG['threads'],
+            connection_limit=PRODUCTION_CONFIG['connection_limit'],
+            channel_timeout=PRODUCTION_CONFIG['channel_timeout'],
+            cleanup_interval=PRODUCTION_CONFIG['cleanup_interval'],
             ident='Silvarium Social'
         )
 

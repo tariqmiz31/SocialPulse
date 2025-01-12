@@ -27,12 +27,23 @@ def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
     start_time = time.time()
     while time.time() - start_time < timeout:
         try:
-            with socket.create_connection((host, port), timeout=1):
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.bind((host, port))
                 logger.info(f"المنفذ {port} متاح للاستخدام")
                 return True
-        except (socket.timeout, ConnectionRefusedError, OSError) as e:
-            logger.debug(f"انتظار المنفذ {port}: {str(e)}")
+        except socket.timeout:
+            logger.debug(f"انتظار المنفذ {port} - مهلة")
             time.sleep(1)
+        except ConnectionRefusedError:
+            logger.debug(f"انتظار المنفذ {port} - تم رفض الاتصال")
+            time.sleep(1)
+        except OSError as e:
+            if e.errno == socket.errno.EADDRINUSE:
+                logger.debug(f"المنفذ {port} مشغول، انتظار...")
+                time.sleep(1)
+            else:
+                logger.error(f"خطأ في المنفذ {port}: {str(e)}")
+                return False
     logger.error(f"المنفذ {port} غير متاح بعد {timeout} ثانية")
     return False
 
@@ -107,7 +118,7 @@ def create_app(testing=False):
                 supports_credentials=True,
                 resources={
                     r"/api/*": {
-                        "origins": ["http://localhost:8080", "https://*.repl.co", "http://0.0.0.0:8080"],
+                        "origins": ["http://localhost:5000", "https://*.repl.co", "http://0.0.0.0:5000"],
                         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
                         "allow_headers": ["Content-Type", "Authorization"],
                         "expose_headers": ["Content-Type"],
@@ -136,7 +147,7 @@ def create_app(testing=False):
             logger.info("✓ تم تسجيل المسارات")
 
             # انتظار جاهزية المنفذ قبل بدء الخدمة
-            port = int(os.getenv('PORT', '8080'))
+            port = int(os.getenv('PORT', '5000'))
             if not wait_for_port(port=port):
                 logger.error(f"المنفذ {port} غير متاح بعد انتهاء المهلة")
                 return None
@@ -159,5 +170,5 @@ def create_app(testing=False):
 if __name__ == "__main__":
     app = create_app()
     if app:
-        port = int(os.getenv('PORT', '8080'))
+        port = int(os.getenv('PORT', '5000'))
         app.run(host="0.0.0.0", port=port)
