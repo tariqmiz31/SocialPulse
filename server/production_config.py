@@ -23,7 +23,7 @@ file_handler.setFormatter(logging.Formatter(
 # تكوين الخادم
 PRODUCTION_CONFIG = {
     'host': '0.0.0.0',
-    'port': int(os.getenv('PORT', '8080')),
+    'port': int(os.getenv('PORT', '5000')),
     'threads': 4,
     'url_scheme': 'https',
     'connection_limit': 1000,

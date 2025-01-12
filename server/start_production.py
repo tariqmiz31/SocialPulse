@@ -127,7 +127,7 @@ def create_app():
                 supports_credentials=True,
                 resources={
                     r"/api/*": {
-                        "origins": ["http://localhost:8080", "https://*.repl.co", "http://0.0.0.0:8080"],
+                        "origins": ["http://localhost:5000", "https://*.repl.co", "http://0.0.0.0:5000"],
                         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
                         "allow_headers": ["Content-Type", "Authorization"],
                         "expose_headers": ["Content-Type"],
@@ -194,7 +194,7 @@ def main():
         os.environ['FLASK_ENV'] = 'production'
 
         # تحديد المنفذ
-        DEFAULT_PORT = 8080
+        DEFAULT_PORT = 5000
         port = int(os.getenv('PORT', str(DEFAULT_PORT)))
         host = '0.0.0.0'
 

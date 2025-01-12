@@ -24,9 +24,14 @@ export function Navbar() {
                 <a className="text-sm text-muted-foreground hover:text-foreground mr-4">التحليلات</a>
               </Link>
               {user?.role === 'admin' && (
-                <Link href="/admin">
-                  <a className="text-sm text-muted-foreground hover:text-foreground mr-4 font-semibold">لوحة الإشراف</a>
-                </Link>
+                <>
+                  <Link href="/admin">
+                    <a className="text-sm text-muted-foreground hover:text-foreground mr-4">لوحة الإشراف</a>
+                  </Link>
+                  <Link href="/admin/roles">
+                    <a className="text-sm text-muted-foreground hover:text-foreground mr-4">إدارة الصلاحيات</a>
+                  </Link>
+                </>
               )}
             </div>
           </div>

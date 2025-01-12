@@ -13,6 +13,7 @@ const Calendar = lazy(() => import("@/pages/Calendar"));
 const Analytics = lazy(() => import("@/pages/Analytics"));
 const AdminPanel = lazy(() => import("@/pages/AdminPanel"));
 const SocialMediaManager = lazy(() => import("@/pages/SocialMediaManager"));
+const RoleManagement = lazy(() => import("@/pages/admin/role-management"));
 
 function App() {
   const { user, isLoading } = useUser();
@@ -49,7 +50,10 @@ function App() {
                 <Route path="/analytics" component={Analytics} />
                 <Route path="/social" component={SocialMediaManager} />
                 {user.role === "admin" && (
-                  <Route path="/admin" component={AdminPanel} />
+                  <>
+                    <Route path="/admin" component={AdminPanel} />
+                    <Route path="/admin/roles" component={RoleManagement} />
+                  </>
                 )}
                 <Route component={NotFound} />
               </>

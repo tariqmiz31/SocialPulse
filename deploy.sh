@@ -45,7 +45,7 @@ wait_for_port() {
 
 # تنظيف المنافذ
 echo "تنظيف المنافذ..."
-PORT=8080
+PORT=5000
 kill $(lsof -t -i:$PORT) 2>/dev/null || true
 sleep 2
 
@@ -59,7 +59,7 @@ echo "تم تحرير المنفذ $PORT بنجاح"
 
 # بدء التطبيق
 echo "بدء التطبيق..."
-export PORT=8080
+export PORT=5000
 python server/start_production.py &
 
 # انتظار بدء التطبيق

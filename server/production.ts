@@ -12,7 +12,7 @@ import { exec } from "child_process";
 
 dotenv.config();
 
-const DEFAULT_PORT = 8080;
+const DEFAULT_PORT = 5000;
 const PORT = parseInt(process.env.PORT || `${DEFAULT_PORT}`, 10);
 const HOST = "0.0.0.0";
 
@@ -79,7 +79,7 @@ export function configureProduction(app: express.Application) {
 
   // تكوين CORS
   app.use(cors({
-    origin: ["http://localhost:8080", "https://*.repl.co", "http://0.0.0.0:8080"],
+    origin: ["http://localhost:5000", "https://*.repl.co", "http://0.0.0.0:5000"],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization']

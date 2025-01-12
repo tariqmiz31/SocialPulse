@@ -1,10 +1,46 @@
-// Previous imports remain unchanged
+import type { Express, Request, Response, NextFunction } from "express";
+import { createServer, type Server } from "http";
 import { db } from "@db";
-import { users, verificationCodes } from "@db/schema";
+import { users, verificationCodes, type SelectUser } from "@db/schema";
 import { eq, and } from "drizzle-orm";
+import { sendRoleChangeNotification } from "./mail";
+import passport from "passport";
+
+// Extend Express.User
+declare global {
+  namespace Express {
+    interface User extends SelectUser {}
+  }
+}
+
+// التحقق من صلاحيات المشرف
+async function isAdmin(req: Request, res: Response, next: NextFunction) {
+  try {
+    if (!req.isAuthenticated()) {
+      return res.status(401).json({ message: "يجب تسجيل الدخول للوصول إلى هذه الصفحة" });
+    }
+
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(eq(users.id, req.user.id))
+      .limit(1);
+
+    if (!user || user.role !== "admin") {
+      return res.status(403).json({ message: "غير مصرح لك بالوصول إلى هذه الصفحة" });
+    }
+
+    next();
+  } catch (error) {
+    console.error("Error in isAdmin middleware:", error);
+    return res.status(500).json({ message: "حدث خطأ أثناء التحقق من الصلاحيات" });
+  }
+}
 
 export function registerRoutes(app: Express): Server {
-  // Previous middleware and setup remain unchanged
+  // إعداد Passport
+  app.use(passport.initialize());
+  app.use(passport.session());
 
   // تحديث نقطة نهاية تغيير الصلاحيات مع التحقق متعدد المراحل
   app.post("/api/admin/users/:userId/:action", isAdmin, async (req, res) => {
@@ -20,21 +56,19 @@ export function registerRoutes(app: Express): Server {
         .limit(1);
 
       if (!user) {
-        return res.status(404).send("المستخدم غير موجود");
+        return res.status(404).json({ message: "المستخدم غير موجود" });
       }
 
       // التحقق من مراحل تغيير الصلاحيات
       if (action === "promote" || action === "demote") {
         switch (verificationStep) {
           case 'initial':
-            // التحقق من وجود البريد الإلكتروني
             if (!user.email) {
-              return res.status(400).send("يجب إضافة بريد إلكتروني للمستخدم أولاً");
+              return res.status(400).json({ message: "يجب إضافة بريد إلكتروني للمستخدم أولاً" });
             }
             break;
 
           case 'email_sent':
-            // التحقق من صحة الرمز
             const [verificationRecord] = await db
               .select()
               .from(verificationCodes)
@@ -48,11 +82,11 @@ export function registerRoutes(app: Express): Server {
               .limit(1);
 
             if (!verificationRecord) {
-              return res.status(400).send("لم يتم العثور على رمز تحقق صالح");
+              return res.status(400).json({ message: "لم يتم العثور على رمز تحقق صالح" });
             }
 
             if (verificationRecord.code !== verificationCode) {
-              return res.status(400).send("رمز التحقق غير صحيح");
+              return res.status(400).json({ message: "رمز التحقق غير صحيح" });
             }
 
             // تحديث حالة رمز التحقق
@@ -82,11 +116,11 @@ export function registerRoutes(app: Express): Server {
             });
 
           default:
-            return res.status(400).send("خطوة تحقق غير صالحة");
+            return res.status(400).json({ message: "خطوة تحقق غير صالحة" });
         }
       }
 
-      // باقي الإجراءات تبقى كما هي
+      // باقي الإجراءات
       switch (action) {
         case "approve":
           await db
@@ -113,15 +147,13 @@ export function registerRoutes(app: Express): Server {
           break;
 
         default:
-          res.status(400).send("إجراء غير صالح");
+          res.status(400).json({ message: "إجراء غير صالح" });
       }
     } catch (error) {
       console.error('Error updating user role:', error);
-      res.status(500).send("خطأ في تحديث حالة المستخدم");
+      res.status(500).json({ message: "خطأ في تحديث حالة المستخدم" });
     }
   });
-
-  // باقي نقاط النهاية تبقى كما هي
 
   const httpServer = createServer(app);
   return httpServer;

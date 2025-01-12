@@ -4,8 +4,8 @@ import sys
 import socket
 import time
 import logging
-from logging.handlers import RotatingFileHandler
 import psutil
+from logging.handlers import RotatingFileHandler
 from flask import Flask
 from flask_cors import CORS
 from waitress import serve
@@ -24,17 +24,20 @@ logger.addHandler(file_handler)
 
 def cleanup_ports():
     """تنظيف المنافذ المشغولة"""
-    port = int(os.getenv('PORT', '8080'))
+    port = int(os.getenv('PORT', '5000'))  # تحديث المنفذ الافتراضي إلى 5000
     logger.info(f"بدء تنظيف المنفذ {port}...")
 
     try:
         for proc in psutil.process_iter(['pid', 'name', 'connections']):
             try:
                 for conn in proc.connections():
-                    if conn.laddr.port == port:
+                    if hasattr(conn, 'laddr') and conn.laddr.port == port:
                         logger.info(f"إنهاء العملية {proc.pid} على المنفذ {port}")
                         proc.terminate()
-                        proc.wait(timeout=3)
+                        try:
+                            proc.wait(timeout=3)
+                        except psutil.TimeoutExpired:
+                            proc.kill()
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
         return True
@@ -44,7 +47,7 @@ def cleanup_ports():
 
 def wait_for_port(timeout=120):
     """انتظار حتى يصبح المنفذ متاحاً"""
-    port = int(os.getenv('PORT', '8080'))
+    port = int(os.getenv('PORT', '5000'))  # تحديث المنفذ الافتراضي إلى 5000
     logger.info(f"انتظار المنفذ {port}...")
     start_time = time.time()
 
@@ -74,7 +77,7 @@ def create_app():
     # تكوين CORS
     CORS(app, resources={
         r"/api/*": {
-            "origins": ["https://*.repl.co", "http://0.0.0.0:8080"],
+            "origins": ["https://*.repl.co", "http://0.0.0.0:5000"],  # تحديث المنفذ إلى 5000
             "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
             "allow_headers": ["Content-Type", "Authorization"]
         }
@@ -93,7 +96,7 @@ def start_workflow():
         if not wait_for_port():
             return False
 
-        port = int(os.getenv('PORT', '8080'))
+        port = int(os.getenv('PORT', '5000'))  # تحديث المنفذ الافتراضي إلى 5000
         app = create_app()
 
         # إشارة الجاهزية للتدفق العملي
