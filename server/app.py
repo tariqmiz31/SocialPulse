@@ -107,7 +107,7 @@ def create_app(testing=False):
                 supports_credentials=True,
                 resources={
                     r"/api/*": {
-                        "origins": ["http://localhost:5000", "https://*.repl.co", "http://0.0.0.0:5000"],
+                        "origins": ["http://localhost:8080", "https://*.repl.co", "http://0.0.0.0:8080"],
                         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
                         "allow_headers": ["Content-Type", "Authorization"],
                         "expose_headers": ["Content-Type"],
@@ -135,22 +135,8 @@ def create_app(testing=False):
             app.register_blueprint(auth_bp)
             logger.info("✓ تم تسجيل المسارات")
 
-            # نقطة نهاية لحالة الخادم
-            @app.route('/api/server/status')
-            def server_status():
-                """التحقق من حالة الخادم"""
-                return jsonify({
-                    'status': 'running',
-                    'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
-                    'components': {
-                        'database': bool(g.get('db')),
-                        'mail': bool(mail),
-                        'session': bool(session_interface)
-                    }
-                })
-
             # انتظار جاهزية المنفذ قبل بدء الخدمة
-            port = int(os.getenv('PORT', '5000'))
+            port = int(os.getenv('PORT', '8080'))
             if not wait_for_port(port=port):
                 logger.error(f"المنفذ {port} غير متاح بعد انتهاء المهلة")
                 return None

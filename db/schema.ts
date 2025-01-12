@@ -29,6 +29,9 @@ export const verificationCodes = pgTable("verification_codes", {
   verificationStep: serial("verification_step").default(1),
   totalSteps: serial("total_steps").default(3),
   createdAt: timestamp("created_at").defaultNow(),
+  adminEmail: text("admin_email"),
+  ipAddress: text("ip_address"),
+  userAgent: text("user_agent"),
 });
 
 export const roleChangeHistory = pgTable("role_change_history", {
@@ -45,6 +48,10 @@ export const roleChangeHistory = pgTable("role_change_history", {
   clientIp: text("client_ip"),
   userAgent: text("user_agent"),
   createdAt: timestamp("created_at").defaultNow(),
+  step1CompletedAt: timestamp("step1_completed_at"),
+  step2CompletedAt: timestamp("step2_completed_at"),
+  step3CompletedAt: timestamp("step3_completed_at"),
+  verificationNotes: text("verification_notes"),
 });
 
 // Export schemas and types

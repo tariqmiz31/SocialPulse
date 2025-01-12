@@ -4,6 +4,7 @@ import sys
 import logging
 import socket
 import time
+import signal
 import psutil
 from flask import Flask, request, jsonify, session, g
 from flask_cors import CORS
@@ -41,7 +42,10 @@ def cleanup_port(port: int, host: str = '0.0.0.0') -> bool:
                     if hasattr(conn, 'laddr') and conn.laddr.port == port:
                         logger.info(f"إنهاء العملية {proc.pid} التي تستخدم المنفذ {port}")
                         proc.terminate()
-                        proc.wait(timeout=3)
+                        try:
+                            proc.wait(timeout=3)
+                        except psutil.TimeoutExpired:
+                            proc.kill()
                         return True
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.TimeoutExpired):
                 continue
@@ -49,35 +53,44 @@ def cleanup_port(port: int, host: str = '0.0.0.0') -> bool:
         logger.error(f"خطأ في تنظيف المنفذ: {str(e)}")
     return False
 
-def is_port_in_use(port: int, host: str = '0.0.0.0') -> bool:
-    """التحقق من استخدام المنفذ"""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        try:
-            sock.bind((host, port))
-            return False
-        except socket.error:
-            return True
-
 def wait_for_port(port: int, host: str = '0.0.0.0', timeout: int = 120) -> bool:
     """انتظار حتى يصبح المنفذ متاحاً"""
     logger.info(f"بدء انتظار المنفذ {port}... | Starting to wait for port {port}...")
     start_time = time.time()
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
     while time.time() - start_time < timeout:
-        if is_port_in_use(port, host):
-            logger.info(f"المنفذ {port} مشغول، محاولة تنظيفه...")
+        try:
+            # محاولة تنظيف المنفذ أولاً
             if cleanup_port(port, host):
-                logger.info(f"تم تنظيف المنفذ {port} بنجاح")
-            else:
+                logger.info(f"تم تنظيف المنفذ {port}")
+                time.sleep(1)  # انتظار لحظة للتأكد من تحرير المنفذ
+
+            # محاولة ربط المنفذ
+            sock.bind((host, port))
+            sock.close()
+            logger.info(f"المنفذ {port} متاح الآن")
+            return True
+
+        except socket.error as e:
+            if e.errno == socket.errno.EADDRINUSE:
                 logger.debug(f"المنفذ {port} مشغول، انتظار...")
                 time.sleep(2)
-            continue
-
-        logger.info(f"المنفذ {port} متاح الآن")
-        return True
+            else:
+                logger.error(f"خطأ غير متوقع في المنفذ: {str(e)}")
+                return False
 
     logger.error(f"انتهت مهلة انتظار المنفذ {port}")
     return False
+
+def setup_signal_handlers():
+    """إعداد معالجات الإشارات"""
+    def signal_handler(signum, frame):
+        logger.info("تم استلام إشارة إيقاف، جاري الإغلاق بأمان...")
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
 
 def create_app():
     """إنشاء وتهيئة تطبيق Flask"""
@@ -179,8 +192,6 @@ def main():
     try:
         # تحديد المتغيرات البيئية
         os.environ['FLASK_ENV'] = 'production'
-        os.environ['WAIT_FOR_PORT'] = 'true'
-        os.environ['WAIT_FOR_PORT_TIMEOUT'] = '120'
 
         # تحديد المنفذ
         DEFAULT_PORT = 8080
@@ -189,7 +200,7 @@ def main():
 
         logger.info(f"بدء تهيئة الخادم على المنفذ {port}")
 
-        # انتظار حتى يصبح المنفذ متاحاً
+        # تنظيف وانتظار المنفذ
         if not wait_for_port(port, host, timeout=120):
             logger.error(f"المنفذ {port} غير متاح - إنهاء التطبيق")
             return 1
@@ -199,6 +210,9 @@ def main():
         if not app:
             logger.error("فشل في إنشاء تطبيق Flask")
             return 1
+
+        # إعداد معالجات الإشارات
+        setup_signal_handlers()
 
         # تأكيد جاهزية التطبيق
         print('ready')

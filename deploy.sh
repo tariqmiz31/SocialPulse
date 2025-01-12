@@ -1,45 +1,10 @@
 #!/bin/bash
 
-echo "تحديث تكوين Replit..."
-
-# تأكد من وجود التكوينات المطلوبة
-if [ ! -f ".replit" ]; then
-  echo "إنشاء ملف .replit..."
-  cat > .replit << EOL
-run = "python server/start_production.py"
-language = "python3"
-hidden = [".config", "package-lock.json"]
-
-[env]
-XDG_CONFIG_HOME = "/home/runner/.config"
-PORT = "8080"
-
-[nix]
-channel = "stable-21_11"
-
-[gitHubImport]
-requiredFiles = [".replit", "replit.nix", ".config"]
-EOL
-fi
-
-# تحديث replit.nix إذا لزم الأمر
-if [ ! -f "replit.nix" ]; then
-  echo "إنشاء ملف replit.nix..."
-  cat > replit.nix << EOL
-{ pkgs }: {
-    deps = [
-        pkgs.python39
-        pkgs.postgresql
-    ];
-}
-EOL
-fi
-
 echo "بدء عملية النشر..."
 
-# التحقق من المتغيرات البيئية
+# التحقق من المتغيرات البيئية الضرورية
 if [ -z "$DATABASE_URL" ]; then
-    echo "خطأ: DATABASE_URL غير موجود"
+    echo "خطأ: متغير DATABASE_URL غير موجود"
     exit 1
 fi
 
@@ -47,54 +12,70 @@ fi
 echo "تثبيت الاعتماديات..."
 pip install -r requirements.txt
 
-# إيقاف جميع العمليات السابقة على المنفذ 8080
-echo "إيقاف العمليات السابقة..."
-kill $(lsof -t -i:8080) 2>/dev/null || true
-sleep 2
-
-# التحقق من حالة المنفذ
-if lsof -i:8080 > /dev/null 2>&1; then
-    echo "تعذر تحرير المنفذ 8080، محاولة القتل القسري..."
-    kill -9 $(lsof -t -i:8080) 2>/dev/null || true
-    sleep 2
-fi
-
-# انتظار حتى يصبح المنفذ متاحاً
+# دالة لانتظار المنفذ
 wait_for_port() {
     local port=$1
-    local retries=10
-    local wait=2
-    while [ $retries -gt 0 ]; do
+    local max_attempts=30
+    local attempt=1
+
+    echo "انتظار المنفذ $port..."
+
+    while [ $attempt -le $max_attempts ]; do
         if ! lsof -i :$port > /dev/null 2>&1; then
+            echo "المنفذ $port متاح"
             return 0
         fi
-        retries=$((retries - 1))
-        echo "المنفذ $port مشغول، انتظار..."
-        sleep $wait
+
+        echo "محاولة $attempt من $max_attempts - المنفذ $port مشغول"
+
+        # محاولة إنهاء العملية التي تستخدم المنفذ
+        local pid=$(lsof -t -i:$port)
+        if [ ! -z "$pid" ]; then
+            echo "محاولة إنهاء العملية $pid على المنفذ $port"
+            kill -9 $pid 2>/dev/null
+        fi
+
+        sleep 2
+        attempt=$((attempt + 1))
     done
+
+    echo "خطأ: فشل في تحرير المنفذ $port بعد $max_attempts محاولة"
     return 1
 }
 
-if ! wait_for_port 8080; then
-    echo "خطأ: المنفذ 8080 لا يزال مشغولاً"
+# تنظيف المنافذ
+echo "تنظيف المنافذ..."
+PORT=8080
+kill $(lsof -t -i:$PORT) 2>/dev/null || true
+sleep 2
+
+# انتظار تحرير المنفذ
+if ! wait_for_port $PORT; then
+    echo "فشل في تحرير المنفذ $PORT"
     exit 1
 fi
 
-echo "تم تحرير المنفذ 8080 بنجاح"
+echo "تم تحرير المنفذ $PORT بنجاح"
 
 # بدء التطبيق
 echo "بدء التطبيق..."
-PORT=8080 python server/start_production.py &
+export PORT=8080
+python server/start_production.py &
 
 # انتظار بدء التطبيق
 echo "انتظار بدء التطبيق..."
-sleep 5
+attempt=1
+max_attempts=30
 
-# التحقق من حالة التطبيق
-if curl -s http://localhost:8080/api/monitoring/health > /dev/null; then
-    echo "تم بدء التطبيق بنجاح على المنفذ 8080!"
-    exit 0
-else
-    echo "فشل بدء التطبيق"
-    exit 1
-fi
+while [ $attempt -le $max_attempts ]; do
+    if curl -s http://localhost:$PORT/api/health > /dev/null 2>&1; then
+        echo "تم بدء التطبيق بنجاح على المنفذ $PORT!"
+        exit 0
+    fi
+    echo "محاولة $attempt من $max_attempts - انتظار بدء التطبيق..."
+    sleep 2
+    attempt=$((attempt + 1))
+done
+
+echo "فشل في بدء التطبيق بعد $max_attempts محاولة"
+exit 1

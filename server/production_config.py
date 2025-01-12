@@ -11,8 +11,8 @@ if not os.path.exists(LOG_DIR):
 # إعداد ملف السجلات الدوار
 file_handler = RotatingFileHandler(
     os.path.join(LOG_DIR, 'production.log'),
-    maxBytes=1024 * 1024,  # 1MB
-    backupCount=10,
+    maxBytes=10 * 1024 * 1024,  # 10MB
+    backupCount=5,
     encoding='utf-8'
 )
 file_handler.setFormatter(logging.Formatter(
@@ -20,7 +20,7 @@ file_handler.setFormatter(logging.Formatter(
     '%Y-%m-%d %H:%M:%S'
 ))
 
-# تكوين خادم الإنتاج
+# تكوين الخادم
 PRODUCTION_CONFIG = {
     'host': '0.0.0.0',
     'port': int(os.getenv('PORT', '8080')),
@@ -41,7 +41,7 @@ APP_CONFIG = {
     'SESSION_COOKIE_SECURE': True,
     'SESSION_COOKIE_HTTPONLY': True,
     'SESSION_COOKIE_SAMESITE': 'Lax',
-    'PERMANENT_SESSION_LIFETIME': 86400,  # 24 hours
+    'PERMANENT_SESSION_LIFETIME': 86400,  # 24 ساعة
     'MAX_CONTENT_LENGTH': 16 * 1024 * 1024,  # 16MB
     'JSON_AS_ASCII': False,
     'JSON_SORT_KEYS': False,
