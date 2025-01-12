@@ -86,6 +86,8 @@ app.use(performanceMonitor);
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
+  logger.debug(`Incoming request: ${req.method} ${path}`);
+
   let capturedJsonResponse: Record<string, any> | undefined = undefined;
 
   const originalResJson = res.json;
@@ -107,10 +109,48 @@ app.use((req, res, next) => {
       }
 
       log(logLine);
+      logger.info(logLine);
     }
   });
 
   next();
+});
+
+// نقطة نهاية التحقق من صحة الخادم
+app.get("/api/health", (_req, res) => {
+  try {
+    res.json({
+      status: "healthy",
+      timestamp: new Date().toISOString(),
+      environment: process.env.NODE_ENV || "development",
+      version: process.env.npm_package_version || "1.0.0"
+    });
+  } catch (error) {
+    logger.error("خطأ في نقطة نهاية الصحة:", error);
+    res.status(500).json({ 
+      status: "error", 
+      message: "خطأ داخلي في الخادم",
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Error handling middleware
+app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+  const status = err.status || err.statusCode || 500;
+  const message = err.message || "Internal Server Error";
+
+  logger.error({
+    message: err.message,
+    stack: err.stack,
+    timestamp: new Date().toISOString()
+  });
+
+  res.status(status).json({ 
+    error: true,
+    message: process.env.NODE_ENV === 'production' ? 'An internal server error occurred' : message,
+    timestamp: new Date().toISOString()
+  });
 });
 
 // Initialize server setup
@@ -121,35 +161,16 @@ app.use((req, res, next) => {
     await db.execute(sql`SELECT 1`);
     logger.info("Initial database connection test successful");
 
-    // Create HTTP server
+    // Create HTTP server and register routes
     const server = createServer(app);
-
-    // Register routes BEFORE Vite setup
     registerRoutes(app);
+    logger.info("Routes registered successfully");
 
     // Start monitoring
     startMonitoring();
 
     // Setup scheduled tasks
     scheduleBackups();
-
-    // Error handling middleware (must be after routes)
-    app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-      const status = err.status || err.statusCode || 500;
-      const message = err.message || "Internal Server Error";
-
-      logger.error({
-        message: err.message,
-        stack: err.stack,
-        timestamp: new Date().toISOString()
-      });
-
-      res.status(status).json({ 
-        error: true,
-        message: process.env.NODE_ENV === 'production' ? 'An internal server error occurred' : message,
-        timestamp: new Date().toISOString()
-      });
-    });
 
     // Setup vite in development
     if (process.env.NODE_ENV !== 'production') {

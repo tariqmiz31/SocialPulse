@@ -18,6 +18,21 @@ export const users = pgTable("users", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// تحديث نوع AdminPermissions
+export const adminPermissionsSchema = z.object({
+  isAdmin: z.boolean(),
+  role: z.enum(["admin", "user"]),
+  isApproved: z.boolean(),
+  status: z.enum(["active", "pending", "blocked"])
+});
+
+export type AdminPermissions = z.infer<typeof adminPermissionsSchema>;
+
+export const insertUserSchema = createInsertSchema(users);
+export const selectUserSchema = createSelectSchema(users);
+export type InsertUser = typeof users.$inferInsert;
+export type SelectUser = typeof users.$inferSelect;
+
 export const verificationCodes = pgTable("verification_codes", {
   id: serial("id").primaryKey(),
   userId: serial("user_id").references(() => users.id),
@@ -53,12 +68,6 @@ export const roleChangeHistory = pgTable("role_change_history", {
   step3CompletedAt: timestamp("step3_completed_at"),
   verificationNotes: text("verification_notes"),
 });
-
-// Export schemas and types
-export const insertUserSchema = createInsertSchema(users);
-export const selectUserSchema = createSelectSchema(users);
-export type InsertUser = typeof users.$inferInsert;
-export type SelectUser = typeof users.$inferSelect;
 
 export const insertVerificationCodeSchema = createInsertSchema(verificationCodes, {
   type: z.enum(["reset_password", "email_verification", "role_change"]),
