@@ -1,24 +1,11 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { db } from "@db";
-import { users, verificationCodes, adminPermissionsSchema } from "@db/schema";
+import { users, verificationCodes, adminPermissionsSchema, roleChangeHistory } from "@db/schema";
 import { eq, and } from "drizzle-orm";
 import { sendRoleChangeNotification } from "./mail";
 import passport from "passport";
 import logger from "./logConfig";
-
-// Extend Express.User
-declare global {
-  namespace Express {
-    interface User {
-      id: number;
-      username: string;
-      role: string;
-      isApproved: boolean;
-      status: string;
-    }
-  }
-}
 
 // التحقق من صلاحيات المشرف
 async function isAdmin(req: Request, res: Response, next: NextFunction) {
@@ -61,15 +48,17 @@ export function registerRoutes(app: Express): Server {
   app.use(passport.initialize());
   app.use(passport.session());
 
-  // التحقق من صحة الخادم
+  // نقطة نهاية التحقق من صحة الخادم مع سجلات مفصلة
   app.get("/api/health", (_req, res) => {
     try {
+      logger.info("تم استلام طلب التحقق من صحة الخادم");
       res.json({
         status: "healthy",
         timestamp: new Date().toISOString(),
         environment: process.env.NODE_ENV || "development",
         version: process.env.npm_package_version || "1.0.0"
       });
+      logger.info("تم إرسال رد صحة الخادم بنجاح");
     } catch (error) {
       logger.error("خطأ في نقطة نهاية الصحة:", error);
       res.status(500).json({ 
@@ -150,20 +139,47 @@ export function registerRoutes(app: Express): Server {
 
       // تغيير الصلاحيات
       if (action === "promote" || action === "demote") {
+        const newRole = action === "promote" ? "admin" : "user";
+
         switch (verificationStep) {
           case 'initial':
+            // إنشاء سجل تغيير الصلاحيات
+            const [roleChangeRecord] = await db
+              .insert(roleChangeHistory)
+              .values({
+                userId: targetUser.id,
+                adminId: res.locals.admin.id,
+                oldRole: targetUser.role,
+                newRole,
+                changeReason: req.body.reason || "تغيير الصلاحيات من قبل المشرف",
+                clientIp: req.ip,
+                userAgent: req.headers['user-agent']
+              })
+              .returning();
+
             // إنشاء رمز تحقق جديد
             const newVerificationCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-            await db.insert(verificationCodes).values({
-              userId: res.locals.admin.id,
-              code: newVerificationCode,
-              type: "role_change",
-              expiresAt: new Date(Date.now() + 30 * 60 * 1000),
-              totalSteps: 3,
-              adminEmail: res.locals.admin.email,
-              ipAddress: req.ip,
-              userAgent: req.headers['user-agent']
-            });
+            const [verificationRecord] = await db
+              .insert(verificationCodes)
+              .values({
+                userId: res.locals.admin.id,
+                code: newVerificationCode,
+                type: "role_change",
+                expiresAt: new Date(Date.now() + 30 * 60 * 1000),
+                totalSteps: 3,
+                adminEmail: res.locals.admin.email,
+                ipAddress: req.ip,
+                userAgent: req.headers['user-agent']
+              })
+              .returning();
+
+            // تحديث سجل تغيير الصلاحيات
+            await db
+              .update(roleChangeHistory)
+              .set({
+                verificationId: verificationRecord.id
+              })
+              .where(eq(roleChangeHistory.id, roleChangeRecord.id));
 
             logger.info(`تم إنشاء رمز تحقق جديد للمستخدم: ${targetUser.username}`);
             return res.json({
@@ -174,7 +190,8 @@ export function registerRoutes(app: Express): Server {
             });
 
           case 'verify_code':
-            const [verificationRecord] = await db
+            // التحقق من الرمز
+            const [verification] = await db
               .select()
               .from(verificationCodes)
               .where(
@@ -186,12 +203,12 @@ export function registerRoutes(app: Express): Server {
               )
               .limit(1);
 
-            if (!verificationRecord || verificationRecord.code !== verificationCode) {
+            if (!verification || verification.code !== verificationCode) {
               logger.warn(`رمز تحقق غير صالح للمستخدم: ${targetUser.username}`);
               return res.status(400).json({ message: "رمز التحقق غير صحيح" });
             }
 
-            if (new Date() > verificationRecord.expiresAt) {
+            if (new Date() > verification.expiresAt) {
               logger.warn(`رمز تحقق منتهي الصلاحية للمستخدم: ${targetUser.username}`);
               return res.status(400).json({ message: "انتهت صلاحية رمز التحقق" });
             }
@@ -202,9 +219,17 @@ export function registerRoutes(app: Express): Server {
               .set({
                 verified: true,
                 verifiedAt: new Date(),
-                verificationStep: verificationRecord.verificationStep + 1
+                verificationStep: verification.verificationStep + 1
               })
-              .where(eq(verificationCodes.id, verificationRecord.id));
+              .where(eq(verificationCodes.id, verification.id));
+
+            // تحديث سجل تغيير الصلاحيات
+            await db
+              .update(roleChangeHistory)
+              .set({
+                step2CompletedAt: new Date()
+              })
+              .where(eq(roleChangeHistory.verificationId, verification.id));
 
             logger.info(`تم التحقق من الرمز بنجاح للمستخدم: ${targetUser.username}`);
             return res.json({
@@ -215,7 +240,6 @@ export function registerRoutes(app: Express): Server {
 
           case 'confirm':
             // تنفيذ تغيير الصلاحية
-            const newRole = action === "promote" ? "admin" : "user";
             await db
               .update(users)
               .set({
@@ -225,6 +249,22 @@ export function registerRoutes(app: Express): Server {
                 updatedAt: new Date()
               })
               .where(eq(users.id, userId));
+
+            // تحديث سجل تغيير الصلاحيات
+            await db
+              .update(roleChangeHistory)
+              .set({
+                approvalStatus: "approved",
+                approverId: res.locals.admin.id,
+                approvedAt: new Date(),
+                step3CompletedAt: new Date()
+              })
+              .where(
+                and(
+                  eq(roleChangeHistory.userId, userId),
+                  eq(roleChangeHistory.approvalStatus, "pending")
+                )
+              );
 
             // إرسال إشعار
             if (targetUser.email) {
@@ -282,6 +322,49 @@ export function registerRoutes(app: Express): Server {
     } catch (error) {
       logger.error('خطأ في تحديث حالة المستخدم:', error);
       res.status(500).json({ message: "خطأ في تحديث حالة المستخدم" });
+    }
+  });
+
+  // نقطة نهاية اختبار لتغيير الصلاحيات
+  app.post("/api/admin/test-role-change", isAdmin, async (req, res) => {
+    try {
+      const { userId, action, verificationStep, verificationCode } = req.body;
+      logger.info(`بدء اختبار تغيير الصلاحيات:
+        المستخدم: ${userId}
+        الإجراء: ${action}
+        الخطوة: ${verificationStep}
+        الرمز: ${verificationCode ? '****' : 'غير متوفر'}`
+      );
+
+      // التحقق من البيانات المطلوبة
+      if (!userId || !action) {
+        logger.warn("بيانات غير مكتملة في طلب اختبار تغيير الصلاحيات");
+        return res.status(400).json({ message: "يجب توفير معرف المستخدم والإجراء المطلوب" });
+      }
+
+      // محاكاة عملية تغيير الصلاحيات
+      const requestUrl = `http://localhost:5000/api/admin/users/${userId}/${action}`;
+      logger.info(`إرسال طلب إلى: ${requestUrl}`);
+
+      const response = await fetch(requestUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          verificationStep,
+          verificationCode,
+          reason: "اختبار نظام تغيير الصلاحيات"
+        })
+      });
+
+      const result = await response.json();
+      logger.info(`تم استلام الرد من نظام تغيير الصلاحيات: ${JSON.stringify(result)}`);
+      res.json(result);
+
+    } catch (error) {
+      logger.error('خطأ في اختبار تغيير الصلاحيات:', error);
+      res.status(500).json({ message: "خطأ في اختبار تغيير الصلاحيات" });
     }
   });
 

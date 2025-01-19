@@ -1,0 +1,1 @@
+{"private":true,"dependencies":{"types-registry":"^0.1.701"},"devDependencies":{"@types/express":"^5.0.0","@types/express-session":"^1.18.1","@types/lodash":"^4.17.13","@types/npm":"^7.19.3","@types/passport":"^1.0.17","@types/passport-local":"^1.0.38","@types/react":"^19.0.2","@types/react-beautiful-dnd":"^13.1.8","@types/react-dom":"^19.0.2","@types/ws":"^8.5.13"}}
