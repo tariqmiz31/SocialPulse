@@ -1,21 +1,19 @@
+from flask import Flask
 from flask import Flask, send_from_directory, request, jsonify, redirect, url_for
 from flask_cors import CORS
 import os
 import logging
 from app.services.social_media_service import SocialMediaService
 
-# إعداد تسجيل الأخطاء
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("SocialPulse")
 
 app = Flask(__name__, static_folder='dist/public', static_url_path='/')
 
-# تسجيل الطلبات الواردة
 @app.before_request
 def log_request_info():
     logger.info(f"Request received: {request.method} {request.path}")
 
-# نقطة نهاية للحصول على معلومات المستخدم
 @app.route('/api/user', methods=['GET'])
 def get_user_info():
     try:
@@ -31,14 +29,12 @@ def get_user_info():
         logger.error(f"Error in /api/user: {e}", exc_info=True)
         return jsonify({"error": "Failed to fetch user information"}), 500
 
-        # تسجيل البيانات قبل إعادتها
         logger.info(f"User info sent: {user_info}")
         return jsonify(user_info), 200
     except Exception as e:
         logger.error(f"Error in /api/user: {e}", exc_info=True)
         return jsonify({"error": "Failed to fetch user information"}), 500
 
-# إعداد CORS
 CORS(app, resources={
     r"/*": {
         "origins": os.getenv('ALLOWED_ORIGINS', '*').split(','),
@@ -47,39 +43,32 @@ CORS(app, resources={
     }
 })
 
-# نقاط نهاية للمراقبة
 @app.route('/api/monitoring/health', methods=['GET'])
 def monitoring_health():
-    """للتحقق من صحة التطبيق"""
     health_data = {"status": "healthy"}
     logger.info(f"Health status: {health_data}")
     return jsonify(health_data), 200
 
 @app.route('/api/monitoring/status', methods=['GET'])
 def monitoring_status():
-    """للتحقق من حالة التطبيق"""
     status_data = {"status": "running", "uptime": "24h"}
     logger.info(f"Status data: {status_data}")
     return jsonify(status_data), 200
 
 @app.route('/api/monitoring/logs', methods=['GET'])
 def monitoring_logs():
-    """عرض السجلات"""
     logs_data = {"logs": []}
     logger.info(f"Logs data: {logs_data}")
     return jsonify(logs_data), 200
 
 @app.route('/api/monitoring/errors', methods=['GET'])
 def monitoring_errors():
-    """عرض الأخطاء"""
     errors_data = {"errors": []}
     logger.info(f"Errors data: {errors_data}")
     return jsonify(errors_data), 200
 
-# تهيئة الخدمات
 social_media_service = SocialMediaService()
 
-# إضافة ترويسات الأمان
 @app.after_request
 def add_security_headers(response):
     response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
@@ -90,7 +79,6 @@ def add_security_headers(response):
     response.headers['Permissions-Policy'] = 'geolocation=(), microphone=(), camera=()'
     return response
 
-# نقاط نهاية مصادقة منصات التواصل الاجتماعي
 @app.route('/api/auth/<platform>/connect')
 async def connect_platform(platform):
     try:
@@ -122,7 +110,6 @@ async def platform_callback(platform):
         logger.error(f"Unexpected error in callback for {platform}: {e}", exc_info=True)
         return jsonify({"error": "Authentication failed"}), 500
 
-# نقطة نهاية لنشر المحتوى
 @app.route('/api/social/post', methods=['POST'])
 async def publish_content():
     try:
@@ -158,7 +145,6 @@ async def publish_content():
         logger.error(f"Unexpected error in publish_content: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
-# تقديم الملفات الثابتة
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 def serve(path):
